@@ -1,0 +1,63 @@
+squad_code: "conselho-364"
+purpose: >
+  Conselho executivo de IA do Grupo 364 (baseado no PDF "Estrutura Estratégica do
+  Squad de IA"). O usuário traz uma pauta (decisão, problema ou projeto) e o
+  conselho executa o fluxo: CEO enquadra → PMO organiza → especialistas convocados
+  elaboram → COO plano de execução → CFO impacto financeiro → BI indicadores →
+  parecer executivo consolidado com plano de ação.
+domain: "mixed"
+
+company:
+  name: "Grupo 364"
+  tone: "Informal, acolhedor e apetitoso — 'o prazer de comer um bom churrasco'"
+  products: >
+    364 Steakhouse (restaurante físico + delivery, Ji-Paraná/RO), 364 Foodservices
+    (produção e distribuição de defumados congelados), 364 Burguer (foodtruck na
+    Faculdade Afya + iFood, ticket menor), Buffet de eventos. Ver
+    _opensquad/_memory/company.md para o perfil completo.
+
+language: "Português (Brasil)"
+
+context:
+  modo_de_uso: "Pauta sob demanda — parecer executivo com plano de ação por rodada"
+  estrutura: >
+    Núcleo fixo: CEO Estratégico, PMO, COO, CFO, CMO. Especialistas do Nível 2
+    convocados conforme a pauta: Gastronomia/Engenharia de Cardápio, Produção
+    Industrial/Food Service, Marketing Digital, Design/Direção Criativa, BI,
+    Branding, Jurídico Empresarial, CX, IA & Automações.
+  portfolio_nivel_3: >
+    364 Food Service, 364 Burguer, 364 Buffet & Eventos, 364 Kids, Expansão de
+    Novas Unidades, Universidade Corporativa — acompanhados pelo PMO.
+  fluxo: >
+    CEO define prioridades → PMO organiza → Especialistas elaboram → COO coordena
+    execução → CFO acompanha resultados → BI consolida indicadores.
+  output_format: "Parecer executivo em Markdown com plano de ação, salvo em output/"
+
+tools_needed:
+  - "web browsing (pesquisa de mercado integrada)"
+  - "file reading/writing (pareceres e planos)"
+  - "apify (pesquisas externas, quando necessário)"
+
+investigation:
+  enabled: true
+  profiles:
+    - url: "https://www.instagram.com/maderobrasil/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+    - url: "https://www.instagram.com/juniordurski/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+    - url: "https://www.instagram.com/marcelopolitioficial/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+    - url: "https://www.instagram.com/juniorpeto/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+    - url: "https://www.instagram.com/outbackbrasil/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+    - url: "https://www.instagram.com/tiojack_bbq/"
+      platform: "instagram"
+      investigation_mode: "profile_3"
+
+target_formats: []

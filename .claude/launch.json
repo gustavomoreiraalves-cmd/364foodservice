@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sistema-364-dev",
+      "runtimeExecutable": "zsh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.nvm/versions/node/v24.18.0/bin:$PATH\" && cd \"$HOME/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/sistema-364-web\" && npm run dev"
+      ],
+      "port": 3000
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "squad": "conselho-364",
+  "status": "running",
+  "step": {
+    "current": 5,
+    "total": 11,
+    "label": "Mesa de Especialistas"
+  },
+  "agents": [
+    {
+      "id": "vicente-visao",
+      "name": "Vicente Visão",
+      "icon": "🎯",
+      "status": "done",
+      "desk": { "col": 1, "row": 1 }
+    },
+    {
+      "id": "priscila-prazo",
+      "name": "Priscila Prazo",
+      "icon": "📋",
+      "status": "working",
+      "desk": { "col": 2, "row": 1 }
+    },
+    {
+      "id": "otavio-operacao",
+      "name": "Otávio Operação",
+      "icon": "⚙️",
+      "status": "idle",
+      "desk": { "col": 3, "row": 1 }
+    },
+    {
+      "id": "fernanda-fluxo",
+      "name": "Fernanda Fluxo",
+      "icon": "💰",
+      "status": "idle",
+      "desk": { "col": 1, "row": 2 }
+    },
+    {
+      "id": "marina-marca",
+      "name": "Marina Marca",
+      "icon": "📣",
+      "status": "idle",
+      "desk": { "col": 2, "row": 2 }
+    },
+    {
+      "id": "bento-benchmark",
+      "name": "Bento Benchmark",
+      "icon": "📊",
+      "status": "idle",
+      "desk": { "col": 3, "row": 2 }
+    },
+    {
+      "id": "samuel-sonda",
+      "name": "Samuel Sonda",
+      "icon": "🔍",
+      "status": "done",
+      "desk": { "col": 1, "row": 3 }
+    },
+    {
+      "id": "rebeca-rigor",
+      "name": "Rebeca Rigor",
+      "icon": "🔎",
+      "status": "idle",
+      "desk": { "col": 2, "row": 3 }
+    }
+  ],
+  "handoff": {
+    "from": "samuel-sonda",
+    "to": "priscila-prazo",
+    "message": "Pesquisa completa: padrões visuais preto+ouro, ANVISA 1,6mm mín, dimensões 2-3 portas, material PVC espumado recomendado.",
+    "completedAt": "2026-07-20T17:13:36Z"
+  },
+  "startedAt": "2026-07-20T17:13:36Z",
+  "updatedAt": "2026-07-20T17:13:36Z"
+}

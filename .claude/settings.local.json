@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Read(//Users/gustavomoreiraalves/.nvm/versions/node/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(command -v corepack pnpm yarn bun)",
+      "Bash(mkdir -p \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/sistema-364-web/.claude\")",
+      "Bash(mkdir -p \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/.claude\")",
+      "Bash(mv \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/sistema-364-web/.claude/launch.json\" \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/.claude/launch.json\")",
+      "Bash(rmdir \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/sistema-364-web/.claude\")",
+      "Bash(dig +short 364foodservices.com A)",
+      "Bash(dig +short www.364foodservices.com A)",
+      "Bash(dig +short www.364foodservices.com CNAME)",
+      "Bash(dig +short 364steakhouse.com A)",
+      "Bash(dig +short www.364steakhouse.com CNAME)",
+      "Bash(curl -sL -o /dev/null -w \"HTTP %{http_code} | tempo %{time_total}s | url final: %{url_effective}\\\\n\" --max-time 30 https://www.364foodservices.com)",
+      "Bash(curl -sL --max-time 30 https://www.364foodservices.com)",
+      "Bash(curl -sL --max-time 30 https://www.364foodservices.com -o /private/tmp/claude-501/-Users-gustavomoreiraalves-Library-CloudStorage-GoogleDrive-gustavomoreiraalves-gmail-com-Outros-computadores-Meu-MacBook-Pro-364-Steakhouse-2026-364-food-services-Sistema-de-Gest-o-Sistema-Web/2665945e-1981-4b42-9182-2cb523082084/scratchpad/fs.html)",
+      "WebFetch(domain:clube.sociedadedacarne.com.br)",
+      "WebSearch",
+      "mcp__claude-in-chrome__computer",
+      "WebFetch(domain:blog.sulprint.com.br)",
+      "WebFetch(domain:rotuloconforme.com.br)",
+      "WebFetch(domain:www.etiquetaagil.com.br)",
+      "WebFetch(domain:www.apolo.com.br)",
+      "WebFetch(domain:www.expositores.com)",
+      "WebFetch(domain:www.plasticospuma.com.br)",
+      "WebFetch(domain:www.gov.br)",
+      "Bash(ls -la \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/\" | head -20)",
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(git add *)"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+name: "Conselho 364"
+code: "conselho-364"
+icon: "🏛️"
+description: >
+  Conselho executivo de IA do Grupo 364 (364 Steakhouse, 364 Foodservices, 364 Burguer,
+  Buffet & Eventos). Você traz uma pauta — decisão, problema ou projeto — e o conselho
+  executa o fluxo CEO → pesquisa → especialistas → COO → CFO → BI → parecer executivo
+  consolidado com plano de ação, com checkpoints de aprovação.
+
+language: "Português (Brasil)"
+
+party: squad-party.csv
+pipeline: pipeline/pipeline.yaml
+
+skills:
+  - web_search
+  - web_fetch
+
+data:
+  - pipeline/data/research-brief.md
+  - pipeline/data/domain-framework.md
+  - pipeline/data/quality-criteria.md
+  - pipeline/data/output-examples.md
+  - pipeline/data/anti-patterns.md
+  - pipeline/data/especialistas.md
+
+memory: _memory/memories.md
+investigations: _investigations/

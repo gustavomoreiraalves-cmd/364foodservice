@@ -1,0 +1,106 @@
+# Design output — conselho-364 (aprovado pelo usuário em 2026-07-18)
+
+squad:
+  code: "conselho-364"
+  name: "Conselho 364"
+  description: "Conselho executivo de IA do Grupo 364 — pauta sob demanda, parecer executivo com plano de ação"
+  icon: "🏛️"
+
+agents:
+  - id: "vicente-visao"
+    name: "Vicente Visão"
+    title: "CEO Estratégico"
+    icon: "🎯"
+    execution: "inline"
+    role_summary: "Enquadra a pauta, define objetivo da rodada e convoca especialistas"
+  - id: "priscila-prazo"
+    name: "Priscila Prazo"
+    title: "PMO"
+    icon: "📋"
+    execution: "inline"
+    role_summary: "Conduz a mesa de especialistas e consolida o parecer executivo com plano de ação"
+  - id: "otavio-operacao"
+    name: "Otávio Operação"
+    title: "COO"
+    icon: "⚙️"
+    execution: "inline"
+    role_summary: "Plano de execução operacional por unidade"
+  - id: "fernanda-fluxo"
+    name: "Fernanda Fluxo"
+    title: "CFO"
+    icon: "💰"
+    execution: "inline"
+    role_summary: "Impacto financeiro: CMV, prime cost, precificação, investimento, caixa"
+  - id: "marina-marca"
+    name: "Marina Marca"
+    title: "CMO"
+    icon: "📣"
+    execution: "inline"
+    role_summary: "Branding, marketing e crescimento, calibrada pela investigação de 6 perfis"
+  - id: "bento-benchmark"
+    name: "Bento Benchmark"
+    title: "Business Intelligence"
+    icon: "📊"
+    execution: "inline"
+    role_summary: "Indicadores de sucesso e benchmarks do setor para cada decisão"
+  - id: "samuel-sonda"
+    name: "Samuel Sonda"
+    title: "Pesquisador de Mercado"
+    icon: "🔍"
+    execution: "subagent"
+    role_summary: "Pesquisa web focada na pauta antes do conselho opinar"
+  - id: "rebeca-rigor"
+    name: "Rebeca Rigor"
+    title: "Revisora de Pareceres"
+    icon: "🔎"
+    execution: "inline"
+    role_summary: "Veredito APROVA/REJEITA do parecer contra critérios de qualidade"
+
+nivel_2_especialistas_convocaveis:
+  arquivo: "pipeline/data/especialistas.md"
+  lista: [gastronomia-cardapio, producao-industrial, marketing-digital, design-criativo, branding, juridico, cx, ia-automacoes]
+
+nivel_3_portfolio:
+  - "364 Food Service"
+  - "364 Burguer"
+  - "364 Buffet & Eventos"
+  - "364 Kids"
+  - "Expansão de Novas Unidades"
+  - "Universidade Corporativa"
+
+pipeline:
+  - { step: 1,  name: "abertura-de-pauta",       type: "checkpoint", output_file: "squads/conselho-364/output/pauta.md" }
+  - { step: 2,  name: "enquadramento-ceo",        type: "agent", agent: "vicente-visao",  execution: "inline",  input_file: "squads/conselho-364/output/pauta.md", output_file: "squads/conselho-364/output/enquadramento.md" }
+  - { step: 3,  name: "aprovar-enquadramento",    type: "checkpoint" }
+  - { step: 4,  name: "pesquisa-de-mercado",      type: "agent", agent: "samuel-sonda",   execution: "subagent", model_tier: "powerful", input_file: "squads/conselho-364/output/enquadramento.md", output_file: "squads/conselho-364/output/pesquisa.md" }
+  - { step: 5,  name: "mesa-de-especialistas",    type: "agent", agent: "priscila-prazo", execution: "inline",  input_file: "squads/conselho-364/output/pesquisa.md", output_file: "squads/conselho-364/output/contribuicoes.md" }
+  - { step: 6,  name: "plano-operacional",        type: "agent", agent: "otavio-operacao", execution: "inline", input_file: "squads/conselho-364/output/contribuicoes.md", output_file: "squads/conselho-364/output/plano-operacional.md" }
+  - { step: 7,  name: "analise-financeira",       type: "agent", agent: "fernanda-fluxo", execution: "inline",  input_file: "squads/conselho-364/output/plano-operacional.md", output_file: "squads/conselho-364/output/analise-financeira.md" }
+  - { step: 8,  name: "indicadores",              type: "agent", agent: "bento-benchmark", execution: "inline", input_file: "squads/conselho-364/output/analise-financeira.md", output_file: "squads/conselho-364/output/indicadores.md" }
+  - { step: 9,  name: "parecer-executivo",        type: "agent", agent: "priscila-prazo", execution: "inline",  input_file: "squads/conselho-364/output/indicadores.md", output_file: "squads/conselho-364/output/parecer-executivo.md" }
+  - { step: 10, name: "revisao",                  type: "agent", agent: "rebeca-rigor",   execution: "inline",  input_file: "squads/conselho-364/output/parecer-executivo.md", output_file: "squads/conselho-364/output/revisao.md", on_reject: 9 }
+  - { step: 11, name: "aprovacao-final",          type: "checkpoint" }
+
+investigation:
+  enriched: true
+  profiles_analyzed: 6
+  date: "2026-07-18"
+  dir: "squads/conselho-364/_investigations"
+
+research_brief: |
+  KPIs restaurante BR 2026: CMV saudável 28–31% (alerta >35%); prime cost (CMV+mão de obra)
+  60–70% da receita; mão de obra alvo 25–30%; margem operacional saudável 7–22% (McKinsey);
+  turnover do setor >70%/ano. Congelados: margem-alvo 30–60%; distribuidoras operam com margem
+  operacional 4–6%; precificação combina markup + margem de contribuição. Fontes: sults.com.br,
+  controlenamao.com.br, cayena.com, infoprice.co, marcelopoliti.com.br, sebrae.com.br.
+  Investigação Instagram (6 perfis): ver _investigations/consolidated-analysis.md.
+
+skills_installed:
+  - "web_search"
+  - "web_fetch"
+
+formats_selected: []
+
+best_practices_consulted:
+  - "review.md"
+  - "data-analysis.md"

@@ -1,0 +1,9 @@
+id,name,title,icon,execution,path
+vicente-visao,Vicente Visão,CEO Estratégico,🎯,inline,./agents/vicente-visao.agent.md
+priscila-prazo,Priscila Prazo,PMO,📋,inline,./agents/priscila-prazo.agent.md
+otavio-operacao,Otávio Operação,COO,⚙️,inline,./agents/otavio-operacao.agent.md
+fernanda-fluxo,Fernanda Fluxo,CFO,💰,inline,./agents/fernanda-fluxo.agent.md
+marina-marca,Marina Marca,CMO,📣,inline,./agents/marina-marca.agent.md
+bento-benchmark,Bento Benchmark,Business Intelligence,📊,inline,./agents/bento-benchmark.agent.md
+samuel-sonda,Samuel Sonda,Pesquisador de Mercado,🔍,subagent,./agents/samuel-sonda.agent.md
+rebeca-rigor,Rebeca Rigor,Revisora de Pareceres,🔎,inline,./agents/rebeca-rigor.agent.md

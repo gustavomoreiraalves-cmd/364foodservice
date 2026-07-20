@@ -1,0 +1,41 @@
+# Pipeline — Conselho 364
+# Fluxo: CEO define prioridades → PMO organiza → Especialistas elaboram →
+#        COO coordena → CFO acompanha → BI consolida → parecer revisado e aprovado.
+
+steps:
+  - file: steps/step-01-abertura-de-pauta.md
+    type: checkpoint
+  - file: steps/step-02-enquadramento-ceo.md
+    type: agent
+    agent: vicente-visao
+  - file: steps/step-03-aprovar-enquadramento.md
+    type: checkpoint
+  - file: steps/step-04-pesquisa-de-mercado.md
+    type: agent
+    agent: samuel-sonda
+  - file: steps/step-05-mesa-de-especialistas.md
+    type: agent
+    agent: priscila-prazo
+  - file: steps/step-06-plano-operacional.md
+    type: agent
+    agent: otavio-operacao
+  - file: steps/step-07-analise-financeira.md
+    type: agent
+    agent: fernanda-fluxo
+  - file: steps/step-08-indicadores.md
+    type: agent
+    agent: bento-benchmark
+  - file: steps/step-09-parecer-executivo.md
+    type: agent
+    agent: priscila-prazo
+  - file: steps/step-10-revisao.md
+    type: agent
+    agent: rebeca-rigor
+    on_reject: steps/step-09-parecer-executivo.md
+  - file: steps/step-11-aprovacao-final.md
+    type: checkpoint
+
+checkpoints:
+  - steps/step-01-abertura-de-pauta.md
+  - steps/step-03-aprovar-enquadramento.md
+  - steps/step-11-aprovacao-final.md

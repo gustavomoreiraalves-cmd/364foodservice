@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: 364os-postgres
+    environment:
+      POSTGRES_USER: 364_user
+      POSTGRES_PASSWORD: 364_secure_dev_password_change_in_prod
+      POSTGRES_DB: 364_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U 364_user -d 364_os"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - 364os-network
+
+  # Backend will run via: cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+  # Frontend will run via: cd frontend && npm run dev
+
+volumes:
+  postgres_data:
+
+networks:
+  364os-network:
+    driver: bridge
