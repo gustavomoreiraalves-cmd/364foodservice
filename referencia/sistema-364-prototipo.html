@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>364 Foodservices — Sistema de Gestão</title>
+<style>
+  :root{
+    --char:#1c1815;
+    --char2:#252019;
+    --char3:#2f2921;
+    --smoke:#3c352b;
+    --paper:#f4efe6;
+    --paper-dim:#c9c0af;
+    --amber:#c68a2e;
+    --amber-bright:#e0a949;
+    --ember:#a13d2b;
+    --green:#5c7a4f;
+    --red:#a13d2b;
+    --border:#413a2f;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--char);
+    color:var(--paper);
+    font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;
+    display:flex;
+    min-height:600px;
+  }
+  h1,h2,h3{font-family:Georgia,'Times New Roman',serif; letter-spacing:.3px; margin:0 0 4px;}
+  a{color:var(--amber-bright);}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--smoke);border-radius:4px;}
+
+  /* SIDEBAR */
+  .sidebar{
+    width:210px; min-width:210px;
+    background:linear-gradient(180deg,#171310,#1c1815 60%);
+    border-right:1px solid var(--border);
+    padding:18px 0;
+    display:flex; flex-direction:column;
+  }
+  .brand{
+    padding:0 18px 16px; border-bottom:1px solid var(--border); margin-bottom:10px;
+  }
+  .brand .num{color:var(--amber-bright); font-family:Georgia,serif; font-size:22px; font-weight:700; letter-spacing:1px;}
+  .brand .sub{color:var(--paper-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:1.5px; margin-top:2px;}
+  nav{display:flex; flex-direction:column; gap:1px; padding:0 10px;}
+  nav button{
+    all:unset; cursor:pointer; padding:9px 10px; border-radius:var(--radius);
+    color:var(--paper-dim); font-size:13px; display:flex; align-items:center; gap:9px;
+  }
+  nav button .ic{width:16px; text-align:center; opacity:.8;}
+  nav button:hover{background:var(--char3); color:var(--paper);}
+  nav button.active{background:var(--smoke); color:var(--amber-bright); font-weight:600;}
+  .sidebar-foot{margin-top:auto; padding:14px 18px 0; border-top:1px solid var(--border); font-size:10.5px; color:var(--paper-dim);}
+
+  /* MAIN */
+  .main{flex:1; min-width:0; padding:26px 34px; overflow-x:auto;}
+  .topbar{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:22px; flex-wrap:wrap; gap:10px;}
+  .topbar h1{font-size:22px; color:var(--paper);}
+  .topbar .desc{color:var(--paper-dim); font-size:12.5px; margin-top:2px;}
+  .sync{font-size:11px; color:var(--paper-dim);}
+  .sync.saving{color:var(--amber-bright);}
+
+  section.view{display:none;}
+  section.view.active{display:block;}
+
+  /* CARDS / KPI */
+  .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:26px;}
+  .kpi{background:var(--char2); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; border-left:3px solid var(--amber);}
+  .kpi.warn{border-left-color:var(--red);}
+  .kpi .label{font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--paper-dim);}
+  .kpi .value{font-family:Georgia,serif; font-size:24px; color:var(--paper); margin-top:4px;}
+  .kpi .value.warn{color:var(--red);}
+
+  .panel{background:var(--char2); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:22px;}
+  .panel h3{font-size:14px; color:var(--amber-bright); text-transform:uppercase; letter-spacing:.8px; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:8px;}
+
+  /* FORMS */
+  .form-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; align-items:end;}
+  label{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--paper-dim); margin-bottom:4px;}
+  input,select,textarea{
+    width:100%; background:var(--char); border:1px solid var(--border); color:var(--paper);
+    padding:8px 9px; border-radius:var(--radius); font-size:13px; font-family:inherit;
+  }
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--amber);}
+  textarea{resize:vertical; min-height:44px;}
+  .btn{
+    all:unset; cursor:pointer; background:var(--amber); color:#1c1815; font-weight:700;
+    padding:9px 16px; border-radius:var(--radius); font-size:12.5px; text-transform:uppercase; letter-spacing:.5px;
+    text-align:center;
+  }
+  .btn:hover{background:var(--amber-bright);}
+  .btn.secondary{background:transparent; border:1px solid var(--border); color:var(--paper-dim);}
+  .btn.secondary:hover{border-color:var(--amber); color:var(--amber-bright);}
+  .btn.danger{background:transparent; border:1px solid var(--red); color:var(--red); padding:5px 9px; font-size:11px;}
+  .btn.danger:hover{background:var(--red); color:var(--paper);}
+  .btn.small{padding:5px 9px; font-size:11px;}
+
+  /* TABLE */
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  th{text-align:left; color:var(--paper-dim); text-transform:uppercase; letter-spacing:.5px; font-size:10.5px; padding:8px 10px; border-bottom:1px solid var(--border);}
+  td{padding:8px 10px; border-bottom:1px solid #2a251e;}
+  tr:hover td{background:#241f19;}
+  .empty-row td{color:var(--paper-dim); font-style:italic; text-align:center; padding:22px;}
+  .tag{display:inline-block; padding:2px 8px; border-radius:20px; font-size:10.5px; text-transform:uppercase; letter-spacing:.4px;}
+  .tag.ok{background:#28351f; color:#8fbd6f;}
+  .tag.warn{background:#3a2b13; color:var(--amber-bright);}
+  .tag.bad{background:#3a1c15; color:#e5806c;}
+  .num{text-align:right; font-variant-numeric:tabular-nums;}
+  .muted{color:var(--paper-dim);}
+
+  .row-actions{display:flex; gap:6px;}
+  .table-wrap{overflow-x:auto;}
+  .items-list{border:1px solid var(--border); border-radius:var(--radius); padding:10px; margin-top:6px; background:var(--char);}
+  .item-line{display:flex; gap:8px; align-items:center; padding:4px 0; font-size:12.5px;}
+  .item-line span{flex:1;}
+  .subtotal{text-align:right; margin-top:8px; font-weight:700; color:var(--amber-bright);}
+  .banner{background:#3a2b13; border:1px solid var(--amber); border-radius:var(--radius); padding:10px 14px; font-size:12.5px; margin-bottom:16px; color:var(--amber-bright);}
+  .banner.info{background:#1f2b3a; border-color:#3d6ea1; color:#7cb0e0;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr;}}
+  .filter-bar{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; align-items:end;}
+  .filter-bar > div{min-width:150px;}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="num">364</div>
+    <div class="sub">Foodservices · Gestão</div>
+  </div>
+  <nav id="nav"></nav>
+  <div class="sidebar-foot">
+    Dados sincronizados entre todos que abrirem este sistema.
+    <div id="sync" class="sync" style="margin-top:6px;">●  sincronizado</div>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div>
+      <h1 id="view-title">Dashboard</h1>
+      <div class="desc" id="view-desc">Visão geral da operação</div>
+    </div>
+  </div>
+  <div id="view-container"></div>
+</main>
+
+<script>
+/* =========================================================
+   364 FOODSERVICES — SISTEMA DE GESTÃO
+   Módulos: Fornecedores, Recebimento, Estoque, Produção,
+   Produtos, Clientes, Vendas, Relatórios
+   ========================================================= */
+
+const MODULES = [
+  {id:'dashboard', label:'Dashboard', ic:'◆', desc:'Visão geral da operação'},
+  {id:'fornecedores', label:'Fornecedores', ic:'▤', desc:'Cadastro de fornecedores e categorias'},
+  {id:'recebimento', label:'Recebimento', ic:'▣', desc:'Entrada de matéria-prima e geração de lotes'},
+  {id:'estoque', label:'Estoque', ic:'▥', desc:'Saldo de matéria-prima e produto acabado'},
+  {id:'produtos', label:'Produtos', ic:'▧', desc:'Catálogo, ficha técnica, custo e preço de venda'},
+  {id:'producao', label:'Produção', ic:'▨', desc:'Lançamento de lotes produzidos e cálculo de custo'},
+  {id:'clientes', label:'Clientes', ic:'▦', desc:'Cadastro de clientes e revendas'},
+  {id:'vendas', label:'Pedidos de Venda', ic:'▩', desc:'Pedidos, faturamento e baixa de estoque'},
+  {id:'funcionarios', label:'Funcionários', ic:'☺', desc:'Equipe e responsáveis por cada registro'},
+  {id:'relatorios', label:'Relatórios', ic:'▢', desc:'Produção, compras e financeiro'},
+];
+
+let DB = null;
+const STORAGE_KEY = 'sistema364-db-v1';
+let saveTimer = null;
+
+function uid(prefix){ return prefix + '-' + Math.random().toString(36).slice(2,9); }
+function fmtMoney(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtDate(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
+function today(){ return new Date().toISOString().slice(0,10); }
+function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000); }
+
+function defaultDB(){
+  return {
+    fornecedores:[
+      {id:uid('for'), nome:'Frigorífico Exemplo Ltda', cnpj:'00.000.000/0001-00', categoria:'Carnes', contato:'João', telefone:'(11) 90000-0000', email:''},
+    ],
+    materiasPrimas:[
+      {id:uid('mp'), nome:'Pernil suíno in natura', unidade:'kg', custoUnitario:14.50},
+      {id:uid('mp'), nome:'Sal de cura', unidade:'kg', custoUnitario:22.00},
+      {id:uid('mp'), nome:'Embalagem a vácuo', unidade:'un', custoUnitario:0.90},
+    ],
+    produtos:[],
+    recebimentos:[],
+    producoes:[],
+    clientes:[],
+    pedidos:[],
+    despesas:[],
+    funcionarios:[
+      {id:uid('func'), nome:'Exemplo — Ana Souza', cargo:'Produção', ativo:true},
+    ],
+    _seed:true
+  };
+}
+
+async function loadDB(){
+  try{
+    const r = await window.storage.get(STORAGE_KEY, true);
+    DB = r ? JSON.parse(r.value) : defaultDB();
+  }catch(e){
+    DB = defaultDB();
+  }
+  if(!DB.despesas) DB.despesas = [];
+  if(!DB.funcionarios) DB.funcionarios = [];
+  render();
+}
+
+function saveDB(){
+  const el = document.getElementById('sync');
+  el.textContent = '●  salvando…'; el.classList.add('saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      await window.storage.set(STORAGE_KEY, JSON.stringify(DB), true);
+      el.textContent = '●  sincronizado'; el.classList.remove('saving');
+    }catch(e){
+      el.textContent = '●  erro ao salvar'; 
+      console.error(e);
+    }
+  }, 300);
+}
+
+function clearSeed(){
+  if(!confirm('Remover os dados de exemplo (fornecedor e matérias-primas de demonstração)?')) return;
+  DB = {fornecedores:[],materiasPrimas:[],produtos:[],recebimentos:[],producoes:[],clientes:[],pedidos:[],despesas:[],funcionarios:[]};
+  saveDB(); render();
+}
+
+/* ---------- lote number generator: LT-AAMMDD-### ---------- */
+function nextLoteNumber(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const prefix = `LT-${yy}${mm}${dd}-`;
+  const all = [...DB.recebimentos.map(r=>r.lote), ...DB.producoes.map(p=>p.lote)];
+  const countToday = all.filter(l=>l && l.startsWith(prefix)).length;
+  return prefix + String(countToday+1).padStart(3,'0');
+}
+function nextProdutoCodigo(){
+  const nums = DB.produtos.map(p=>parseInt((p.codigo||'0364-000').split('-')[1])||0);
+  const next = (nums.length?Math.max(...nums):0)+1;
+  return '0364-' + String(next).padStart(3,'0');
+}
+
+/* ---------- stock calculations ---------- */
+function estoqueMateriaPrima(mpId){
+  const recebido = DB.recebimentos.filter(r=>r.materiaPrimaId===mpId).reduce((s,r)=>s+Number(r.quantidade),0);
+  const consumido = DB.producoes.reduce((s,p)=>{
+    const item = (p.consumo||[]).find(c=>c.materiaPrimaId===mpId);
+    return s + (item?Number(item.quantidade):0);
+  },0);
+  return recebido - consumido;
+}
+function custoMedioMateriaPrima(mpId){
+  const recs = DB.recebimentos.filter(r=>r.materiaPrimaId===mpId);
+  if(!recs.length){
+    const mp = DB.materiasPrimas.find(m=>m.id===mpId);
+    return mp?mp.custoUnitario:0;
+  }
+  const totalQtd = recs.reduce((s,r)=>s+Number(r.quantidade),0);
+  const totalCusto = recs.reduce((s,r)=>s+Number(r.quantidade)*Number(r.custoUnitario),0);
+  return totalQtd? totalCusto/totalQtd : 0;
+}
+function estoqueProduto(produtoId){
+  const produzido = DB.producoes.filter(p=>p.produtoId===produtoId).reduce((s,p)=>s+Number(p.quantidade),0);
+  const vendido = DB.pedidos.filter(p=>p.status!=='Cancelado').reduce((s,p)=>{
+    const item = (p.itens||[]).find(i=>i.produtoId===produtoId);
+    return s + (item?Number(item.quantidade):0);
+  },0);
+  return produzido - vendido;
+}
+function custoUnitarioProduto(produtoId){
+  const prod = DB.produtos.find(p=>p.id===produtoId);
+  if(!prod) return 0;
+  const lotesProd = DB.producoes.filter(p=>p.produtoId===produtoId);
+  if(lotesProd.length){
+    const totalQtd = lotesProd.reduce((s,p)=>s+Number(p.quantidade),0);
+    const totalCusto = lotesProd.reduce((s,p)=>s+Number(p.custoTotal),0);
+    return totalQtd? totalCusto/totalQtd : custoTeoricoProduto(produtoId);
+  }
+  return custoTeoricoProduto(produtoId);
+}
+function custoTeoricoProduto(produtoId){
+  const prod = DB.produtos.find(p=>p.id===produtoId);
+  if(!prod || !prod.fichaTecnica) return 0;
+  return prod.fichaTecnica.reduce((s,item)=>{
+    const mp = DB.materiasPrimas.find(m=>m.id===item.materiaPrimaId);
+    return s + (mp? Number(item.quantidade)*Number(mp.custoUnitario) : 0);
+  },0);
+}
+
+/* ================= NAVIGATION / RENDER ================= */
+let currentView = 'dashboard';
+
+function buildNav(){
+  const nav = document.getElementById('nav');
+  nav.innerHTML = MODULES.map(m=>`<button data-view="${m.id}" class="${m.id===currentView?'active':''}"><span class="ic">${m.ic}</span>${m.label}</button>`).join('');
+  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>switchView(b.dataset.view)));
+}
+function switchView(id){
+  currentView = id;
+  const mod = MODULES.find(m=>m.id===id);
+  document.getElementById('view-title').textContent = mod.label;
+  document.getElementById('view-desc').textContent = mod.desc;
+  buildNav();
+  render();
+}
+function render(){
+  const c = document.getElementById('view-container');
+  if(!DB){ c.innerHTML = '<p class="muted">Carregando…</p>'; return; }
+  const renderers = {
+    dashboard: renderDashboard, fornecedores: renderFornecedores, recebimento: renderRecebimento,
+    estoque: renderEstoque, produtos: renderProdutos, producao: renderProducao,
+    clientes: renderClientes, vendas: renderVendas, relatorios: renderRelatorios,
+    funcionarios: renderFuncionarios
+  };
+  c.innerHTML = renderers[currentView]();
+  attachHandlers(currentView);
+}
+
+/* ================= DASHBOARD ================= */
+function renderDashboard(){
+  const receitaMes = DB.pedidos.filter(p=>p.status!=='Cancelado' && (p.data||'').slice(0,7)===today().slice(0,7))
+    .reduce((s,p)=>s + (p.itens||[]).reduce((s2,i)=>s2+Number(i.quantidade)*Number(i.precoUnitario),0), 0);
+  const pedidosPendentes = DB.pedidos.filter(p=>p.status==='Pendente').length;
+  const lotesEstoqueBaixo = DB.materiasPrimas.filter(m=>estoqueMateriaPrima(m.id) <= 0).length;
+  const vencendo = DB.recebimentos.filter(r=>{
+    if(!r.validade) return false;
+    const d = daysBetween(today(), r.validade);
+    return d>=0 && d<=7 && estoqueMateriaPrima(r.materiaPrimaId)>0;
+  }).length;
+
+  let seedBanner = '';
+  if(DB._seed || (DB.fornecedores.some(f=>f.nome==='Frigorífico Exemplo Ltda'))){
+    seedBanner = `<div class="banner">Este sistema contém dados de exemplo para demonstração. <a href="#" onclick="clearSeed();return false;">Remover dados de exemplo</a></div>`;
+  }
+
+  return `
+    ${seedBanner}
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Receita do mês</div><div class="value">${fmtMoney(receitaMes)}</div></div>
+      <div class="kpi"><div class="label">Pedidos pendentes</div><div class="value">${pedidosPendentes}</div></div>
+      <div class="kpi ${lotesEstoqueBaixo?'warn':''}"><div class="label">Matérias-primas zeradas</div><div class="value ${lotesEstoqueBaixo?'warn':''}">${lotesEstoqueBaixo}</div></div>
+      <div class="kpi ${vencendo?'warn':''}"><div class="label">Lotes vencendo em 7 dias</div><div class="value ${vencendo?'warn':''}">${vencendo}</div></div>
+      <div class="kpi"><div class="label">Produtos cadastrados</div><div class="value">${DB.produtos.length}</div></div>
+      <div class="kpi"><div class="label">Clientes ativos</div><div class="value">${DB.clientes.length}</div></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Últimos recebimentos</h3>
+        ${tableOrEmpty(DB.recebimentos.slice(-6).reverse(), r=>{
+          const mp = DB.materiasPrimas.find(m=>m.id===r.materiaPrimaId);
+          const forn = DB.fornecedores.find(f=>f.id===r.fornecedorId);
+          return `<tr><td>${fmtDate(r.data)}</td><td>${mp?mp.nome:'—'}</td><td>${forn?forn.nome:'—'}</td><td class="num">${r.quantidade} ${mp?mp.unidade:''}</td><td class="muted">${r.lote}</td></tr>`;
+        }, ['Data','Matéria-prima','Fornecedor','Qtd','Lote'])}
+      </div>
+      <div class="panel">
+        <h3>Últimos pedidos de venda</h3>
+        ${tableOrEmpty(DB.pedidos.slice(-6).reverse(), p=>{
+          const cli = DB.clientes.find(c=>c.id===p.clienteId);
+          const total = (p.itens||[]).reduce((s,i)=>s+Number(i.quantidade)*Number(i.precoUnitario),0);
+          return `<tr><td>${fmtDate(p.data)}</td><td>${cli?cli.nome:'—'}</td><td class="num">${fmtMoney(total)}</td><td>${statusTag(p.status)}</td></tr>`;
+        }, ['Data','Cliente','Total','Status'])}
+      </div>
+    </div>
+  `;
+}
+function statusTag(s){
+  const map = {'Pendente':'warn','Faturado':'ok','Enviado':'ok','Cancelado':'bad','Recebido':'ok'};
+  return `<span class="tag ${map[s]||'warn'}">${s}</span>`;
+}
+function tableOrEmpty(rows, rowFn, headers){
+  if(!rows.length) return `<p class="muted" style="font-size:12.5px;">Nenhum registro ainda.</p>`;
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(rowFn).join('')}</tbody></table></div>`;
+}
+
+/* ================= FORNECEDORES ================= */
+function renderFornecedores(){
+  return `
+    <div class="panel">
+      <h3>Novo fornecedor</h3>
+      <form id="form-fornecedor" class="form-grid">
+        <div><label>Nome / Razão social</label><input name="nome" required></div>
+        <div><label>CNPJ</label><input name="cnpj"></div>
+        <div><label>Categoria</label>
+          <select name="categoria">
+            <option>Carnes</option><option>Temperos</option><option>Embalagens</option>
+            <option>Equipamentos</option><option>Serviços</option><option>Outros</option>
+          </select>
+        </div>
+        <div><label>Contato</label><input name="contato"></div>
+        <div><label>Telefone</label><input name="telefone"></div>
+        <div><label>E-mail</label><input name="email" type="email"></div>
+        <div><button class="btn" type="submit">Adicionar fornecedor</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Fornecedores cadastrados (${DB.fornecedores.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nome</th><th>Categoria</th><th>CNPJ</th><th>Contato</th><th>Telefone</th><th></th></tr></thead>
+        <tbody>
+          ${DB.fornecedores.length? DB.fornecedores.map(f=>`
+            <tr>
+              <td>${f.nome}</td><td>${f.categoria||'—'}</td><td class="muted">${f.cnpj||'—'}</td>
+              <td>${f.contato||'—'}</td><td class="muted">${f.telefone||'—'}</td>
+              <td class="row-actions"><button class="btn danger" onclick="delItem('fornecedores','${f.id}')">Excluir</button></td>
+            </tr>`).join('') : `<tr class="empty-row"><td colspan="6">Nenhum fornecedor cadastrado.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= RECEBIMENTO ================= */
+function renderRecebimento(){
+  const mpOptions = DB.materiasPrimas.map(m=>`<option value="${m.id}">${m.nome} (${m.unidade})</option>`).join('');
+  const fornOptions = DB.fornecedores.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  if(!DB.materiasPrimas.length || !DB.fornecedores.length){
+    return `<div class="banner info">Cadastre ao menos um <b>fornecedor</b> e uma <b>matéria-prima</b> (aba Produtos → Matérias-primas) antes de lançar um recebimento.</div>`;
+  }
+  return `
+    <div class="panel">
+      <h3>Novo recebimento de mercadoria</h3>
+      <form id="form-recebimento" class="form-grid">
+        <div><label>Data</label><input name="data" type="date" value="${today()}" required></div>
+        <div><label>Fornecedor</label><select name="fornecedorId" required>${fornOptions}</select></div>
+        <div><label>Matéria-prima</label><select name="materiaPrimaId" required>${mpOptions}</select></div>
+        <div><label>Quantidade</label><input name="quantidade" type="number" step="0.001" required></div>
+        <div><label>Custo unitário (R$)</label><input name="custoUnitario" type="number" step="0.01" required></div>
+        <div><label>Nota fiscal</label><input name="notaFiscal"></div>
+        <div><label>Validade</label><input name="validade" type="date"></div>
+        <div><label>Responsável</label><select name="responsavelId">${responsavelOptions()}</select></div>
+        <div><button class="btn" type="submit">Registrar e gerar lote</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Recebimentos (${DB.recebimentos.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lote</th><th>Data</th><th>Matéria-prima</th><th>Fornecedor</th><th>Qtd</th><th>Custo unit.</th><th>Custo total</th><th>Validade</th><th>Responsável</th><th></th></tr></thead>
+        <tbody>
+        ${DB.recebimentos.length? DB.recebimentos.slice().reverse().map(r=>{
+          const mp = DB.materiasPrimas.find(m=>m.id===r.materiaPrimaId);
+          const forn = DB.fornecedores.find(f=>f.id===r.fornecedorId);
+          return `<tr>
+            <td class="muted">${r.lote}</td><td>${fmtDate(r.data)}</td><td>${mp?mp.nome:'—'}</td><td>${forn?forn.nome:'—'}</td>
+            <td class="num">${r.quantidade} ${mp?mp.unidade:''}</td><td class="num">${fmtMoney(r.custoUnitario)}</td>
+            <td class="num">${fmtMoney(r.quantidade*r.custoUnitario)}</td><td>${fmtDate(r.validade)}</td>
+            <td class="muted">${nomeFuncionario(r.responsavelId)}</td>
+            <td><button class="btn danger" onclick="delItem('recebimentos','${r.id}')">Excluir</button></td>
+          </tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="10">Nenhum recebimento lançado.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= ESTOQUE ================= */
+function renderEstoque(){
+  return `
+    <div class="grid2">
+      <div class="panel">
+        <h3>Estoque de matéria-prima</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Matéria-prima</th><th>Saldo</th><th>Custo médio</th><th>Valor em estoque</th></tr></thead>
+          <tbody>
+          ${DB.materiasPrimas.length? DB.materiasPrimas.map(m=>{
+            const saldo = estoqueMateriaPrima(m.id);
+            const custo = custoMedioMateriaPrima(m.id);
+            return `<tr>
+              <td>${m.nome}</td>
+              <td class="num ${saldo<=0?'muted':''}">${saldo.toFixed(2)} ${m.unidade}</td>
+              <td class="num">${fmtMoney(custo)}</td>
+              <td class="num">${fmtMoney(saldo*custo)}</td>
+            </tr>`;
+          }).join('') : `<tr class="empty-row"><td colspan="4">Nenhuma matéria-prima cadastrada.</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h3>Estoque de produto acabado</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Produto</th><th>Saldo</th><th>Custo unit.</th><th>Valor em estoque</th></tr></thead>
+          <tbody>
+          ${DB.produtos.length? DB.produtos.map(p=>{
+            const saldo = estoqueProduto(p.id);
+            const custo = custoUnitarioProduto(p.id);
+            return `<tr>
+              <td>${p.codigo} — ${p.nome}</td>
+              <td class="num ${saldo<=0?'muted':''}">${saldo.toFixed(2)} ${p.unidade}</td>
+              <td class="num">${fmtMoney(custo)}</td>
+              <td class="num">${fmtMoney(saldo*custo)}</td>
+            </tr>`;
+          }).join('') : `<tr class="empty-row"><td colspan="4">Nenhum produto cadastrado.</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Lotes de matéria-prima em aberto</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lote</th><th>Matéria-prima</th><th>Recebido em</th><th>Validade</th><th>Situação</th></tr></thead>
+        <tbody>
+        ${DB.recebimentos.length? DB.recebimentos.map(r=>{
+          const mp = DB.materiasPrimas.find(m=>m.id===r.materiaPrimaId);
+          const d = r.validade? daysBetween(today(), r.validade) : null;
+          let sit = '<span class="tag ok">OK</span>';
+          if(d!==null && d<0) sit = '<span class="tag bad">Vencido</span>';
+          else if(d!==null && d<=7) sit = '<span class="tag warn">Vence em '+d+'d</span>';
+          return `<tr><td class="muted">${r.lote}</td><td>${mp?mp.nome:'—'}</td><td>${fmtDate(r.data)}</td><td>${fmtDate(r.validade)}</td><td>${sit}</td></tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="5">Sem lotes.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= PRODUTOS (catálogo + ficha técnica) ================= */
+function renderProdutos(){
+  const mpOptions = DB.materiasPrimas.map(m=>`<option value="${m.id}">${m.nome} (${m.unidade})</option>`).join('');
+  return `
+    <div class="panel">
+      <h3>Matérias-primas cadastradas</h3>
+      <form id="form-mp" class="form-grid">
+        <div><label>Nome</label><input name="nome" required></div>
+        <div><label>Unidade</label>
+          <select name="unidade"><option value="kg">kg</option><option value="g">g</option><option value="un">un</option><option value="L">L</option></select>
+        </div>
+        <div><label>Custo unitário padrão (R$)</label><input name="custoUnitario" type="number" step="0.01" required></div>
+        <div><button class="btn" type="submit">Adicionar matéria-prima</button></div>
+      </form>
+      <div class="table-wrap" style="margin-top:14px;"><table>
+        <thead><tr><th>Nome</th><th>Unidade</th><th>Custo padrão</th><th></th></tr></thead>
+        <tbody>
+        ${DB.materiasPrimas.length? DB.materiasPrimas.map(m=>`
+          <tr><td>${m.nome}</td><td>${m.unidade}</td><td class="num">${fmtMoney(m.custoUnitario)}</td>
+          <td><button class="btn danger" onclick="delItem('materiasPrimas','${m.id}')">Excluir</button></td></tr>
+        `).join('') : `<tr class="empty-row"><td colspan="4">Nenhuma matéria-prima.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="panel">
+      <h3>Novo produto</h3>
+      <form id="form-produto" class="form-grid">
+        <div><label>Nome</label><input name="nome" required></div>
+        <div><label>Categoria</label><input name="categoria" placeholder="Defumado, Embutido..."></div>
+        <div><label>Unidade de venda</label>
+          <select name="unidade"><option value="un">un</option><option value="kg">kg</option><option value="pct">pacote</option></select>
+        </div>
+        <div><label>Preço de venda (R$)</label><input name="precoVenda" type="number" step="0.01" required></div>
+        <div><label>Validade do produto (dias)</label><input name="validadeDias" type="number" value="90"></div>
+        <div><button class="btn" type="submit">Adicionar produto</button></div>
+      </form>
+      <p class="muted" style="font-size:11.5px; margin-top:8px;">O código (0364-XXX) é gerado automaticamente. Depois de criar, defina a ficha técnica (matérias-primas usadas) na tabela abaixo.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Catálogo de produtos (${DB.produtos.length})</h3>
+      ${DB.produtos.length? DB.produtos.map(p=>{
+        const custoTeorico = custoTeoricoProduto(p.id);
+        const margem = p.precoVenda? ((p.precoVenda-custoTeorico)/p.precoVenda*100) : 0;
+        return `
+        <div class="items-list" style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div><b>${p.codigo}</b> — ${p.nome} <span class="muted">(${p.categoria||'sem categoria'})</span></div>
+            <div class="row-actions">
+              <span class="muted" style="font-size:11.5px;">Custo teórico: ${fmtMoney(custoTeorico)} · Preço: ${fmtMoney(p.precoVenda)} · Margem: ${margem.toFixed(1)}%</span>
+              <button class="btn danger" onclick="delItem('produtos','${p.id}')">Excluir produto</button>
+            </div>
+          </div>
+          <div style="margin-top:10px;">
+            <label style="margin-bottom:6px;">Ficha técnica (matéria-prima por unidade produzida)</label>
+            ${(p.fichaTecnica||[]).map((it,idx)=>{
+              const mp = DB.materiasPrimas.find(m=>m.id===it.materiaPrimaId);
+              return `<div class="item-line"><span>${mp?mp.nome:'—'}</span><span class="num">${it.quantidade} ${mp?mp.unidade:''}</span>
+                <button class="btn danger small" onclick="removeFichaItem('${p.id}',${idx})">×</button></div>`;
+            }).join('') || '<p class="muted" style="font-size:12px;">Nenhum item na ficha técnica ainda.</p>'}
+            <form class="form-grid" style="margin-top:8px;" onsubmit="addFichaItem(event,'${p.id}')">
+              <div><label>Matéria-prima</label><select name="materiaPrimaId">${mpOptions}</select></div>
+              <div><label>Qtd por unidade</label><input name="quantidade" type="number" step="0.001" required></div>
+              <div><button class="btn secondary" type="submit">Adicionar à ficha técnica</button></div>
+            </form>
+          </div>
+        </div>`;
+      }).join('') : `<p class="muted">Nenhum produto cadastrado ainda.</p>`}
+    </div>
+  `;
+}
+function addFichaItem(ev, produtoId){
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const produto = DB.produtos.find(p=>p.id===produtoId);
+  if(!produto.fichaTecnica) produto.fichaTecnica = [];
+  produto.fichaTecnica.push({materiaPrimaId:f.get('materiaPrimaId'), quantidade:Number(f.get('quantidade'))});
+  saveDB(); render();
+}
+function removeFichaItem(produtoId, idx){
+  const produto = DB.produtos.find(p=>p.id===produtoId);
+  produto.fichaTecnica.splice(idx,1);
+  saveDB(); render();
+}
+
+/* ================= PRODUÇÃO ================= */
+function renderProducao(){
+  if(!DB.produtos.length){
+    return `<div class="banner info">Cadastre ao menos um produto (com ficha técnica) na aba <b>Produtos</b> antes de lançar produção.</div>`;
+  }
+  const prodOptions = DB.produtos.map(p=>`<option value="${p.id}">${p.codigo} — ${p.nome}</option>`).join('');
+  return `
+    <div class="panel">
+      <h3>Novo lote de produção</h3>
+      <form id="form-producao" class="form-grid">
+        <div><label>Data</label><input name="data" type="date" value="${today()}" required></div>
+        <div><label>Produto</label><select name="produtoId" required>${prodOptions}</select></div>
+        <div><label>Quantidade produzida</label><input name="quantidade" type="number" step="0.001" required></div>
+        <div><label>Responsável</label><select name="responsavelId">${responsavelOptions()}</select></div>
+        <div><button class="btn" type="submit">Registrar produção</button></div>
+      </form>
+      <p class="muted" style="font-size:11.5px; margin-top:8px;">O sistema calcula automaticamente o consumo de matéria-prima com base na ficha técnica do produto, dá baixa no estoque e calcula o custo do lote.</p>
+    </div>
+    <div class="panel">
+      <h3>Lotes produzidos (${DB.producoes.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lote</th><th>Data</th><th>Produto</th><th>Qtd</th><th>Custo total</th><th>Custo unit.</th><th>Validade</th><th>Responsável</th><th></th></tr></thead>
+        <tbody>
+        ${DB.producoes.length? DB.producoes.slice().reverse().map(pr=>{
+          const prod = DB.produtos.find(p=>p.id===pr.produtoId);
+          return `<tr>
+            <td class="muted">${pr.lote}</td><td>${fmtDate(pr.data)}</td><td>${prod?prod.nome:'—'}</td>
+            <td class="num">${pr.quantidade}</td><td class="num">${fmtMoney(pr.custoTotal)}</td>
+            <td class="num">${fmtMoney(pr.custoTotal/pr.quantidade)}</td><td>${fmtDate(pr.validade)}</td>
+            <td class="muted">${nomeFuncionario(pr.responsavelId)}</td>
+            <td><button class="btn danger" onclick="delItem('producoes','${pr.id}')">Excluir</button></td>
+          </tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="9">Nenhuma produção lançada.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= CLIENTES ================= */
+function renderClientes(){
+  return `
+    <div class="panel">
+      <h3>Novo cliente</h3>
+      <form id="form-cliente" class="form-grid">
+        <div><label>Nome / Razão social</label><input name="nome" required></div>
+        <div><label>CNPJ/CPF</label><input name="cnpj"></div>
+        <div><label>Tipo</label>
+          <select name="tipo"><option>Revenda</option><option>Distribuidor</option><option>Food Service</option><option>Consumidor Final</option></select>
+        </div>
+        <div><label>Contato</label><input name="contato"></div>
+        <div><label>Telefone</label><input name="telefone"></div>
+        <div><button class="btn" type="submit">Adicionar cliente</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Clientes cadastrados (${DB.clientes.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nome</th><th>Tipo</th><th>Contato</th><th>Telefone</th><th></th></tr></thead>
+        <tbody>
+        ${DB.clientes.length? DB.clientes.map(c=>`
+          <tr><td>${c.nome}</td><td>${c.tipo||'—'}</td><td>${c.contato||'—'}</td><td class="muted">${c.telefone||'—'}</td>
+          <td><button class="btn danger" onclick="delItem('clientes','${c.id}')">Excluir</button></td></tr>
+        `).join('') : `<tr class="empty-row"><td colspan="5">Nenhum cliente cadastrado.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= FUNCIONÁRIOS ================= */
+function renderFuncionarios(){
+  return `
+    <div class="panel">
+      <h3>Novo funcionário</h3>
+      <form id="form-funcionario" class="form-grid">
+        <div><label>Nome</label><input name="nome" required></div>
+        <div><label>Cargo / setor</label>
+          <select name="cargo">
+            <option>Recebimento</option><option>Produção</option><option>Embalagem</option>
+            <option>Estoque</option><option>Vendas</option><option>Administrativo</option><option>Outro</option>
+          </select>
+        </div>
+        <div><button class="btn" type="submit">Adicionar funcionário</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h3>Equipe cadastrada (${DB.funcionarios.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nome</th><th>Cargo / setor</th><th></th></tr></thead>
+        <tbody>
+        ${DB.funcionarios.length? DB.funcionarios.map(f=>`
+          <tr><td>${f.nome}</td><td>${f.cargo||'—'}</td>
+          <td><button class="btn danger" onclick="delItem('funcionarios','${f.id}')">Excluir</button></td></tr>
+        `).join('') : `<tr class="empty-row"><td colspan="3">Nenhum funcionário cadastrado.</td></tr>`}
+        </tbody>
+      </table></div>
+      <p class="muted" style="font-size:11.5px; margin-top:10px;">Depois de cadastrar aqui, o nome aparece como opção de "Responsável" nas telas de Recebimento, Produção, Vendas e Despesas — assim cada ficha fica registrada em nome de quem lançou.</p>
+    </div>
+  `;
+}
+function responsavelOptions(){
+  const ativos = DB.funcionarios.filter(f=>f.ativo!==false);
+  if(!ativos.length) return '<option value="">— nenhum funcionário cadastrado —</option>';
+  return '<option value="">Selecione…</option>' + ativos.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+}
+function nomeFuncionario(id){
+  if(!id) return '—';
+  const f = DB.funcionarios.find(f=>f.id===id);
+  return f? f.nome : '—';
+}
+
+/* ================= VENDAS ================= */
+let pedidoDraftItens = [];
+function renderVendas(){
+  if(!DB.clientes.length || !DB.produtos.length){
+    return `<div class="banner info">Cadastre ao menos um <b>cliente</b> e um <b>produto</b> antes de lançar um pedido de venda.</div>`;
+  }
+  const cliOptions = DB.clientes.map(c=>`<option value="${c.id}">${c.nome}</option>`).join('');
+  const prodOptions = DB.produtos.map(p=>`<option value="${p.id}">${p.codigo} — ${p.nome} (saldo: ${estoqueProduto(p.id).toFixed(1)})</option>`).join('');
+  return `
+    <div class="panel">
+      <h3>Novo pedido de venda</h3>
+      <div class="form-grid">
+        <div><label>Data</label><input id="pedido-data" type="date" value="${today()}"></div>
+        <div><label>Cliente</label><select id="pedido-cliente">${cliOptions}</select></div>
+        <div><label>Responsável</label><select id="pedido-responsavel">${responsavelOptions()}</select></div>
+      </div>
+      <div style="margin-top:14px;">
+        <label>Itens do pedido</label>
+        <form class="form-grid" onsubmit="addPedidoItem(event)">
+          <div><label>Produto</label><select name="produtoId" id="pedido-produto">${prodOptions}</select></div>
+          <div><label>Quantidade</label><input name="quantidade" type="number" step="0.001" required></div>
+          <div><label>Preço unit. (R$)</label><input name="precoUnitario" type="number" step="0.01" id="pedido-preco"></div>
+          <div><button class="btn secondary" type="submit">Adicionar item</button></div>
+        </form>
+        <div class="items-list">
+          ${pedidoDraftItens.length? pedidoDraftItens.map((it,idx)=>{
+            const prod = DB.produtos.find(p=>p.id===it.produtoId);
+            return `<div class="item-line"><span>${prod?prod.nome:'—'}</span><span class="num">${it.quantidade} × ${fmtMoney(it.precoUnitario)}</span>
+              <button class="btn danger small" onclick="removePedidoItem(${idx})">×</button></div>`;
+          }).join('') : '<p class="muted" style="font-size:12px;">Nenhum item adicionado ainda.</p>'}
+          ${pedidoDraftItens.length? `<div class="subtotal">Total: ${fmtMoney(pedidoDraftItens.reduce((s,i)=>s+i.quantidade*i.precoUnitario,0))}</div>` : ''}
+        </div>
+        <button class="btn" style="margin-top:12px;" onclick="finalizarPedido()">Finalizar pedido</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Pedidos lançados (${DB.pedidos.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Itens</th><th>Total</th><th>Status</th><th>Responsável</th><th></th></tr></thead>
+        <tbody>
+        ${DB.pedidos.length? DB.pedidos.slice().reverse().map(p=>{
+          const cli = DB.clientes.find(c=>c.id===p.clienteId);
+          const total = (p.itens||[]).reduce((s,i)=>s+i.quantidade*i.precoUnitario,0);
+          return `<tr>
+            <td>${fmtDate(p.data)}</td><td>${cli?cli.nome:'—'}</td><td>${(p.itens||[]).length} item(ns)</td>
+            <td class="num">${fmtMoney(total)}</td>
+            <td>
+              <select onchange="setPedidoStatus('${p.id}', this.value)">
+                ${['Pendente','Faturado','Enviado','Cancelado'].map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}
+              </select>
+            </td>
+            <td class="muted">${nomeFuncionario(p.responsavelId)}</td>
+            <td><button class="btn danger" onclick="delItem('pedidos','${p.id}')">Excluir</button></td>
+          </tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="7">Nenhum pedido lançado.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+function addPedidoItem(ev){
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const produtoId = f.get('produtoId');
+  const prod = DB.produtos.find(p=>p.id===produtoId);
+  let preco = Number(f.get('precoUnitario'));
+  if(!preco && prod) preco = prod.precoVenda;
+  pedidoDraftItens.push({produtoId, quantidade:Number(f.get('quantidade')), precoUnitario:preco});
+  render();
+}
+function removePedidoItem(idx){ pedidoDraftItens.splice(idx,1); render(); }
+function finalizarPedido(){
+  if(!pedidoDraftItens.length){ alert('Adicione ao menos um item ao pedido.'); return; }
+  const clienteId = document.getElementById('pedido-cliente').value;
+  const data = document.getElementById('pedido-data').value || today();
+  const responsavelId = document.getElementById('pedido-responsavel').value;
+  DB.pedidos.push({id:uid('ped'), data, clienteId, itens:pedidoDraftItens, status:'Pendente', responsavelId});
+  pedidoDraftItens = [];
+  saveDB(); render();
+}
+function setPedidoStatus(id, status){
+  const p = DB.pedidos.find(p=>p.id===id);
+  p.status = status;
+  saveDB(); render();
+}
+
+/* ================= RELATÓRIOS ================= */
+function renderRelatorios(){
+  const receitaTotal = DB.pedidos.filter(p=>p.status!=='Cancelado')
+    .reduce((s,p)=>s+(p.itens||[]).reduce((s2,i)=>s2+i.quantidade*i.precoUnitario,0),0);
+  const cmvTotal = DB.pedidos.filter(p=>p.status!=='Cancelado')
+    .reduce((s,p)=>s+(p.itens||[]).reduce((s2,i)=>s2+i.quantidade*custoUnitarioProduto(i.produtoId),0),0);
+  const comprasTotal = DB.recebimentos.reduce((s,r)=>s+r.quantidade*r.custoUnitario,0);
+  const despesasTotal = DB.despesas.reduce((s,d)=>s+Number(d.valor),0);
+  const lucroBruto = receitaTotal - cmvTotal;
+  const lucroLiquido = lucroBruto - despesasTotal;
+
+  return `
+    <div class="filter-bar">
+      <div class="panel" style="flex:1; min-width:260px;">
+        <h3>DRE simplificado (acumulado)</h3>
+        <table>
+          <tr><td>Receita de vendas</td><td class="num">${fmtMoney(receitaTotal)}</td></tr>
+          <tr><td>(–) CMV (custo dos produtos vendidos)</td><td class="num">${fmtMoney(cmvTotal)}</td></tr>
+          <tr><td><b>= Lucro bruto</b></td><td class="num"><b>${fmtMoney(lucroBruto)}</b></td></tr>
+          <tr><td>(–) Despesas operacionais</td><td class="num">${fmtMoney(despesasTotal)}</td></tr>
+          <tr><td><b>= Lucro líquido</b></td><td class="num" style="color:var(--amber-bright);"><b>${fmtMoney(lucroLiquido)}</b></td></tr>
+        </table>
+      </div>
+      <div class="panel" style="flex:1; min-width:260px;">
+        <h3>Fluxo de caixa (acumulado)</h3>
+        <table>
+          <tr><td>Entradas (vendas faturadas/enviadas)</td><td class="num">${fmtMoney(DB.pedidos.filter(p=>['Faturado','Enviado'].includes(p.status)).reduce((s,p)=>s+(p.itens||[]).reduce((s2,i)=>s2+i.quantidade*i.precoUnitario,0),0))}</td></tr>
+          <tr><td>Saídas (compras de matéria-prima)</td><td class="num">${fmtMoney(comprasTotal)}</td></tr>
+          <tr><td>Saídas (despesas operacionais)</td><td class="num">${fmtMoney(despesasTotal)}</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Despesas operacionais</h3>
+      <form id="form-despesa" class="form-grid">
+        <div><label>Data</label><input name="data" type="date" value="${today()}" required></div>
+        <div><label>Descrição</label><input name="descricao" placeholder="Aluguel, energia, salários..." required></div>
+        <div><label>Valor (R$)</label><input name="valor" type="number" step="0.01" required></div>
+        <div><label>Responsável</label><select name="responsavelId">${responsavelOptions()}</select></div>
+        <div><button class="btn" type="submit">Lançar despesa</button></div>
+      </form>
+      <div class="table-wrap" style="margin-top:12px;"><table>
+        <thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Responsável</th><th></th></tr></thead>
+        <tbody>
+        ${DB.despesas.length? DB.despesas.slice().reverse().map(d=>`
+          <tr><td>${fmtDate(d.data)}</td><td>${d.descricao}</td><td class="num">${fmtMoney(d.valor)}</td>
+          <td class="muted">${nomeFuncionario(d.responsavelId)}</td>
+          <td><button class="btn danger" onclick="delItem('despesas','${d.id}')">Excluir</button></td></tr>
+        `).join('') : `<tr class="empty-row"><td colspan="5">Nenhuma despesa lançada.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="panel">
+      <h3>Relatório de produção</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lote</th><th>Data</th><th>Produto</th><th>Qtd produzida</th><th>Custo total</th><th>Custo/un.</th></tr></thead>
+        <tbody>
+        ${DB.producoes.length? DB.producoes.map(pr=>{
+          const prod = DB.produtos.find(p=>p.id===pr.produtoId);
+          return `<tr><td class="muted">${pr.lote}</td><td>${fmtDate(pr.data)}</td><td>${prod?prod.nome:'—'}</td>
+            <td class="num">${pr.quantidade}</td><td class="num">${fmtMoney(pr.custoTotal)}</td><td class="num">${fmtMoney(pr.custoTotal/pr.quantidade)}</td></tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="6">Sem dados de produção.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="panel">
+      <h3>Relatório de compras por fornecedor</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fornecedor</th><th>Nº de recebimentos</th><th>Total comprado</th></tr></thead>
+        <tbody>
+        ${DB.fornecedores.length? DB.fornecedores.map(f=>{
+          const recs = DB.recebimentos.filter(r=>r.fornecedorId===f.id);
+          const total = recs.reduce((s,r)=>s+r.quantidade*r.custoUnitario,0);
+          return `<tr><td>${f.nome}</td><td class="num">${recs.length}</td><td class="num">${fmtMoney(total)}</td></tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="3">Sem fornecedores.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+}
+
+/* ================= GENERIC HELPERS ================= */
+function delItem(collection, id){
+  if(!confirm('Excluir este registro?')) return;
+  DB[collection] = DB[collection].filter(x=>x.id!==id);
+  saveDB(); render();
+}
+
+function attachHandlers(view){
+  const forms = {
+    'form-fornecedor': (f)=>{ DB.fornecedores.push({id:uid('for'), ...Object.fromEntries(f)}); },
+    'form-mp': (f)=>{ const d=Object.fromEntries(f); d.custoUnitario=Number(d.custoUnitario); DB.materiasPrimas.push({id:uid('mp'), ...d}); },
+    'form-produto': (f)=>{
+      const d = Object.fromEntries(f);
+      d.precoVenda = Number(d.precoVenda); d.validadeDias = Number(d.validadeDias)||90;
+      DB.produtos.push({id:uid('prod'), codigo:nextProdutoCodigo(), fichaTecnica:[], ...d});
+    },
+    'form-cliente': (f)=>{ DB.clientes.push({id:uid('cli'), ...Object.fromEntries(f)}); },
+    'form-recebimento': (f)=>{
+      const d = Object.fromEntries(f);
+      d.quantidade = Number(d.quantidade); d.custoUnitario = Number(d.custoUnitario);
+      d.lote = nextLoteNumber(d.data);
+      DB.recebimentos.push({id:uid('rec'), ...d});
+    },
+    'form-producao': (f)=>{
+      const d = Object.fromEntries(f);
+      const qtd = Number(d.quantidade);
+      const produto = DB.produtos.find(p=>p.id===d.produtoId);
+      if(!produto.fichaTecnica || !produto.fichaTecnica.length){
+        alert('Este produto ainda não tem ficha técnica definida (aba Produtos). Cadastre antes de lançar produção.');
+        return false;
+      }
+      const consumo = produto.fichaTecnica.map(it=>({materiaPrimaId:it.materiaPrimaId, quantidade:it.quantidade*qtd}));
+      for(const c of consumo){
+        const saldo = estoqueMateriaPrima(c.materiaPrimaId);
+        if(saldo < c.quantidade){
+          const mp = DB.materiasPrimas.find(m=>m.id===c.materiaPrimaId);
+          if(!confirm(`Estoque insuficiente de "${mp.nome}" (saldo ${saldo.toFixed(2)}, necessário ${c.quantidade.toFixed(2)}). Registrar produção mesmo assim?`)) return false;
+        }
+      }
+      const custoTotal = consumo.reduce((s,c)=>s + c.quantidade*custoMedioMateriaPrima(c.materiaPrimaId), 0);
+      const validade = new Date(d.data+'T00:00:00');
+      validade.setDate(validade.getDate() + Number(produto.validadeDias||90));
+      DB.producoes.push({
+        id:uid('prd'), lote:nextLoteNumber(d.data), data:d.data, produtoId:d.produtoId,
+        quantidade:qtd, consumo, custoTotal, validade: validade.toISOString().slice(0,10)
+      });
+    },
+    'form-despesa': (f)=>{ const d=Object.fromEntries(f); d.valor=Number(d.valor); DB.despesas.push({id:uid('desp'), ...d}); },
+    'form-funcionario': (f)=>{ DB.funcionarios.push({id:uid('func'), ativo:true, ...Object.fromEntries(f)}); },
+  };
+  Object.keys(forms).forEach(formId=>{
+    const el = document.getElementById(formId);
+    if(!el) return;
+    el.addEventListener('submit', (ev)=>{
+      ev.preventDefault();
+      const result = forms[formId](new FormData(ev.target));
+      if(result === false) return;
+      saveDB(); render();
+    });
+  });
+}
+
+/* ================= INIT ================= */
+buildNav();
+loadDB();
+</script>
+</body>
+</html>
