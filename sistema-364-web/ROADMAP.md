@@ -35,6 +35,14 @@
       compras por fornecedor
 - [x] **Fichas impressas** — `components/FichaPrint.js`: modelo em preto e branco com
       cabeçalho, campos, itens, observações e assinaturas (botão "Imprimir ficha")
+- [x] **Controle de qualidade no Recebimento** — lote do fornecedor, temperatura,
+      condição da embalagem, peso conferido vs. peso na nota fiscal (com aviso de
+      divergência), status Aceito/Aceito com ressalva/Rejeitado (só os dois primeiros
+      contam no saldo de estoque e no custo médio), local de armazenamento, aprovação
+      por responsável de qualidade (segundo campo, distinto de quem recebeu), anexo de
+      nota fiscal e foto do produto (Supabase Storage, bucket privado `recebimentos`,
+      acesso via signed URL sob demanda). Matérias-primas ganharam `categoria` e
+      `preco_alvo_kg`, usado para avisar quando o custo do lote vem acima do esperado.
 
 ### Produção avançada (descoberta já existente no banco, não construída pelo frontend ainda)
 
@@ -62,14 +70,21 @@ para não duplicar esforço.
 7. `supabase/atualizacao_06_rls_multiempresa.sql`
 8. `supabase/atualizacao_07_views_empresa.sql` (requer Postgres 15+; confirmar com `select version();`)
 9. `supabase/atualizacao_08_producao_avancada.sql`
+10. `supabase/atualizacao_09_recebimento_qualidade.sql`
 
-> Nota: em jul/2026 todos os 9 arquivos acima já foram executados no projeto Supabase
+> Nota: em jul/2026 todos os 10 arquivos acima já foram executados no projeto Supabase
 > em uso (`yvouevyfhtmbtankoofx`). Os dados (fornecedores, produtos, usuários,
 > permissões, empresas) continuam no banco mesmo depois de uma restauração do código
 > local — só rode o SQL de novo se estiver apontando para um projeto Supabase novo/vazio.
 
 ## Próximos passos
 
+O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
+concluído acima) — próximos módulos vêm em mensagens separadas, mesma dinâmica.
+
+- [ ] **Testar upload real de anexo** (nota fiscal/foto) no Recebimento em produção —
+      o fluxo foi implementado e verificado por leitura de código, mas o teste
+      automatizado não exercitou um upload de arquivo de verdade
 - [ ] **Telas de defumação, embalagem, assinaturas e preços por cliente** — o banco já
       suporta multiempresa nessas tabelas; falta construir as páginas
 - [ ] **CRM**: Leads/Oportunidades, funil de vendas, histórico de interações, tarefas

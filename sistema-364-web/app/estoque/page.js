@@ -24,7 +24,7 @@ function Conteudo() {
       const [mp, prod, recs, producoes, lotes] = await Promise.all([
         supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid).order('nome'),
         supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid).order('codigo'),
-        supabase.from('recebimentos').select('materia_prima_id, quantidade, custo_unitario').eq('empresa_id', eid),
+        supabase.from('recebimentos').select('materia_prima_id, quantidade, custo_unitario, status_recebimento').eq('empresa_id', eid),
         supabase.from('producoes').select('produto_id, quantidade, custo_total').eq('empresa_id', eid),
         supabase.from('recebimentos').select('lote, data, validade, materia_prima_id, materias_primas(nome)').eq('empresa_id', eid).order('created_at', { ascending: false }),
       ]);

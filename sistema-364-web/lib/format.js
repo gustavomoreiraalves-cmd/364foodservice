@@ -43,9 +43,14 @@ export async function proximoCodigoProduto(empresaId, prefixo) {
 }
 
 // Custo médio de uma matéria-prima a partir da lista de recebimentos
-// (fallback: custo padrão cadastrado na matéria-prima)
+// (fallback: custo padrão cadastrado na matéria-prima). Só considera
+// recebimentos Aceito/Aceito com ressalva — um lote Rejeitado não deve
+// puxar o custo médio, do mesmo jeito que não entra no saldo de estoque.
 export function custoMedioMP(mpId, recebimentos, materiasPrimas) {
-  const recs = (recebimentos || []).filter(r => r.materia_prima_id === mpId);
+  const recs = (recebimentos || []).filter(r =>
+    r.materia_prima_id === mpId &&
+    (r.status_recebimento == null || ['Aceito', 'Aceito com ressalva'].includes(r.status_recebimento))
+  );
   if (!recs.length) {
     const mp = (materiasPrimas || []).find(m => m.id === mpId);
     return mp ? Number(mp.custo_unitario) : 0;
