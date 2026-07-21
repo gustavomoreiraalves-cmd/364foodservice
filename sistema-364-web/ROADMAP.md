@@ -1,0 +1,95 @@
+# Roadmap — 364 Foodservices / Grupo 364
+
+## Concluído (jul/2026)
+
+- [x] **Autenticação** — login por usuário e senha; usuário de teste `admin`/`admin`
+      (criado por `supabase/usuarios_permissoes.sql`)
+- [x] **Usuários e permissões** (`/usuarios`, só administradores) — cadastro completo
+      (nome, usuário, e-mail, telefone, CPF), edição, troca de senha, permissão de
+      acesso por aba (tabela `permissoes`) e por empresa (tabela `usuario_empresas`)
+- [x] **Layout do protótipo** — sidebar com navegação filtrada por permissão
+      (`components/AppShell.js` + `app/globals.css`)
+- [x] **ERP multiempresa (Grupo 364)** — camada `grupos → empresas → unidades` por
+      cima do schema original; as 4 marcas (364 Steakhouse, 364 Food Service, 364
+      Burguer, 364 Foodtruck/Afya) compartilham o mesmo sistema com dados isolados
+      por `empresa_id` + RLS (`empresas_permitidas()`), seletor de empresa na sidebar
+      (`lib/empresa.js`). Todos os dados reais existentes foram preservados sob
+      "364 Food Service"; as demais marcas nascem vazias, prontas para uso.
+- [x] **Dashboard** (`/`) — KPIs, últimos recebimentos e pedidos
+- [x] **Fornecedores** (`/fornecedores`)
+- [x] **Produtos** (`/produtos`) — matérias-primas + catálogo com código automático
+      por empresa (`0364-XXX` no Food Service, `STK-XXX`, `BURG-XXX`, `AFYA-XXX` nas
+      demais) + ficha técnica
+- [x] **Recebimento** (`/recebimentos`) — lote automático `LT-AAMMDD-###` por empresa
+      + **ficha impressa**
+- [x] **Produção** (`/producoes`) — consumo calculado pela ficha técnica, custo pelo
+      custo médio da matéria-prima, validade automática + **ficha impressa**
+- [x] **Estoque** (`/estoque`) — somente leitura, via views `vw_estoque_*`
+- [x] **Clientes** (`/clientes`)
+- [x] **Pedidos de venda** (`/pedidos`) — itens, status, baixa de estoque via view
+      + **pedido impresso**
+- [x] **Funcionários** (`/funcionarios`) — cadastro por empresa, ativar/inativar,
+      usado como "Responsável" em recebimento, produção, pedidos e despesas
+- [x] **Despesas** (`/despesas`)
+- [x] **Relatórios** (`/relatorios`) — DRE simplificado, fluxo de caixa, produção e
+      compras por fornecedor
+- [x] **Fichas impressas** — `components/FichaPrint.js`: modelo em preto e branco com
+      cabeçalho, campos, itens, observações e assinaturas (botão "Imprimir ficha")
+
+### Produção avançada (descoberta já existente no banco, não construída pelo frontend ainda)
+
+Durante a migração multiempresa foi encontrado, já em uso no banco de dados, um fluxo
+de produção mais detalhado que o do frontend atual — recebimento → **defumação**
+(`defumacoes`/`defumacao_itens`, com rendimento: peso bruto, perda de limpeza, sobra,
+peso final) → **embalagem** (`embalagens`/`embalagem_itens`, que via trigger
+`trg_embalagem_items_to_producao` gera automaticamente o registro em `producoes`) →
+pedido. Também existem, ainda sem tela: `assinaturas`/`assinatura_entregas`
+(entregas recorrentes por cliente) e `cliente_precos` (preço negociado por cliente).
+Todas essas tabelas já receberam `empresa_id` + RLS multiempresa
+(`atualizacao_04`/`06`), e o trigger foi corrigido para propagar a empresa
+(`atualizacao_08_producao_avancada.sql`) — mas **não têm telas no frontend ainda**.
+Isso é trabalho de outra sessão/pessoa; vale sincronizar antes de construir as telas
+para não duplicar esforço.
+
+### SQL a rodar no Supabase (ordem)
+
+1. `supabase/schema.sql`
+2. `supabase/usuarios_permissoes.sql`
+3. `supabase/atualizacao_02_cadastro.sql`
+4. `supabase/atualizacao_03_grupos_empresas.sql`
+5. `supabase/atualizacao_04_empresa_id_backfill.sql`
+6. `supabase/atualizacao_05_usuario_empresas.sql`
+7. `supabase/atualizacao_06_rls_multiempresa.sql`
+8. `supabase/atualizacao_07_views_empresa.sql` (requer Postgres 15+; confirmar com `select version();`)
+9. `supabase/atualizacao_08_producao_avancada.sql`
+
+> Nota: em jul/2026 todos os 9 arquivos acima já foram executados no projeto Supabase
+> em uso (`yvouevyfhtmbtankoofx`). Os dados (fornecedores, produtos, usuários,
+> permissões, empresas) continuam no banco mesmo depois de uma restauração do código
+> local — só rode o SQL de novo se estiver apontando para um projeto Supabase novo/vazio.
+
+## Próximos passos
+
+- [ ] **Telas de defumação, embalagem, assinaturas e preços por cliente** — o banco já
+      suporta multiempresa nessas tabelas; falta construir as páginas
+- [ ] **CRM**: Leads/Oportunidades, funil de vendas, histórico de interações, tarefas
+      de follow-up, conversão lead → cliente
+- [ ] **Vincular login a funcionário automaticamente** — usar o funcionário do
+      usuário logado como "Responsável" padrão nos formulários
+- [ ] **Permissão por aba × empresa** — hoje são dimensões independentes (uma aba
+      concedida vale para todas as empresas do usuário); evoluir para matriz se
+      algum papel precisar de mistura (ex: Vendas só na Steakhouse, Financeiro em todas)
+- [ ] **FKs compostas cross-empresa** (`unique(id, empresa_id)` + FK composta) para
+      reforçar que registros de uma empresa nunca referenciem outra
+- [ ] **Tela de administração de Grupos/Empresas** — hoje as 4 empresas são fixas via
+      seed SQL; CNPJ e prefixo ainda não preenchidos, ajustáveis direto no banco
+- [ ] **Filtros por período nos relatórios** (mês/ano)
+- [ ] **Trocar admin/admin** e revogar a chave secreta usada no desenvolvimento antes
+      de ir a produção
+
+## Referência
+
+O protótipo funcional completo (HTML único, lógica de negócio validada) está em
+`referencia/sistema-364-prototipo.html` — os módulos de negócio original seguem esse
+comportamento, com os dados no Supabase em vez de memória. Não cobre defumação,
+embalagem, assinaturas ou preços por cliente (ver seção acima).

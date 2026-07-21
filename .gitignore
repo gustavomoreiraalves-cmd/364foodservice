@@ -28,6 +28,11 @@ wheels/
 .installed.cfg
 *.egg
 
+# A regra "lib/" acima (Python venv) casa por engano com o código-fonte
+# de sistema-364-web/lib — mantém essa pasta versionada.
+!sistema-364-web/lib/
+!sistema-364-web/lib/**
+
 # FastAPI
 .pytest_cache/
 .coverage
