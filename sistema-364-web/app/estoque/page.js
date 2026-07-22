@@ -28,17 +28,17 @@ function Conteudo() {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [mp, prod, recs, producoes, lotes] = await Promise.all([
+      const [mp, prod, saldos, producoes, lotes] = await Promise.all([
         supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid).order('nome'),
         supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid).order('codigo'),
-        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, inspecoes_qualidade(status)').eq('empresa_id', eid),
+        supabase.from('stock_balances').select('materia_prima_id, quantidade, custo_unitario').eq('empresa_id', eid),
         supabase.from('producoes').select('produto_id, quantidade, custo_total').eq('empresa_id', eid),
         supabase.from('recebimento_itens').select('lote, validade, materia_prima_id, materias_primas(nome), recebimentos(data), inspecoes_qualidade(status)').eq('empresa_id', eid).order('created_at', { ascending: false }),
       ]);
       setDados({
         estoqueMP: mp.data || [],
         estoqueProd: prod.data || [],
-        recebimentos: (recs.data || []).map(r => ({ ...r, status_qualidade: primeiroStatus(r.inspecoes_qualidade) })),
+        saldosLote: saldos.data || [],
         producoes: producoes.data || [],
         lotes: (lotes.data || []).map(r => ({ ...r, data: r.recebimentos?.data, status_qualidade: primeiroStatus(r.inspecoes_qualidade) })),
       });
@@ -66,7 +66,7 @@ function Conteudo() {
               <tbody>
                 {dados.estoqueMP.length ? dados.estoqueMP.map(m => {
                   const saldo = Number(m.saldo);
-                  const custo = custoMedioMP(m.materia_prima_id, dados.recebimentos, []);
+                  const custo = custoMedioMP(m.materia_prima_id, dados.saldosLote, []);
                   return (
                     <tr key={m.materia_prima_id}>
                       <td>{m.nome}</td>

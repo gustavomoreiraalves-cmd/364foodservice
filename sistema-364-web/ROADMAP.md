@@ -92,6 +92,7 @@ documenta o schema real (idempotente — não faz nada se já aplicado).
 14. `supabase/atualizacao_13_rls_permissao_modulo.sql`
 15. `supabase/atualizacao_14_recebimento_multiitem.sql`
 16. `supabase/atualizacao_15_inspecoes_qualidade.sql`
+17. `supabase/atualizacao_16_estoque_ledger.sql`
 
 > Nota: em jul/2026 todos os 10 primeiros arquivos acima já foram executados no projeto
 > Supabase em uso (`yvouevyfhtmbtankoofx`), e o efeito do 11º (`recebimentos` dividida em
@@ -153,8 +154,23 @@ centros de custo, indicadores). Etapas:
       cadastrado em vez do custo médio real) ainda liam a tabela `recebimentos` no
       formato antigo. Testado ponta a ponta em produção (item em quarentena com
       motivo e temperatura, exclusão limpa depois). `supabase/atualizacao_15_inspecoes_qualidade.sql`.
-- [ ] **Etapa 3 — Estoque**: ledger (`stock_movements` + `stock_balances`),
-      substituindo as views atuais como fonte principal do `/estoque`.
+- [x] **Etapa 3 — Estoque como ledger**: `stock_movements` (histórico append-only —
+      sem UPDATE/DELETE nunca, só estorno/ajuste) + `stock_balances` (saldo
+      materializado por empresa/depósito/matéria-prima/lote, mantido por trigger a
+      cada movimento). Trigger em `inspecoes_qualidade`: quando um item é aprovado
+      (na criação ou numa atualização futura de status), gera automaticamente a
+      entrada no estoque — fecha "ao concluir o recebimento, gerar entrada
+      automaticamente" sem depender do frontend lembrar de fazer isso. Backfill dos
+      6 itens já aprovados. `vw_estoque_materia_prima` (mesmo formato de colunas)
+      passa a somar `stock_balances` em vez de recalcular via join toda vez —
+      `/estoque` não precisou mudar a query da tabela principal. Custo médio em
+      `/estoque` e `/producoes` também migrou de recalcular via join com
+      `inspecoes_qualidade` para ler direto do ledger (mais simples, já pré-filtrado).
+      Cada movimento gera automaticamente um registro em `audit_logs` (criada na
+      Etapa 1, esse foi o primeiro uso real dela). Testado ponta a ponta via API
+      direta (Chrome instável no momento do teste): inspeção aprovada → movimento →
+      saldo → view, tudo automático; dados de teste limpos depois.
+      `supabase/atualizacao_16_estoque_ledger.sql`.
 - [ ] **Etapa 4 — Requisições internas** (`/requisicoes`)
 - [ ] **Etapa 5 — Transferências entre unidades/depósitos** (`/transferencias`)
 - [ ] **Etapa 6 — Consumo direto com centro de custo obrigatório** (`/consumos`)
