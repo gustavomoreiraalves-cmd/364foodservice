@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, Fragment } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import { supabase } from '../../lib/supabase';
-import { fmtMoney, fmtDate, hoje, proximoLote } from '../../lib/format';
+import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes } from '../../lib/format';
 import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebimento } from '../../lib/storage';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
@@ -9,14 +9,14 @@ import { useEmpresaAtual } from '../../lib/empresa';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_OPCOES = ['Aceito', 'Aceito com ressalva', 'Rejeitado'];
+const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
 
-const FORM_VAZIO = () => ({
-  data: hoje(), fornecedor_id: '', materia_prima_id: '',
-  quantidade: '', peso_nota_kg: '', custo_unitario: '',
-  numero_lote_fornecedor: '', temperatura_c: '', condicao_embalagem: 'Íntegra',
-  status_recebimento: 'Aceito', local_armazenamento: '',
-  nota_fiscal: '', validade: '', responsavel_id: '', aprovado_por_id: '',
-  notaFiscalArquivo: null, fotoProdutoArquivo: null,
+const HEADER_VAZIO = () => ({ data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null });
+const ITEM_VAZIO = () => ({
+  materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
+  deposito_id: '', local_armazenamento: '', observacoes: '',
+  validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_recebimento: 'Aceito',
+  temperatura_c: '', aprovado_por_id: '', fotoProdutoArquivo: null,
 });
 
 export default function RecebimentosPage() {
@@ -37,112 +37,153 @@ function Conteudo({ setFicha }) {
   const [mps, setMps] = useState([]);
   const [fornecedores, setFornecedores] = useState([]);
   const [funcionarios, setFuncionarios] = useState([]);
+  const [depositos, setDepositos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [form, setForm] = useState(FORM_VAZIO());
+  const [header, setHeader] = useState(HEADER_VAZIO());
+  const [itemForm, setItemForm] = useState(ITEM_VAZIO());
+  const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
+  const proximaKey = useRef(0);
 
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('recebimento_itens')
         .select(`
           *,
-          materias_primas(nome, unidade, preco_alvo_kg),
+          materias_primas(nome, unidade, preco_alvo_kg, controle_recebimento),
+          depositos(nome, unidades(nome)),
           aprovado_por:funcionarios!recebimento_itens_aprovado_por_id_fkey(nome),
           recebimentos!inner(
-            data, fornecedor_id, nota_fiscal, responsavel_id, temperatura_c, nota_fiscal_arquivo_url,
+            data, fornecedor_id, nota_fiscal, responsavel_id, nota_fiscal_arquivo_url,
             fornecedores(nome),
             responsavel:funcionarios!recebimentos_responsavel_id_fkey(nome)
           )
         `)
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
-      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
+      supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
     if (r1.error) console.error(r1.error);
     setLista((r1.data || []).map(item => ({
       ...item,
-      ...item.recebimentos,
-      fornecedores: item.recebimentos?.fornecedores,
-      responsavel: item.recebimentos?.responsavel,
+      recebimento_id: item.recebimento_id,
+      cabecalho: item.recebimentos,
     })));
     setMps(r2.data || []);
     setFornecedores(r3.data || []);
     setFuncionarios(r4.data || []);
+    setDepositos(r5.data || []);
     setLoading(false);
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
+  const mpSelecionada = mps.find(m => m.id === itemForm.materia_prima_id);
+  const regra = mpSelecionada?.controle_recebimento || 'simples';
+  const alvo = mpSelecionada?.preco_alvo_kg ? Number(mpSelecionada.preco_alvo_kg) : null;
+  const custoAcimaDoAlvo = alvo && Number(itemForm.custo_unitario) > alvo;
+  const diasValidade = mpSelecionada?.dias_minimos_validade && itemForm.validade ? diasEntre(hoje(), itemForm.validade) : null;
+  const validadeAbaixoDoMinimo = diasValidade != null && diasValidade < mpSelecionada.dias_minimos_validade;
+
+  function adicionarItem(e) {
+    e.preventDefault();
+    if (!mpSelecionada) { alert('Selecione a matéria-prima.'); return; }
+    if (!itemForm.quantidade || !itemForm.custo_unitario) { alert('Preencha peso conferido e custo unitário.'); return; }
+    if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
+    if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
+    proximaKey.current += 1;
+    setItens([...itens, { ...itemForm, _key: proximaKey.current, _mp: mpSelecionada }]);
+    setItemForm(ITEM_VAZIO());
+  }
+
+  function removerItemStaged(key) {
+    setItens(itens.filter(i => i._key !== key));
+  }
+
   async function registrar(e) {
     e.preventDefault();
+    if (!itens.length) { alert('Adicione ao menos um item antes de registrar o recebimento.'); return; }
     setSalvando(true);
     try {
-      const lote = await proximoLote(form.data, empresaAtual.id);
-
       const { data: cabecalho, error: errCabecalho } = await supabase.from('recebimentos').insert([{
-        data: form.data,
-        fornecedor_id: form.fornecedor_id || null,
-        nota_fiscal: form.nota_fiscal || null,
-        responsavel_id: form.responsavel_id || null,
-        temperatura_c: form.temperatura_c ? Number(form.temperatura_c) : null,
+        data: header.data,
+        fornecedor_id: header.fornecedor_id || null,
+        nota_fiscal: header.nota_fiscal || null,
+        responsavel_id: header.responsavel_id || null,
         empresa_id: empresaAtual.id,
       }]).select('id').single();
 
       if (errCabecalho) { alert('Erro ao salvar: ' + errCabecalho.message); return; }
 
-      const { data: item, error: errItem } = await supabase.from('recebimento_itens').insert([{
-        recebimento_id: cabecalho.id,
-        lote,
-        materia_prima_id: form.materia_prima_id,
-        quantidade: Number(form.quantidade),
-        peso_nota_kg: form.peso_nota_kg ? Number(form.peso_nota_kg) : null,
-        custo_unitario: Number(form.custo_unitario),
-        numero_lote_fornecedor: form.numero_lote_fornecedor || null,
-        condicao_embalagem: form.condicao_embalagem || null,
-        status_recebimento: form.status_recebimento,
-        local_armazenamento: form.local_armazenamento || null,
-        validade: form.validade || null,
-        aprovado_por_id: form.aprovado_por_id || null,
-        empresa_id: empresaAtual.id,
-      }]).select('id').single();
+      const lotes = await proximosLotes(header.data, empresaAtual.id, itens.length);
+      const inseridos = [];
 
-      if (errItem) {
-        alert('Erro ao salvar: ' + errItem.message);
-        await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
-        return;
+      for (let i = 0; i < itens.length; i++) {
+        const it = itens[i];
+        const ehSimples = it._mp.controle_recebimento === 'simples';
+        const { data: inserido, error: errItem } = await supabase.from('recebimento_itens').insert([{
+          recebimento_id: cabecalho.id,
+          lote: lotes[i],
+          materia_prima_id: it.materia_prima_id,
+          quantidade: Number(it.quantidade),
+          peso_nota_kg: it.peso_nota_kg ? Number(it.peso_nota_kg) : null,
+          custo_unitario: Number(it.custo_unitario),
+          deposito_id: it.deposito_id || null,
+          local_armazenamento: it.local_armazenamento || null,
+          observacoes: it.observacoes || null,
+          validade: !ehSimples ? (it.validade || null) : null,
+          numero_lote_fornecedor: it._mp.controle_recebimento === 'lote' ? (it.numero_lote_fornecedor || null) : null,
+          condicao_embalagem: !ehSimples ? (it.condicao_embalagem || null) : null,
+          status_recebimento: !ehSimples ? it.status_recebimento : 'Aceito',
+          temperatura_c: it._mp.exige_temperatura && it.temperatura_c ? Number(it.temperatura_c) : null,
+          aprovado_por_id: it._mp.exige_inspecao ? (it.aprovado_por_id || null) : null,
+          empresa_id: empresaAtual.id,
+        }]).select('id').single();
+
+        if (errItem) {
+          alert(`Erro ao salvar o item ${i + 1} (${it._mp.nome}): ` + errItem.message);
+          for (const done of inseridos) await supabase.from('recebimento_itens').delete().eq('id', done.id);
+          await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
+          return;
+        }
+        inseridos.push({ id: inserido.id, fotoProdutoArquivo: it.fotoProdutoArquivo, exigeFoto: it._mp.exige_foto });
       }
 
-      if (form.notaFiscalArquivo) {
+      if (header.notaFiscalArquivo) {
         try {
-          const url = await uploadArquivoRecebimento(empresaAtual.id, cabecalho.id, 'nota-fiscal', form.notaFiscalArquivo);
+          const url = await uploadArquivoRecebimento(empresaAtual.id, cabecalho.id, 'nota-fiscal', header.notaFiscalArquivo);
           await supabase.from('recebimentos').update({ nota_fiscal_arquivo_url: url }).eq('id', cabecalho.id);
         } catch (upErr) {
           alert('Recebimento salvo, mas o anexo da nota fiscal falhou: ' + upErr.message);
         }
       }
-      if (form.fotoProdutoArquivo) {
-        try {
-          const url = await uploadArquivoRecebimento(empresaAtual.id, item.id, 'foto', form.fotoProdutoArquivo);
-          await supabase.from('recebimento_itens').update({ foto_produto_url: url }).eq('id', item.id);
-        } catch (upErr) {
-          alert('Recebimento salvo, mas o anexo da foto falhou: ' + upErr.message);
+      for (const done of inseridos) {
+        if (done.fotoProdutoArquivo) {
+          try {
+            const url = await uploadArquivoRecebimento(empresaAtual.id, done.id, 'foto', done.fotoProdutoArquivo);
+            await supabase.from('recebimento_itens').update({ foto_produto_url: url }).eq('id', done.id);
+          } catch (upErr) {
+            alert('Item salvo, mas o anexo da foto falhou: ' + upErr.message);
+          }
         }
       }
 
-      setForm(FORM_VAZIO());
+      setHeader(HEADER_VAZIO());
+      setItens([]);
       carregar();
     } finally {
       setSalvando(false);
     }
   }
 
-  async function excluir(r) {
-    if (!confirm('Excluir este recebimento? O saldo de estoque será recalculado.')) return;
+  async function excluirItem(r) {
+    if (!confirm('Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
     await removerAnexosRecebimento([r.foto_produto_url]);
     const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
     if (error) { alert('Erro ao excluir: ' + error.message); return; }
@@ -151,7 +192,7 @@ function Conteudo({ setFicha }) {
       .select('id', { count: 'exact', head: true })
       .eq('recebimento_id', r.recebimento_id);
     if (!count) {
-      await removerAnexosRecebimento([r.nota_fiscal_arquivo_url]);
+      await removerAnexosRecebimento([r.cabecalho?.nota_fiscal_arquivo_url]);
       await supabase.from('recebimentos').delete().eq('id', r.recebimento_id);
     }
     carregar();
@@ -167,28 +208,18 @@ function Conteudo({ setFicha }) {
     }
   }
 
-  function imprimir(r) {
+  function imprimirNota(grupo) {
     imprimirFicha(setFicha, {
       titulo: 'Ficha de Recebimento de Mercadoria',
-      numero: `Lote ${r.lote}`,
+      numero: grupo.cabecalho.nota_fiscal ? `NF ${grupo.cabecalho.nota_fiscal}` : `Recebimento ${fmtDate(grupo.cabecalho.data)}`,
       campos: [
-        { rot: 'Lote (interno)', valor: r.lote },
-        { rot: 'Lote do fornecedor', valor: r.numero_lote_fornecedor },
-        { rot: 'Data do recebimento', valor: fmtDate(r.data) },
-        { rot: 'Fornecedor', valor: r.fornecedores?.nome },
-        { rot: 'Matéria-prima', valor: r.materias_primas?.nome },
-        { rot: 'Peso conferido', valor: `${Number(r.quantidade)} ${r.materias_primas?.unidade || ''}` },
-        { rot: 'Peso na nota fiscal', valor: r.peso_nota_kg != null ? `${Number(r.peso_nota_kg)} ${r.materias_primas?.unidade || ''}` : '—' },
-        { rot: 'Custo unitário', valor: fmtMoney(r.custo_unitario) },
-        { rot: 'Custo total', valor: fmtMoney(Number(r.quantidade) * Number(r.custo_unitario)) },
-        { rot: 'Temperatura no recebimento', valor: r.temperatura_c != null ? `${r.temperatura_c} °C` : '—' },
-        { rot: 'Condição da embalagem', valor: r.condicao_embalagem },
-        { rot: 'Status do recebimento', valor: r.status_recebimento },
-        { rot: 'Nota fiscal (nº)', valor: r.nota_fiscal },
-        { rot: 'Validade', valor: fmtDate(r.validade) },
-        { rot: 'Local de armazenamento', valor: r.local_armazenamento },
-        { rot: 'Recebido por', valor: r.responsavel?.nome },
-        { rot: 'Aprovado por (qualidade)', valor: r.aprovado_por?.nome },
+        { rot: 'Data do recebimento', valor: fmtDate(grupo.cabecalho.data) },
+        { rot: 'Fornecedor', valor: grupo.cabecalho.fornecedores?.nome },
+        { rot: 'Nota fiscal (nº)', valor: grupo.cabecalho.nota_fiscal },
+        { rot: 'Recebido por', valor: grupo.cabecalho.responsavel?.nome },
+        ...grupo.itens.flatMap(it => [
+          { rot: `— ${it.materias_primas?.nome}`, valor: `Lote ${it.lote} · ${Number(it.quantidade)} ${it.materias_primas?.unidade || ''} · ${fmtMoney(it.custo_unitario)}/un · ${it.status_recebimento}` },
+        ]),
       ],
       assinaturas: ['Responsável pelo recebimento', 'Aprovação da qualidade'],
     });
@@ -204,144 +235,221 @@ function Conteudo({ setFicha }) {
     );
   }
 
-  const mpSelecionada = mps.find(m => m.id === form.materia_prima_id);
-  const alvo = mpSelecionada?.preco_alvo_kg ? Number(mpSelecionada.preco_alvo_kg) : null;
-  const custoAcimaDoAlvo = alvo && Number(form.custo_unitario) > alvo;
+  const grupos = [];
+  const grupoPorId = {};
+  for (const item of lista) {
+    let g = grupoPorId[item.recebimento_id];
+    if (!g) {
+      g = { recebimento_id: item.recebimento_id, cabecalho: item.cabecalho, itens: [] };
+      grupoPorId[item.recebimento_id] = g;
+      grupos.push(g);
+    }
+    g.itens.push(item);
+  }
 
   return (
     <>
       <div className="panel">
         <h3>Novo recebimento de mercadoria</h3>
-        <form onSubmit={registrar} className="form-grid">
-          <div><label>Data</label><input type="date" required value={form.data} onChange={e => setForm({ ...form, data: e.target.value })} /></div>
+        <form className="form-grid">
+          <div><label>Data</label><input type="date" required value={header.data} onChange={e => setHeader({ ...header, data: e.target.value })} /></div>
           <div><label>Fornecedor</label>
-            <select required value={form.fornecedor_id} onChange={e => setForm({ ...form, fornecedor_id: e.target.value })}>
+            <select required value={header.fornecedor_id} onChange={e => setHeader({ ...header, fornecedor_id: e.target.value })}>
               <option value="">Selecione…</option>
               {fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
-          <div><label>Lote do fornecedor</label><input value={form.numero_lote_fornecedor} onChange={e => setForm({ ...form, numero_lote_fornecedor: e.target.value })} /></div>
-          <div><label>Matéria-prima</label>
-            <select required value={form.materia_prima_id} onChange={e => setForm({ ...form, materia_prima_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
-            </select>
-          </div>
-          <div><label>Peso conferido</label><input type="number" step="0.001" required value={form.quantidade} onChange={e => setForm({ ...form, quantidade: e.target.value })} /></div>
-          <div><label>Peso na nota fiscal (kg)</label><input type="number" step="0.001" value={form.peso_nota_kg} onChange={e => setForm({ ...form, peso_nota_kg: e.target.value })} /></div>
-          <div>
-            <label>Custo unitário (R$)</label>
-            <input type="number" step="0.01" required value={form.custo_unitario} onChange={e => setForm({ ...form, custo_unitario: e.target.value })} />
-            {custoAcimaDoAlvo && (
-              <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: 'var(--amber-bright)' }}>
-                ⚠ Acima do preço-alvo ({fmtMoney(alvo)}/kg)
-              </span>
-            )}
-          </div>
-          <div><label>Temperatura no recebimento (°C)</label><input type="number" step="0.1" value={form.temperatura_c} onChange={e => setForm({ ...form, temperatura_c: e.target.value })} /></div>
-          <div><label>Condição da embalagem</label>
-            <select value={form.condicao_embalagem} onChange={e => setForm({ ...form, condicao_embalagem: e.target.value })}>
-              {CONDICOES_EMBALAGEM.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-          <div><label>Status do recebimento</label>
-            <select value={form.status_recebimento} onChange={e => setForm({ ...form, status_recebimento: e.target.value })}>
-              {STATUS_OPCOES.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div><label>Local de armazenamento</label><input placeholder="Câmara fria 2..." value={form.local_armazenamento} onChange={e => setForm({ ...form, local_armazenamento: e.target.value })} /></div>
-          <div><label>Nota fiscal (nº)</label><input value={form.nota_fiscal} onChange={e => setForm({ ...form, nota_fiscal: e.target.value })} /></div>
-          <div><label>Validade</label><input type="date" value={form.validade} onChange={e => setForm({ ...form, validade: e.target.value })} /></div>
+          <div><label>Nota fiscal (nº)</label><input value={header.nota_fiscal} onChange={e => setHeader({ ...header, nota_fiscal: e.target.value })} /></div>
           <div><label>Recebido por</label>
-            <select value={form.responsavel_id} onChange={e => setForm({ ...form, responsavel_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
-          </div>
-          <div><label>Aprovado por (qualidade)</label>
-            <select value={form.aprovado_por_id} onChange={e => setForm({ ...form, aprovado_por_id: e.target.value })}>
+            <select value={header.responsavel_id} onChange={e => setHeader({ ...header, responsavel_id: e.target.value })}>
               <option value="">Selecione…</option>
               {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div><label>Anexo da nota fiscal (PDF ou imagem)</label>
-            <input type="file" accept="application/pdf,image/*" onChange={e => setForm({ ...form, notaFiscalArquivo: e.target.files?.[0] || null })} />
+            <input type="file" accept="application/pdf,image/*" onChange={e => setHeader({ ...header, notaFiscalArquivo: e.target.files?.[0] || null })} />
           </div>
-          <div><label>Foto do produto</label>
-            <input type="file" accept="image/*" onChange={e => setForm({ ...form, fotoProdutoArquivo: e.target.files?.[0] || null })} />
-          </div>
-          <div><button className="btn" type="submit" disabled={salvando}>{salvando ? 'Gerando lote…' : 'Registrar e gerar lote'}</button></div>
         </form>
+
+        <h4 style={{ marginTop: 18 }}>Itens da nota</h4>
+        <div className="form-grid">
+          <div><label>Matéria-prima</label>
+            <select value={itemForm.materia_prima_id} onChange={e => setItemForm({ ...ITEM_VAZIO(), materia_prima_id: e.target.value })}>
+              <option value="">Selecione…</option>
+              {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+            </select>
+            {mpSelecionada && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 4 }}>Regra: {REGRA_LABEL[regra]}</span>}
+          </div>
+          {mpSelecionada && (
+            <>
+              <div><label>Peso conferido</label><input type="number" step="0.001" value={itemForm.quantidade} onChange={e => setItemForm({ ...itemForm, quantidade: e.target.value })} /></div>
+              <div><label>Peso na nota fiscal</label><input type="number" step="0.001" value={itemForm.peso_nota_kg} onChange={e => setItemForm({ ...itemForm, peso_nota_kg: e.target.value })} /></div>
+              <div>
+                <label>Custo unitário (R$)</label>
+                <input type="number" step="0.01" value={itemForm.custo_unitario} onChange={e => setItemForm({ ...itemForm, custo_unitario: e.target.value })} />
+                {custoAcimaDoAlvo && <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: 'var(--amber-bright)' }}>⚠ Acima do preço-alvo ({fmtMoney(alvo)}/kg)</span>}
+              </div>
+              <div><label>Depósito</label>
+                <select value={itemForm.deposito_id} onChange={e => setItemForm({ ...itemForm, deposito_id: e.target.value })}>
+                  <option value="">Selecione…</option>
+                  {depositos.map(d => <option key={d.id} value={d.id}>{d.nome} — {d.unidades?.nome}</option>)}
+                </select>
+              </div>
+
+              {regra !== 'simples' && (
+                <div>
+                  <label>Validade</label>
+                  <input type="date" value={itemForm.validade} onChange={e => setItemForm({ ...itemForm, validade: e.target.value })} />
+                  {validadeAbaixoDoMinimo && <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: 'var(--amber-bright)' }}>⚠ Abaixo da validade mínima exigida ({mpSelecionada.dias_minimos_validade} dias)</span>}
+                </div>
+              )}
+              {regra !== 'simples' && (
+                <div><label>Condição da embalagem</label>
+                  <select value={itemForm.condicao_embalagem} onChange={e => setItemForm({ ...itemForm, condicao_embalagem: e.target.value })}>
+                    {CONDICOES_EMBALAGEM.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
+              {regra !== 'simples' && (
+                <div><label>Status do recebimento</label>
+                  <select value={itemForm.status_recebimento} onChange={e => setItemForm({ ...itemForm, status_recebimento: e.target.value })}>
+                    {STATUS_OPCOES.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
+              )}
+              {regra === 'lote' && (
+                <div><label>Lote do fornecedor</label><input value={itemForm.numero_lote_fornecedor} onChange={e => setItemForm({ ...itemForm, numero_lote_fornecedor: e.target.value })} /></div>
+              )}
+              {mpSelecionada.exige_temperatura && (
+                <div><label>Temperatura no recebimento (°C)</label><input type="number" step="0.1" value={itemForm.temperatura_c} onChange={e => setItemForm({ ...itemForm, temperatura_c: e.target.value })} /></div>
+              )}
+              {mpSelecionada.exige_inspecao && (
+                <div><label>Aprovado por (qualidade)</label>
+                  <select value={itemForm.aprovado_por_id} onChange={e => setItemForm({ ...itemForm, aprovado_por_id: e.target.value })}>
+                    <option value="">Selecione…</option>
+                    {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  </select>
+                </div>
+              )}
+              {mpSelecionada.exige_foto && (
+                <div><label>Foto do produto</label>
+                  <input type="file" accept="image/*" onChange={e => setItemForm({ ...itemForm, fotoProdutoArquivo: e.target.files?.[0] || null })} />
+                </div>
+              )}
+              {mpSelecionada.exige_documento_sanitario && (
+                <div className="banner info" style={{ gridColumn: '1 / -1', fontSize: 12 }}>
+                  Este item exige documento sanitário do fornecedor — confira antes de aprovar (upload dedicado chega na Etapa 2.2, quando a inspeção virar uma tela própria).
+                </div>
+              )}
+              <div><label>Endereço específico (opcional)</label><input placeholder="Prateleira 3, gaveta 2..." value={itemForm.local_armazenamento} onChange={e => setItemForm({ ...itemForm, local_armazenamento: e.target.value })} /></div>
+              <div><label>Observações</label><input value={itemForm.observacoes} onChange={e => setItemForm({ ...itemForm, observacoes: e.target.value })} /></div>
+              <div><button className="btn secondary" type="button" onClick={adicionarItem}>Adicionar item à nota</button></div>
+            </>
+          )}
+        </div>
+
+        {itens.length > 0 && (
+          <div className="items-list" style={{ marginTop: 14 }}>
+            <label>Itens adicionados ({itens.length})</label>
+            {itens.map(it => (
+              <div className="item-line" key={it._key}>
+                <span>{it._mp.nome} <span className="muted">({REGRA_LABEL[it._mp.controle_recebimento]})</span></span>
+                <span className="num">{Number(it.quantidade)} {it._mp.unidade} · {fmtMoney(it.custo_unitario)}</span>
+                <button className="btn danger small" type="button" onClick={() => removerItemStaged(it._key)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14 }}>
+          <button className="btn" type="button" disabled={salvando || !itens.length} onClick={registrar}>
+            {salvando ? 'Registrando…' : `Registrar recebimento (${itens.length} ${itens.length === 1 ? 'item' : 'itens'})`}
+          </button>
+        </div>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-          Arquivos até 10 MB. Só recebimentos &quot;Aceito&quot; ou &quot;Aceito com ressalva&quot; contam no saldo de estoque.
+          O formulário do item muda conforme a regra de recebimento cadastrada na matéria-prima (aba Produtos).
+          Só itens &quot;Aceito&quot; ou &quot;Aceito com ressalva&quot; contam no saldo de estoque.
         </p>
       </div>
 
       <div className="panel">
-        <h3>Recebimentos ({lista.length})</h3>
+        <h3>Recebimentos ({grupos.length})</h3>
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Lote</th><th>Data</th><th>Matéria-prima</th><th>Fornecedor</th><th>Peso conferido</th><th>Peso nota</th><th>Custo unit.</th><th>Custo total</th><th>Status</th><th></th></tr>
+              <tr><th>Data</th><th>Nota fiscal</th><th>Fornecedor</th><th>Itens</th><th>Valor total</th><th></th></tr>
             </thead>
             <tbody>
-              {lista.length ? lista.map(r => {
-                const alvoR = r.materias_primas?.preco_alvo_kg ? Number(r.materias_primas.preco_alvo_kg) : null;
-                const acimaAlvo = alvoR && Number(r.custo_unitario) > alvoR;
-                const diffPeso = r.peso_nota_kg != null ? Number(r.quantidade) - Number(r.peso_nota_kg) : null;
-                const divergePeso = diffPeso !== null && Math.abs(diffPeso) > 0.01;
-                const tagStatus = r.status_recebimento === 'Rejeitado' ? 'bad' : r.status_recebimento === 'Aceito com ressalva' ? 'warn' : 'ok';
+              {grupos.length ? grupos.map(g => {
+                const valorTotal = g.itens.reduce((s, it) => s + Number(it.quantidade) * Number(it.custo_unitario), 0);
                 return (
-                  <Fragment key={r.id}>
+                  <Fragment key={g.recebimento_id}>
                     <tr>
-                      <td className="muted">{r.lote}</td>
-                      <td>{fmtDate(r.data)}</td>
-                      <td>{r.materias_primas?.nome || '—'}</td>
-                      <td>{r.fornecedores?.nome || '—'}</td>
-                      <td className="num">
-                        {Number(r.quantidade)} {r.materias_primas?.unidade || ''}
-                        {divergePeso && <div><span className="tag warn">Diverge {diffPeso > 0 ? '+' : ''}{diffPeso.toFixed(3)}</span></div>}
-                      </td>
-                      <td className="num">{r.peso_nota_kg != null ? Number(r.peso_nota_kg) : '—'}</td>
-                      <td className="num">
-                        {fmtMoney(r.custo_unitario)}
-                        {acimaAlvo && <div><span className="tag warn">Acima do alvo</span></div>}
-                      </td>
-                      <td className="num">{fmtMoney(Number(r.quantidade) * Number(r.custo_unitario))}</td>
-                      <td><span className={`tag ${tagStatus}`}>{r.status_recebimento}</span></td>
+                      <td>{fmtDate(g.cabecalho.data)}</td>
+                      <td className="muted">{g.cabecalho.nota_fiscal || '—'}</td>
+                      <td>{g.cabecalho.fornecedores?.nome || '—'}</td>
+                      <td className="num">{g.itens.length}</td>
+                      <td className="num">{fmtMoney(valorTotal)}</td>
                       <td>
                         <div className="row-actions">
-                          <button className="btn secondary small" onClick={() => setExpandido({ ...expandido, [r.id]: !expandido[r.id] })}>
-                            {expandido[r.id] ? 'Ocultar' : 'Detalhes'}
+                          <button className="btn secondary small" onClick={() => setExpandido({ ...expandido, [g.recebimento_id]: !expandido[g.recebimento_id] })}>
+                            {expandido[g.recebimento_id] ? 'Ocultar' : 'Detalhes'}
                           </button>
-                          <button className="btn secondary small" onClick={() => imprimir(r)}>Imprimir ficha</button>
-                          <button className="btn danger" onClick={() => excluir(r)}>Excluir</button>
+                          <button className="btn secondary small" onClick={() => imprimirNota(g)}>Imprimir ficha</button>
                         </div>
                       </td>
                     </tr>
-                    {expandido[r.id] && (
+                    {expandido[g.recebimento_id] && (
                       <tr>
-                        <td colSpan={10}>
-                          <div className="items-list" style={{ fontSize: 12.5 }}>
-                            <div><span className="muted">Lote do fornecedor:</span> {r.numero_lote_fornecedor || '—'}</div>
-                            <div><span className="muted">Temperatura:</span> {r.temperatura_c != null ? `${r.temperatura_c} °C` : '—'}</div>
-                            <div><span className="muted">Condição da embalagem:</span> {r.condicao_embalagem || '—'}</div>
-                            <div><span className="muted">Local de armazenamento:</span> {r.local_armazenamento || '—'}</div>
-                            <div><span className="muted">Nota fiscal (nº):</span> {r.nota_fiscal || '—'}</div>
-                            <div><span className="muted">Validade:</span> {fmtDate(r.validade)}</div>
-                            <div><span className="muted">Recebido por:</span> {r.responsavel?.nome || '—'}</div>
-                            <div><span className="muted">Aprovado por (qualidade):</span> {r.aprovado_por?.nome || '—'}</div>
-                            <div className="row-actions" style={{ marginTop: 8 }}>
-                              <button className="btn secondary small" disabled={!r.nota_fiscal_arquivo_url} onClick={() => verAnexo(r.nota_fiscal_arquivo_url)}>Ver nota fiscal anexada</button>
-                              <button className="btn secondary small" disabled={!r.foto_produto_url} onClick={() => verAnexo(r.foto_produto_url)}>Ver foto do produto</button>
-                            </div>
+                        <td colSpan={6}>
+                          <div className="table-wrap">
+                            <table>
+                              <thead>
+                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Depósito</th><th>Validade</th><th>Status</th><th></th></tr>
+                              </thead>
+                              <tbody>
+                                {g.itens.map(it => {
+                                  const alvoR = it.materias_primas?.preco_alvo_kg ? Number(it.materias_primas.preco_alvo_kg) : null;
+                                  const acimaAlvo = alvoR && Number(it.custo_unitario) > alvoR;
+                                  const diffPeso = it.peso_nota_kg != null ? Number(it.quantidade) - Number(it.peso_nota_kg) : null;
+                                  const divergePeso = diffPeso !== null && Math.abs(diffPeso) > 0.01;
+                                  const tagStatus = it.status_recebimento === 'Rejeitado' ? 'bad' : it.status_recebimento === 'Aceito com ressalva' ? 'warn' : 'ok';
+                                  return (
+                                    <tr key={it.id}>
+                                      <td className="muted">{it.lote}</td>
+                                      <td>{it.materias_primas?.nome || '—'}</td>
+                                      <td className="num">
+                                        {Number(it.quantidade)} {it.materias_primas?.unidade || ''}
+                                        {divergePeso && <div><span className="tag warn">Diverge {diffPeso > 0 ? '+' : ''}{diffPeso.toFixed(3)}</span></div>}
+                                      </td>
+                                      <td className="num">
+                                        {fmtMoney(it.custo_unitario)}
+                                        {acimaAlvo && <div><span className="tag warn">Acima do alvo</span></div>}
+                                      </td>
+                                      <td className="muted">{it.depositos ? `${it.depositos.nome} — ${it.depositos.unidades?.nome}` : '—'}</td>
+                                      <td>{fmtDate(it.validade)}</td>
+                                      <td><span className={`tag ${tagStatus}`}>{it.status_recebimento}</span></td>
+                                      <td>
+                                        <div className="row-actions">
+                                          {it.foto_produto_url && <button className="btn secondary small" onClick={() => verAnexo(it.foto_produto_url)}>Ver foto</button>}
+                                          <button className="btn danger small" onClick={() => excluirItem(it)}>Excluir</button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
+                          {g.cabecalho.nota_fiscal_arquivo_url && (
+                            <button className="btn secondary small" style={{ marginTop: 8 }} onClick={() => verAnexo(g.cabecalho.nota_fiscal_arquivo_url)}>Ver nota fiscal anexada</button>
+                          )}
                         </td>
                       </tr>
                     )}
                   </Fragment>
                 );
-              }) : <tr className="empty-row"><td colSpan={10}>Nenhum recebimento lançado.</td></tr>}
+              }) : <tr className="empty-row"><td colSpan={6}>Nenhum recebimento lançado.</td></tr>}
             </tbody>
           </table>
         </div>

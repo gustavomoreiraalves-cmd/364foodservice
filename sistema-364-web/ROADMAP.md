@@ -90,6 +90,7 @@ documenta o schema real (idempotente — não faz nada se já aplicado).
 12. `supabase/atualizacao_11_fundacao_suprimentos.sql`
 13. `supabase/atualizacao_12_audit_log.sql`
 14. `supabase/atualizacao_13_rls_permissao_modulo.sql`
+15. `supabase/atualizacao_14_recebimento_multiitem.sql`
 
 > Nota: em jul/2026 todos os 10 primeiros arquivos acima já foram executados no projeto
 > Supabase em uso (`yvouevyfhtmbtankoofx`), e o efeito do 11º (`recebimentos` dividida em
@@ -118,11 +119,25 @@ centros de custo, indicadores). Etapas:
       reforço de RLS por permissão de módulo nas tabelas novas (`atualizacao_11/12/13`).
       Telas novas: `/depositos`, `/centros-custo`; `/produtos` ganhou os campos de
       regra de recebimento no formulário de matéria-prima.
-- [ ] **Etapa 2 — Recebimento**: dividir de vez o cadastro em cabeçalho (nota fiscal,
-      múltiplos itens) — a base já existe desde a Etapa 0 (`recebimentos` +
-      `recebimento_itens`, ver seção acima) — mais formulário dinâmico por item
-      conforme `controle_recebimento`, entidade de inspeção de qualidade separada
-      (hoje os campos de qualidade ainda são colunas soltas em `recebimento_itens`).
+- [x] **Etapa 2.1 — Recebimento multi-item + depósito real**: `/recebimentos` deixou
+      de gravar 1 item por envio e passou a aceitar N itens numa mesma nota fiscal
+      (cabeçalho preenchido uma vez, itens adicionados a uma lista antes de
+      "Registrar recebimento"), com o formulário do item mudando dinamicamente
+      conforme `controle_recebimento` da matéria-prima selecionada (Simples esconde
+      validade/lote/qualidade; Validade controlada mostra validade+condição+status;
+      Lote completo mostra tudo, incluindo lote do fornecedor). `deposito_id` liga o
+      item a um depósito real (Etapa 1), com `local_armazenamento` mantido como
+      complemento (endereço específico dentro do depósito). `temperatura_c` migrou do
+      cabeçalho para o item (a exigência é por item, não por nota) — a coluna antiga
+      em `recebimentos` fica órfã até a Etapa 2.2. Lotes sequenciais de uma mesma
+      submissão são gerados em lote via `proximosLotes()` (evita 1 consulta por item
+      e corrida entre itens). Testado ponta a ponta em produção (nota com 2 itens de
+      regras diferentes, exclusão limpa depois). `supabase/atualizacao_14_recebimento_multiitem.sql`.
+- [ ] **Etapa 2.2 — Inspeção de qualidade como entidade separada**: `inspecoes_qualidade`
+      com o status sanitário completo (pendente/aprovado/aprovado com ressalva/
+      quarentena/rejeitado/devolvido, hoje só 3 valores em `status_recebimento`), e a
+      view de estoque passa a considerar esse status (lote em quarentena/rejeitado não
+      conta no saldo nem pode ser usado).
 - [ ] **Etapa 3 — Estoque**: ledger (`stock_movements` + `stock_balances`),
       substituindo as views atuais como fonte principal do `/estoque`.
 - [ ] **Etapa 4 — Requisições internas** (`/requisicoes`)

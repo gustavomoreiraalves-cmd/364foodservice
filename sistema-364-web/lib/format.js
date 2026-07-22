@@ -30,6 +30,21 @@ export async function proximoLote(dataStr, empresaId) {
   return prefixo + String(n + 1).padStart(3, '0');
 }
 
+// Gera `quantidade` códigos de lote sequenciais em uma única consulta —
+// usado no recebimento multi-item, onde vários itens da mesma nota
+// precisam de lotes distintos numa única submissão (evita 1 consulta por
+// item, e evita a corrida de duas chamadas a proximoLote() lendo a mesma
+// contagem antes de qualquer insert acontecer).
+export async function proximosLotes(dataStr, empresaId, quantidade) {
+  const prefixo = `LT-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
+  const [r1, r2] = await Promise.all([
+    supabase.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
+    supabase.from('producoes').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
+  ]);
+  const n = (r1.data?.length || 0) + (r2.data?.length || 0);
+  return Array.from({ length: quantidade }, (_, i) => prefixo + String(n + 1 + i).padStart(3, '0'));
+}
+
 // Gera o próximo código de produto usando o prefixo da empresa (ex: 0364-XXX
 // para o Food Service, STK-XXX para o Steakhouse), contando só os produtos
 // dessa empresa com esse prefixo.
