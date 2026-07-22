@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
+import { useEmpresaAtual } from '../../lib/empresa';
 
 const FORM_VAZIO = { nome: '', cargo: 'Produção', telefone: '', cpf: '' };
 const CARGOS = ['Recebimento', 'Produção', 'Embalagem', 'Estoque', 'Vendas', 'Administrativo', 'Outro'];
@@ -15,22 +16,24 @@ export default function FuncionariosPage() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(FORM_VAZIO);
 
   async function carregar() {
+    if (!empresaAtual) return;
     setLoading(true);
-    const { data } = await supabase.from('funcionarios').select('*').order('nome');
+    const { data } = await supabase.from('funcionarios').select('*').eq('empresa_id', empresaAtual.id).order('nome');
     setLista(data || []);
     setLoading(false);
   }
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
   async function adicionar(e) {
     e.preventDefault();
-    const { error } = await supabase.from('funcionarios').insert([{ ...form, ativo: true }]);
+    const { error } = await supabase.from('funcionarios').insert([{ ...form, ativo: true, empresa_id: empresaAtual.id }]);
     if (error) { alert('Erro ao salvar: ' + error.message); return; }
     setForm(FORM_VAZIO);
     carregar();

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
+import { useEmpresaAtual } from '../../lib/empresa';
 
 const FORM_VAZIO = { nome: '', cnpj: '', categoria: 'Carnes', contato: '', telefone: '', email: '' };
 const CATEGORIAS = ['Carnes', 'Temperos', 'Embalagens', 'Equipamentos', 'Serviços', 'Outros'];
@@ -15,22 +16,24 @@ export default function FornecedoresPage() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(FORM_VAZIO);
 
   async function carregar() {
+    if (!empresaAtual) return;
     setLoading(true);
-    const { data, error } = await supabase.from('fornecedores').select('*').order('nome');
+    const { data, error } = await supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome');
     if (!error) setLista(data);
     setLoading(false);
   }
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
   async function adicionar(e) {
     e.preventDefault();
-    const { error } = await supabase.from('fornecedores').insert([form]);
+    const { error } = await supabase.from('fornecedores').insert([{ ...form, empresa_id: empresaAtual.id }]);
     if (!error) {
       setForm(FORM_VAZIO);
       carregar();

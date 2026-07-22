@@ -79,14 +79,3 @@ select u.id, 'Administrador', 'Administrador'
 from auth.users u
 where u.email = 'admin@364.local'
   and not exists (select 1 from public.funcionarios f where f.user_id = u.id);
-
-V
-
-COSTELA DEFUMADA 500G	Defumados Premium
-COSTELA DESFIADA 500G	Defumados Premium
-COSTELINHA BBQ 500G	Defumados Premium
-CUPIM DEFUMADO 500G	Defumados Premium
-TORRESMO DE ROLO 500G	Defumados Premium
-HAMBÚRGUER DE COSTELA 500G	Defumados Premium
-ESCONDIDINHO DE COSTELA 700G	Petiscos e Acompanhamentos
-CROQUETE DE COSTELA 500G	Petiscos e Acompanhamentos

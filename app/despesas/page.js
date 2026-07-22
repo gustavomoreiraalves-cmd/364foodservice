@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
+import { useEmpresaAtual } from '../../lib/empresa';
 
 const FORM_VAZIO = () => ({ data: hoje(), descricao: '', valor: '', responsavel_id: '' });
 
@@ -15,23 +16,25 @@ export default function DespesasPage() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [funcionarios, setFuncionarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(FORM_VAZIO());
 
   async function carregar() {
+    if (!empresaAtual) return;
     setLoading(true);
     const [r1, r2] = await Promise.all([
-      supabase.from('despesas').select('*, funcionarios(nome)').order('data', { ascending: false }),
-      supabase.from('funcionarios').select('id, nome').eq('ativo', true).order('nome'),
+      supabase.from('despesas').select('*, funcionarios(nome)').eq('empresa_id', empresaAtual.id).order('data', { ascending: false }),
+      supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
     setLista(r1.data || []);
     setFuncionarios(r2.data || []);
     setLoading(false);
   }
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
   async function adicionar(e) {
     e.preventDefault();
@@ -40,6 +43,7 @@ function Conteudo() {
       descricao: form.descricao,
       valor: Number(form.valor),
       responsavel_id: form.responsavel_id || null,
+      empresa_id: empresaAtual.id,
     }]);
     if (error) { alert('Erro ao salvar: ' + error.message); return; }
     setForm(FORM_VAZIO());

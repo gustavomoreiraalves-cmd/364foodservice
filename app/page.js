@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { fmtMoney, fmtDate, hoje, diasEntre } from '../lib/format';
 import AppShell from '../components/AppShell';
+import { useEmpresaAtual } from '../lib/empresa';
 
 export default function Home() {
   return (
@@ -13,27 +14,36 @@ export default function Home() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [dados, setDados] = useState(null);
 
   useEffect(() => {
+    if (!empresaAtual) return;
     async function carregar() {
+      const eid = empresaAtual.id;
       const [pedidos, estoqueMP, recebimentos, produtos, clientes] = await Promise.all([
-        supabase.from('pedidos').select('*, clientes(nome), pedido_itens(quantidade, preco_unitario)').order('created_at', { ascending: false }),
-        supabase.from('vw_estoque_materia_prima').select('*'),
-        supabase.from('recebimentos').select('*, materias_primas(nome, unidade), fornecedores(nome)').order('created_at', { ascending: false }),
-        supabase.from('produtos').select('id'),
-        supabase.from('clientes').select('id'),
+        supabase.from('pedidos').select('*, clientes(nome), pedido_itens(quantidade, preco_unitario)').eq('empresa_id', eid).order('created_at', { ascending: false }),
+        supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid),
+        supabase.from('recebimento_itens')
+          .select('id, quantidade, validade, lote, materia_prima_id, materias_primas(nome, unidade), recebimentos!inner(data, fornecedores(nome))')
+          .eq('empresa_id', eid).order('created_at', { ascending: false }),
+        supabase.from('produtos').select('id').eq('empresa_id', eid),
+        supabase.from('clientes').select('id').eq('empresa_id', eid),
       ]);
       setDados({
         pedidos: pedidos.data || [],
         estoqueMP: estoqueMP.data || [],
-        recebimentos: recebimentos.data || [],
+        recebimentos: (recebimentos.data || []).map(r => ({
+          ...r,
+          data: r.recebimentos?.data,
+          fornecedores: r.recebimentos?.fornecedores,
+        })),
         nProdutos: produtos.data?.length || 0,
         nClientes: clientes.data?.length || 0,
       });
     }
     carregar();
-  }, []);
+  }, [empresaAtual?.id]);
 
   if (!dados) return <p className="muted">Carregando…</p>;
 

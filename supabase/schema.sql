@@ -60,7 +60,7 @@ create table ficha_tecnica (
 -- ---------- RECEBIMENTOS (entrada de matéria-prima = nascimento do lote) ----------
 create table recebimentos (
   id uuid primary key default gen_random_uuid(),
-  lote text not null,                     -- padrão LT-DD/MM/AA-XXX
+  lote text not null,                     -- padrão LT-AAMMDD-###
   data date not null default current_date,
   fornecedor_id uuid references fornecedores(id),
   materia_prima_id uuid not null references materias_primas(id),

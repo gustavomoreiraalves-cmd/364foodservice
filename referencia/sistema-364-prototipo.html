@@ -225,7 +225,7 @@ function saveDB(){
       await window.storage.set(STORAGE_KEY, JSON.stringify(DB), true);
       el.textContent = '●  sincronizado'; el.classList.remove('saving');
     }catch(e){
-      el.textContent = '●  erro ao salvar'; 
+      el.textContent = '●  erro ao salvar';
       console.error(e);
     }
   }, 300);

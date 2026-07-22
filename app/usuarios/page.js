@@ -7,7 +7,7 @@ import AppShell from '../../components/AppShell';
 // Aba exclusiva de administradores: cria e edita usuários e define quais
 // abas cada um pode acessar. Requer SUPABASE_SERVICE_ROLE_KEY no .env.local.
 
-const FORM_VAZIO = { id: null, nome: '', usuario: '', email: '', telefone: '', cpf: '', senha: '', permissoes: [], admin: false };
+const FORM_VAZIO = { id: null, nome: '', usuario: '', email: '', telefone: '', cpf: '', senha: '', permissoes: [], admin: false, empresas: [] };
 
 export default function UsuariosPage() {
   return (
@@ -19,6 +19,7 @@ export default function UsuariosPage() {
 
 function Conteudo() {
   const [lista, setLista] = useState([]);
+  const [empresasDisponiveis, setEmpresasDisponiveis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
   const [form, setForm] = useState(FORM_VAZIO);
@@ -45,8 +46,9 @@ function Conteudo() {
     setLoading(true);
     setErro(null);
     try {
-      const { usuarios } = await api('GET');
+      const { usuarios, empresasDisponiveis } = await api('GET');
       setLista(usuarios);
+      setEmpresasDisponiveis(empresasDisponiveis || []);
     } catch (e) {
       setErro(e.message);
     }
@@ -64,6 +66,15 @@ function Conteudo() {
     }));
   }
 
+  function toggleFormEmpresa(empresaId) {
+    setForm(f => ({
+      ...f,
+      empresas: f.empresas.includes(empresaId)
+        ? f.empresas.filter(e => e !== empresaId)
+        : [...f.empresas, empresaId],
+    }));
+  }
+
   function iniciarEdicao(u) {
     setForm({
       id: u.id,
@@ -75,6 +86,7 @@ function Conteudo() {
       senha: '',
       permissoes: u.permissoes.filter(m => m !== 'admin'),
       admin: u.permissoes.includes('admin'),
+      empresas: u.empresas || [],
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -86,15 +98,18 @@ function Conteudo() {
     setSalvando(true);
     try {
       const permissoes = form.admin ? ['admin'] : form.permissoes;
+      // Admin enxerga todas as empresas automaticamente — não envia `empresas`
+      // (undefined) para não mexer no que já existe de acesso explícito.
+      const empresas = form.admin ? undefined : form.empresas;
       if (editando) {
         await api('PATCH', {
           id: form.id, nome: form.nome, email: form.email, telefone: form.telefone,
-          cpf: form.cpf, senha: form.senha || undefined, permissoes,
+          cpf: form.cpf, senha: form.senha || undefined, permissoes, empresas,
         });
       } else {
         await api('POST', {
           nome: form.nome, usuario: form.usuario, email: form.email,
-          telefone: form.telefone, cpf: form.cpf, senha: form.senha, permissoes,
+          telefone: form.telefone, cpf: form.cpf, senha: form.senha, permissoes, empresas,
         });
       }
       setForm(FORM_VAZIO);
@@ -138,7 +153,7 @@ function Conteudo() {
           <div style={{ margin: '16px 0 6px' }}><label>Abas de acesso</label></div>
           <label className="check-line" style={{ fontWeight: 700, color: 'var(--amber-bright)', marginRight: 16 }}>
             <input type="checkbox" checked={form.admin} onChange={e => setForm({ ...form, admin: e.target.checked })} />
-            Administrador (todas as abas)
+            Administrador (todas as abas e empresas)
           </label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 8, opacity: form.admin ? 0.4 : 1 }}>
             {MODULOS.map(m => (
@@ -150,6 +165,21 @@ function Conteudo() {
                   onChange={() => toggleFormModulo(m.id)}
                 />
                 {m.label}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ margin: '16px 0 6px' }}><label>Empresas com acesso</label></div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', opacity: form.admin ? 0.4 : 1 }}>
+            {empresasDisponiveis.map(emp => (
+              <label key={emp.id} className="check-line">
+                <input
+                  type="checkbox"
+                  disabled={form.admin}
+                  checked={form.empresas.includes(emp.id)}
+                  onChange={() => toggleFormEmpresa(emp.id)}
+                />
+                {emp.nome}
               </label>
             ))}
           </div>
@@ -172,7 +202,7 @@ function Conteudo() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Nome completo</th><th>Usuário</th><th>E-mail</th><th>Telefone</th><th>CPF</th><th>Abas de acesso</th><th></th></tr>
+                <tr><th>Nome completo</th><th>Usuário</th><th>E-mail</th><th>Telefone</th><th>CPF</th><th>Abas de acesso</th><th>Empresas</th><th></th></tr>
               </thead>
               <tbody>
                 {lista.length ? lista.map(u => {
@@ -195,6 +225,16 @@ function Conteudo() {
                             : <span className="muted">sem acesso</span>)}
                       </td>
                       <td>
+                        {ehAdmin
+                          ? <span className="muted">todas</span>
+                          : (u.empresas.length
+                            ? u.empresas.map(eid => {
+                              const emp = empresasDisponiveis.find(x => x.id === eid);
+                              return <span key={eid} className="tag ok" style={{ marginRight: 4 }}>{emp ? emp.nome : eid}</span>;
+                            })
+                            : <span className="muted">nenhuma</span>)}
+                      </td>
+                      <td>
                         <div className="row-actions">
                           <button className="btn secondary small" onClick={() => iniciarEdicao(u)}>Editar</button>
                           <button className="btn danger" onClick={() => excluir(u)}>Excluir</button>
@@ -202,7 +242,7 @@ function Conteudo() {
                       </td>
                     </tr>
                   );
-                }) : <tr className="empty-row"><td colSpan={7}>Nenhum usuário.</td></tr>}
+                }) : <tr className="empty-row"><td colSpan={8}>Nenhum usuário.</td></tr>}
               </tbody>
             </table>
           </div>

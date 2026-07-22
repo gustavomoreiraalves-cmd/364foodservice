@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, custoMedioMP } from '../../lib/format';
 import AppShell from '../../components/AppShell';
+import { useEmpresaAtual } from '../../lib/empresa';
 
 export default function RelatoriosPage() {
   return (
@@ -13,23 +14,26 @@ export default function RelatoriosPage() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [d, setD] = useState(null);
 
   useEffect(() => {
+    if (!empresaAtual) return;
     async function carregar() {
+      const eid = empresaAtual.id;
       const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps] = await Promise.all([
-        supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)'),
-        supabase.from('producoes').select('*, produtos(nome)').order('data'),
-        supabase.from('recebimentos').select('fornecedor_id, materia_prima_id, quantidade, custo_unitario'),
-        supabase.from('despesas').select('valor'),
-        supabase.from('fornecedores').select('id, nome').order('nome'),
-        supabase.from('ficha_tecnica').select('*'),
-        supabase.from('materias_primas').select('*'),
+        supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
+        supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id)').eq('empresa_id', eid),
+        supabase.from('despesas').select('valor').eq('empresa_id', eid),
+        supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
+        supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
+        supabase.from('materias_primas').select('*').eq('empresa_id', eid),
       ]);
       setD({
         pedidos: pedidos.data || [],
         producoes: producoes.data || [],
-        recebimentos: recebimentos.data || [],
+        recebimentos: (recebimentos.data || []).map(r => ({ ...r, fornecedor_id: r.recebimentos?.fornecedor_id })),
         despesas: despesas.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
@@ -37,7 +41,7 @@ function Conteudo() {
       });
     }
     carregar();
-  }, []);
+  }, [empresaAtual?.id]);
 
   if (!d) return <p className="muted">Carregando…</p>;
 

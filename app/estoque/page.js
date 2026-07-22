@@ -3,6 +3,14 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje, diasEntre, custoMedioMP } from '../../lib/format';
 import AppShell from '../../components/AppShell';
+import { useEmpresaAtual } from '../../lib/empresa';
+
+function primeiroStatus(inspecoes) {
+  const insp = Array.isArray(inspecoes) ? inspecoes[0] : inspecoes;
+  return insp?.status ?? null;
+}
+
+const STATUS_BLOQUEADO = { quarentena: 'Quarentena', rejeitado: 'Rejeitado', devolvido: 'Devolvido', pendente: 'Pendente' };
 
 export default function EstoquePage() {
   return (
@@ -13,29 +21,30 @@ export default function EstoquePage() {
 }
 
 function Conteudo() {
+  const { empresaAtual } = useEmpresaAtual();
   const [dados, setDados] = useState(null);
 
   useEffect(() => {
+    if (!empresaAtual) return;
     async function carregar() {
-      const [mp, prod, recs, producoes, lotes, defumado] = await Promise.all([
-        supabase.from('vw_estoque_materia_prima').select('*').order('nome'),
-        supabase.from('vw_estoque_produto').select('*').order('codigo'),
-        supabase.from('recebimentos').select('materia_prima_id, quantidade, custo_unitario'),
-        supabase.from('producoes').select('produto_id, quantidade, custo_total'),
-        supabase.from('recebimentos').select('lote, data, validade, materia_prima_id, materias_primas(nome)').order('created_at', { ascending: false }),
-        supabase.from('vw_estoque_defumado').select('*').order('nome'),
+      const eid = empresaAtual.id;
+      const [mp, prod, saldos, producoes, lotes] = await Promise.all([
+        supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid).order('nome'),
+        supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid).order('codigo'),
+        supabase.from('stock_balances').select('materia_prima_id, quantidade, custo_unitario').eq('empresa_id', eid),
+        supabase.from('producoes').select('produto_id, quantidade, custo_total').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('lote, validade, materia_prima_id, materias_primas(nome), recebimentos(data), inspecoes_qualidade(status)').eq('empresa_id', eid).order('created_at', { ascending: false }),
       ]);
       setDados({
         estoqueMP: mp.data || [],
         estoqueProd: prod.data || [],
-        recebimentos: recs.data || [],
+        saldosLote: saldos.data || [],
         producoes: producoes.data || [],
-        lotes: lotes.data || [],
-        defumado: defumado.error ? null : (defumado.data || []),
+        lotes: (lotes.data || []).map(r => ({ ...r, data: r.recebimentos?.data, status_qualidade: primeiroStatus(r.inspecoes_qualidade) })),
       });
     }
     carregar();
-  }, []);
+  }, [empresaAtual?.id]);
 
   if (!dados) return <p className="muted">Carregando…</p>;
 
@@ -57,7 +66,7 @@ function Conteudo() {
               <tbody>
                 {dados.estoqueMP.length ? dados.estoqueMP.map(m => {
                   const saldo = Number(m.saldo);
-                  const custo = custoMedioMP(m.materia_prima_id, dados.recebimentos, []);
+                  const custo = custoMedioMP(m.materia_prima_id, dados.saldosLote, []);
                   return (
                     <tr key={m.materia_prima_id}>
                       <td>{m.nome}</td>
@@ -96,27 +105,6 @@ function Conteudo() {
         </div>
       </div>
 
-      {dados.defumado && (
-        <div className="panel">
-          <h3>Proteína defumada disponível (aguardando embalagem)</h3>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Matéria-prima defumada</th><th>Total defumado</th><th>Já embalado</th><th>Disponível</th></tr></thead>
-              <tbody>
-                {dados.defumado.filter(d => Number(d.total_defumado) > 0).length ? dados.defumado.filter(d => Number(d.total_defumado) > 0).map(d => (
-                  <tr key={d.materia_prima_id}>
-                    <td>{d.nome}</td>
-                    <td className="num">{Number(d.total_defumado).toFixed(2)} kg</td>
-                    <td className="num">{Number(d.total_embalado).toFixed(2)} kg</td>
-                    <td className={`num ${Number(d.saldo_kg) <= 0 ? 'muted' : ''}`}>{Number(d.saldo_kg).toFixed(2)} kg</td>
-                  </tr>
-                )) : <tr className="empty-row"><td colSpan={4}>Nenhuma defumação registrada ainda.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       <div className="panel">
         <h3>Lotes de matéria-prima em aberto</h3>
         <div className="table-wrap">
@@ -128,6 +116,7 @@ function Conteudo() {
                 let sit = <span className="tag ok">OK</span>;
                 if (d !== null && d < 0) sit = <span className="tag bad">Vencido</span>;
                 else if (d !== null && d <= 7) sit = <span className="tag warn">Vence em {d}d</span>;
+                if (STATUS_BLOQUEADO[r.status_qualidade]) sit = <span className="tag bad">{STATUS_BLOQUEADO[r.status_qualidade]}</span>;
                 return (
                   <tr key={i}>
                     <td className="muted">{r.lote}</td>
