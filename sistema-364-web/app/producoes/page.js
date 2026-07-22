@@ -42,7 +42,7 @@ function Conteudo({ setFicha }) {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
       supabase.from('materias_primas').select('*').eq('empresa_id', eid),
-      supabase.from('recebimentos').select('materia_prima_id, quantidade, custo_unitario, status_recebimento').eq('empresa_id', eid),
+      supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, inspecoes_qualidade(status)').eq('empresa_id', eid),
       supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
     ]);
@@ -50,7 +50,10 @@ function Conteudo({ setFicha }) {
     setProdutos(r2.data || []);
     setFichasTec(r3.data || []);
     setMps(r4.data || []);
-    setRecebimentos(r5.data || []);
+    setRecebimentos((r5.data || []).map(r => ({
+      ...r,
+      status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
+    })));
     setEstoqueMP(r6.data || []);
     setFuncionarios(r7.data || []);
     setLoading(false);

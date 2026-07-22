@@ -91,6 +91,7 @@ documenta o schema real (idempotente — não faz nada se já aplicado).
 13. `supabase/atualizacao_12_audit_log.sql`
 14. `supabase/atualizacao_13_rls_permissao_modulo.sql`
 15. `supabase/atualizacao_14_recebimento_multiitem.sql`
+16. `supabase/atualizacao_15_inspecoes_qualidade.sql`
 
 > Nota: em jul/2026 todos os 10 primeiros arquivos acima já foram executados no projeto
 > Supabase em uso (`yvouevyfhtmbtankoofx`), e o efeito do 11º (`recebimentos` dividida em
@@ -133,11 +134,25 @@ centros de custo, indicadores). Etapas:
       submissão são gerados em lote via `proximosLotes()` (evita 1 consulta por item
       e corrida entre itens). Testado ponta a ponta em produção (nota com 2 itens de
       regras diferentes, exclusão limpa depois). `supabase/atualizacao_14_recebimento_multiitem.sql`.
-- [ ] **Etapa 2.2 — Inspeção de qualidade como entidade separada**: `inspecoes_qualidade`
-      com o status sanitário completo (pendente/aprovado/aprovado com ressalva/
-      quarentena/rejeitado/devolvido, hoje só 3 valores em `status_recebimento`), e a
-      view de estoque passa a considerar esse status (lote em quarentena/rejeitado não
-      conta no saldo nem pode ser usado).
+- [x] **Etapa 2.2 — Inspeção de qualidade como entidade separada**: `inspecoes_qualidade`
+      com o status sanitário completo (pendente/aprovado/aprovado_com_ressalva/
+      quarentena/rejeitado/devolvido — antes só 3 valores soltos em
+      `status_recebimento`), incluindo motivo de rejeição/quarentena, documento
+      sanitário e foto próprios (antes só a foto vivia em `recebimento_itens`). Os
+      dados existentes foram migrados (status antigo → novo, mapeamento 1:1) e as
+      colunas antigas (`status_recebimento`, `condicao_embalagem`, `temperatura_c`,
+      `aprovado_por_id`, `foto_produto_url` em `recebimento_itens`; `temperatura_c`
+      órfã em `recebimentos`) foram removidas — não há mais duplicidade de dados de
+      qualidade. `vw_estoque_materia_prima` e o trigger de embalagem→produção passam a
+      considerar `inspecoes_qualidade.status`: só aprovado/aprovado_com_ressalva contam
+      no saldo — quarentena e rejeitado ficam registrados mas fora do estoque
+      disponível (não podem ser "usados"). Durante o levantamento também foram achados
+      e corrigidos 2 bugs preexistentes (não desta etapa, remanescentes da divisão
+      cabeçalho+itens original): o Dashboard (`app/page.js`) e a Produção
+      (`app/producoes/page.js`, que consequentemente sempre calculava custo pelo valor
+      cadastrado em vez do custo médio real) ainda liam a tabela `recebimentos` no
+      formato antigo. Testado ponta a ponta em produção (item em quarentena com
+      motivo e temperatura, exclusão limpa depois). `supabase/atualizacao_15_inspecoes_qualidade.sql`.
 - [ ] **Etapa 3 — Estoque**: ledger (`stock_movements` + `stock_balances`),
       substituindo as views atuais como fonte principal do `/estoque`.
 - [ ] **Etapa 4 — Requisições internas** (`/requisicoes`)

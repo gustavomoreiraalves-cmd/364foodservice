@@ -8,15 +8,32 @@ import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import { useEmpresaAtual } from '../../lib/empresa';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
-const STATUS_OPCOES = ['Aceito', 'Aceito com ressalva', 'Rejeitado'];
+const STATUS_QUALIDADE = [
+  { valor: 'pendente', label: 'Pendente' },
+  { valor: 'aprovado', label: 'Aprovado' },
+  { valor: 'aprovado_com_ressalva', label: 'Aprovado com ressalva' },
+  { valor: 'quarentena', label: 'Quarentena' },
+  { valor: 'rejeitado', label: 'Rejeitado' },
+  { valor: 'devolvido', label: 'Devolvido' },
+];
+const STATUS_LABEL = Object.fromEntries(STATUS_QUALIDADE.map(s => [s.valor, s.label]));
+const STATUS_TAG = {
+  aprovado: 'ok',
+  aprovado_com_ressalva: 'warn',
+  pendente: 'warn',
+  quarentena: 'bad',
+  rejeitado: 'bad',
+  devolvido: 'bad',
+};
 const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
 
 const HEADER_VAZIO = () => ({ data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null });
 const ITEM_VAZIO = () => ({
   materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
   deposito_id: '', local_armazenamento: '', observacoes: '',
-  validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_recebimento: 'Aceito',
-  temperatura_c: '', aprovado_por_id: '', fotoProdutoArquivo: null,
+  validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_qualidade: 'aprovado',
+  motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '',
+  fotoProdutoArquivo: null, documentoSanitarioArquivo: null,
 });
 
 export default function RecebimentosPage() {
@@ -55,7 +72,7 @@ function Conteudo({ setFicha }) {
           *,
           materias_primas(nome, unidade, preco_alvo_kg, controle_recebimento),
           depositos(nome, unidades(nome)),
-          aprovado_por:funcionarios!recebimento_itens_aprovado_por_id_fkey(nome),
+          inspecoes_qualidade(status, condicao_embalagem, temperatura_c, motivo_rejeicao, foto_url, documento_sanitario_url, inspecionado_por:funcionarios(nome)),
           recebimentos!inner(
             data, fornecedor_id, nota_fiscal, responsavel_id, nota_fiscal_arquivo_url,
             fornecedores(nome),
@@ -74,6 +91,7 @@ function Conteudo({ setFicha }) {
       ...item,
       recebimento_id: item.recebimento_id,
       cabecalho: item.recebimentos,
+      inspecao: Array.isArray(item.inspecoes_qualidade) ? item.inspecoes_qualidade[0] : item.inspecoes_qualidade,
     })));
     setMps(r2.data || []);
     setFornecedores(r3.data || []);
@@ -90,6 +108,7 @@ function Conteudo({ setFicha }) {
   const custoAcimaDoAlvo = alvo && Number(itemForm.custo_unitario) > alvo;
   const diasValidade = mpSelecionada?.dias_minimos_validade && itemForm.validade ? diasEntre(hoje(), itemForm.validade) : null;
   const validadeAbaixoDoMinimo = diasValidade != null && diasValidade < mpSelecionada.dias_minimos_validade;
+  const exigeMotivo = ['rejeitado', 'quarentena'].includes(itemForm.status_qualidade);
 
   function adicionarItem(e) {
     e.preventDefault();
@@ -97,6 +116,8 @@ function Conteudo({ setFicha }) {
     if (!itemForm.quantidade || !itemForm.custo_unitario) { alert('Preencha peso conferido e custo unitário.'); return; }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
+    if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
+    if (regra !== 'simples' && exigeMotivo && !itemForm.motivo_rejeicao) { alert('Informe o motivo da rejeição/quarentena.'); return; }
     proximaKey.current += 1;
     setItens([...itens, { ...itemForm, _key: proximaKey.current, _mp: mpSelecionada }]);
     setItemForm(ITEM_VAZIO());
@@ -127,7 +148,7 @@ function Conteudo({ setFicha }) {
       for (let i = 0; i < itens.length; i++) {
         const it = itens[i];
         const ehSimples = it._mp.controle_recebimento === 'simples';
-        const { data: inserido, error: errItem } = await supabase.from('recebimento_itens').insert([{
+        const { data: itemInserido, error: errItem } = await supabase.from('recebimento_itens').insert([{
           recebimento_id: cabecalho.id,
           lote: lotes[i],
           materia_prima_id: it.materia_prima_id,
@@ -139,10 +160,6 @@ function Conteudo({ setFicha }) {
           observacoes: it.observacoes || null,
           validade: !ehSimples ? (it.validade || null) : null,
           numero_lote_fornecedor: it._mp.controle_recebimento === 'lote' ? (it.numero_lote_fornecedor || null) : null,
-          condicao_embalagem: !ehSimples ? (it.condicao_embalagem || null) : null,
-          status_recebimento: !ehSimples ? it.status_recebimento : 'Aceito',
-          temperatura_c: it._mp.exige_temperatura && it.temperatura_c ? Number(it.temperatura_c) : null,
-          aprovado_por_id: it._mp.exige_inspecao ? (it.aprovado_por_id || null) : null,
           empresa_id: empresaAtual.id,
         }]).select('id').single();
 
@@ -152,7 +169,32 @@ function Conteudo({ setFicha }) {
           await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
           return;
         }
-        inseridos.push({ id: inserido.id, fotoProdutoArquivo: it.fotoProdutoArquivo, exigeFoto: it._mp.exige_foto });
+
+        const { data: inspecaoInserida, error: errInspecao } = await supabase.from('inspecoes_qualidade').insert([{
+          recebimento_item_id: itemInserido.id,
+          empresa_id: empresaAtual.id,
+          status: ehSimples ? 'aprovado' : it.status_qualidade,
+          condicao_embalagem: !ehSimples ? (it.condicao_embalagem || null) : null,
+          temperatura_c: it._mp.exige_temperatura && it.temperatura_c ? Number(it.temperatura_c) : null,
+          motivo_rejeicao: !ehSimples && exigeMotivoStatus(it.status_qualidade) ? (it.motivo_rejeicao || null) : null,
+          inspecionado_por_id: it._mp.exige_inspecao ? (it.inspecionado_por_id || null) : null,
+          inspecionado_em: !ehSimples ? new Date().toISOString() : null,
+        }]).select('id').single();
+
+        if (errInspecao) {
+          alert(`Erro ao salvar a inspeção do item ${i + 1} (${it._mp.nome}): ` + errInspecao.message);
+          for (const done of inseridos) await supabase.from('recebimento_itens').delete().eq('id', done.id);
+          await supabase.from('recebimento_itens').delete().eq('id', itemInserido.id);
+          await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
+          return;
+        }
+
+        inseridos.push({
+          id: itemInserido.id,
+          inspecaoId: inspecaoInserida.id,
+          fotoProdutoArquivo: it.fotoProdutoArquivo,
+          documentoSanitarioArquivo: it.documentoSanitarioArquivo,
+        });
       }
 
       if (header.notaFiscalArquivo) {
@@ -167,9 +209,17 @@ function Conteudo({ setFicha }) {
         if (done.fotoProdutoArquivo) {
           try {
             const url = await uploadArquivoRecebimento(empresaAtual.id, done.id, 'foto', done.fotoProdutoArquivo);
-            await supabase.from('recebimento_itens').update({ foto_produto_url: url }).eq('id', done.id);
+            await supabase.from('inspecoes_qualidade').update({ foto_url: url }).eq('id', done.inspecaoId);
           } catch (upErr) {
             alert('Item salvo, mas o anexo da foto falhou: ' + upErr.message);
+          }
+        }
+        if (done.documentoSanitarioArquivo) {
+          try {
+            const url = await uploadArquivoRecebimento(empresaAtual.id, done.id, 'doc-sanitario', done.documentoSanitarioArquivo);
+            await supabase.from('inspecoes_qualidade').update({ documento_sanitario_url: url }).eq('id', done.inspecaoId);
+          } catch (upErr) {
+            alert('Item salvo, mas o anexo do documento sanitário falhou: ' + upErr.message);
           }
         }
       }
@@ -184,7 +234,7 @@ function Conteudo({ setFicha }) {
 
   async function excluirItem(r) {
     if (!confirm('Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
-    await removerAnexosRecebimento([r.foto_produto_url]);
+    await removerAnexosRecebimento([r.inspecao?.foto_url, r.inspecao?.documento_sanitario_url]);
     const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
     if (error) { alert('Erro ao excluir: ' + error.message); return; }
 
@@ -218,7 +268,7 @@ function Conteudo({ setFicha }) {
         { rot: 'Nota fiscal (nº)', valor: grupo.cabecalho.nota_fiscal },
         { rot: 'Recebido por', valor: grupo.cabecalho.responsavel?.nome },
         ...grupo.itens.flatMap(it => [
-          { rot: `— ${it.materias_primas?.nome}`, valor: `Lote ${it.lote} · ${Number(it.quantidade)} ${it.materias_primas?.unidade || ''} · ${fmtMoney(it.custo_unitario)}/un · ${it.status_recebimento}` },
+          { rot: `— ${it.materias_primas?.nome}`, valor: `Lote ${it.lote} · ${Number(it.quantidade)} ${it.materias_primas?.unidade || ''} · ${fmtMoney(it.custo_unitario)}/un · ${STATUS_LABEL[it.inspecao?.status] || '—'}` },
         ]),
       ],
       assinaturas: ['Responsável pelo recebimento', 'Aprovação da qualidade'],
@@ -311,11 +361,14 @@ function Conteudo({ setFicha }) {
                 </div>
               )}
               {regra !== 'simples' && (
-                <div><label>Status do recebimento</label>
-                  <select value={itemForm.status_recebimento} onChange={e => setItemForm({ ...itemForm, status_recebimento: e.target.value })}>
-                    {STATUS_OPCOES.map(s => <option key={s}>{s}</option>)}
+                <div><label>Status sanitário</label>
+                  <select value={itemForm.status_qualidade} onChange={e => setItemForm({ ...itemForm, status_qualidade: e.target.value })}>
+                    {STATUS_QUALIDADE.map(s => <option key={s.valor} value={s.valor}>{s.label}</option>)}
                   </select>
                 </div>
+              )}
+              {regra !== 'simples' && exigeMotivo && (
+                <div><label>Motivo (rejeição/quarentena)</label><input required value={itemForm.motivo_rejeicao} onChange={e => setItemForm({ ...itemForm, motivo_rejeicao: e.target.value })} /></div>
               )}
               {regra === 'lote' && (
                 <div><label>Lote do fornecedor</label><input value={itemForm.numero_lote_fornecedor} onChange={e => setItemForm({ ...itemForm, numero_lote_fornecedor: e.target.value })} /></div>
@@ -324,8 +377,8 @@ function Conteudo({ setFicha }) {
                 <div><label>Temperatura no recebimento (°C)</label><input type="number" step="0.1" value={itemForm.temperatura_c} onChange={e => setItemForm({ ...itemForm, temperatura_c: e.target.value })} /></div>
               )}
               {mpSelecionada.exige_inspecao && (
-                <div><label>Aprovado por (qualidade)</label>
-                  <select value={itemForm.aprovado_por_id} onChange={e => setItemForm({ ...itemForm, aprovado_por_id: e.target.value })}>
+                <div><label>Responsável pela inspeção</label>
+                  <select value={itemForm.inspecionado_por_id} onChange={e => setItemForm({ ...itemForm, inspecionado_por_id: e.target.value })}>
                     <option value="">Selecione…</option>
                     {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
@@ -337,8 +390,8 @@ function Conteudo({ setFicha }) {
                 </div>
               )}
               {mpSelecionada.exige_documento_sanitario && (
-                <div className="banner info" style={{ gridColumn: '1 / -1', fontSize: 12 }}>
-                  Este item exige documento sanitário do fornecedor — confira antes de aprovar (upload dedicado chega na Etapa 2.2, quando a inspeção virar uma tela própria).
+                <div><label>Documento sanitário</label>
+                  <input type="file" accept="application/pdf,image/*" onChange={e => setItemForm({ ...itemForm, documentoSanitarioArquivo: e.target.files?.[0] || null })} />
                 </div>
               )}
               <div><label>Endereço específico (opcional)</label><input placeholder="Prateleira 3, gaveta 2..." value={itemForm.local_armazenamento} onChange={e => setItemForm({ ...itemForm, local_armazenamento: e.target.value })} /></div>
@@ -368,7 +421,8 @@ function Conteudo({ setFicha }) {
         </div>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
           O formulário do item muda conforme a regra de recebimento cadastrada na matéria-prima (aba Produtos).
-          Só itens &quot;Aceito&quot; ou &quot;Aceito com ressalva&quot; contam no saldo de estoque.
+          Só itens &quot;Aprovado&quot; ou &quot;Aprovado com ressalva&quot; contam no saldo de estoque; lotes em
+          quarentena ou rejeitados ficam registrados, mas fora do saldo disponível.
         </p>
       </div>
 
@@ -405,7 +459,7 @@ function Conteudo({ setFicha }) {
                           <div className="table-wrap">
                             <table>
                               <thead>
-                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Depósito</th><th>Validade</th><th>Status</th><th></th></tr>
+                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
                               </thead>
                               <tbody>
                                 {g.itens.map(it => {
@@ -413,7 +467,7 @@ function Conteudo({ setFicha }) {
                                   const acimaAlvo = alvoR && Number(it.custo_unitario) > alvoR;
                                   const diffPeso = it.peso_nota_kg != null ? Number(it.quantidade) - Number(it.peso_nota_kg) : null;
                                   const divergePeso = diffPeso !== null && Math.abs(diffPeso) > 0.01;
-                                  const tagStatus = it.status_recebimento === 'Rejeitado' ? 'bad' : it.status_recebimento === 'Aceito com ressalva' ? 'warn' : 'ok';
+                                  const status = it.inspecao?.status;
                                   return (
                                     <tr key={it.id}>
                                       <td className="muted">{it.lote}</td>
@@ -428,10 +482,14 @@ function Conteudo({ setFicha }) {
                                       </td>
                                       <td className="muted">{it.depositos ? `${it.depositos.nome} — ${it.depositos.unidades?.nome}` : '—'}</td>
                                       <td>{fmtDate(it.validade)}</td>
-                                      <td><span className={`tag ${tagStatus}`}>{it.status_recebimento}</span></td>
+                                      <td>
+                                        <span className={`tag ${STATUS_TAG[status] || 'ok'}`}>{STATUS_LABEL[status] || '—'}</span>
+                                        {it.inspecao?.motivo_rejeicao && <div className="muted" style={{ fontSize: 11 }}>{it.inspecao.motivo_rejeicao}</div>}
+                                      </td>
                                       <td>
                                         <div className="row-actions">
-                                          {it.foto_produto_url && <button className="btn secondary small" onClick={() => verAnexo(it.foto_produto_url)}>Ver foto</button>}
+                                          {it.inspecao?.foto_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.foto_url)}>Ver foto</button>}
+                                          {it.inspecao?.documento_sanitario_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.documento_sanitario_url)}>Ver documento</button>}
                                           <button className="btn danger small" onClick={() => excluirItem(it)}>Excluir</button>
                                         </div>
                                       </td>
@@ -456,4 +514,8 @@ function Conteudo({ setFicha }) {
       </div>
     </>
   );
+}
+
+function exigeMotivoStatus(status) {
+  return status === 'rejeitado' || status === 'quarentena';
 }
