@@ -87,6 +87,9 @@ documenta o schema real (idempotente — não faz nada se já aplicado).
 9. `supabase/atualizacao_08_producao_avancada.sql`
 10. `supabase/atualizacao_09_recebimento_qualidade.sql`
 11. `supabase/atualizacao_10_catchup_recebimento_itens.sql`
+12. `supabase/atualizacao_11_fundacao_suprimentos.sql`
+13. `supabase/atualizacao_12_audit_log.sql`
+14. `supabase/atualizacao_13_rls_permissao_modulo.sql`
 
 > Nota: em jul/2026 todos os 10 primeiros arquivos acima já foram executados no projeto
 > Supabase em uso (`yvouevyfhtmbtankoofx`), e o efeito do 11º (`recebimentos` dividida em
@@ -100,6 +103,32 @@ documenta o schema real (idempotente — não faz nada se já aplicado).
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
 concluído acima) — próximos módulos vêm em mensagens separadas, mesma dinâmica.
+
+### Módulo central de Suprimentos (em andamento, jul/2026)
+
+Plano em 7 etapas para transformar Recebimento num motor único, configurável por item,
+que atende todas as empresas/unidades do Grupo 364 (recebimento com controle dinâmico
+por item, estoque como ledger, requisições internas, transferências, consumo direto,
+centros de custo, indicadores). Etapas:
+
+- [x] **Etapa 1 — Fundação**: `depositos`, `centros_custo`, regra de recebimento por
+      item em `materias_primas` (`controle_recebimento`: simples/validade/lote +
+      exigências de temperatura/inspeção/foto/documento sanitário), seed real de
+      `unidades` (Matriz por empresa + CD do Grupo 364), `audit_logs` (append-only),
+      reforço de RLS por permissão de módulo nas tabelas novas (`atualizacao_11/12/13`).
+      Telas novas: `/depositos`, `/centros-custo`; `/produtos` ganhou os campos de
+      regra de recebimento no formulário de matéria-prima.
+- [ ] **Etapa 2 — Recebimento**: dividir de vez o cadastro em cabeçalho (nota fiscal,
+      múltiplos itens) — a base já existe desde a Etapa 0 (`recebimentos` +
+      `recebimento_itens`, ver seção acima) — mais formulário dinâmico por item
+      conforme `controle_recebimento`, entidade de inspeção de qualidade separada
+      (hoje os campos de qualidade ainda são colunas soltas em `recebimento_itens`).
+- [ ] **Etapa 3 — Estoque**: ledger (`stock_movements` + `stock_balances`),
+      substituindo as views atuais como fonte principal do `/estoque`.
+- [ ] **Etapa 4 — Requisições internas** (`/requisicoes`)
+- [ ] **Etapa 5 — Transferências entre unidades/depósitos** (`/transferencias`)
+- [ ] **Etapa 6 — Consumo direto com centro de custo obrigatório** (`/consumos`)
+- [ ] **Etapa 7 — Indicadores** (dashboard do CD, alertas de validade/mínimo)
 
 - [ ] **Testar upload real de anexo** (nota fiscal/foto) no Recebimento em produção —
       o fluxo foi implementado e verificado por leitura de código, mas o teste
