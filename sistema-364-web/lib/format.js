@@ -19,11 +19,11 @@ export function diasEntre(a, b) {
 }
 
 // Gera o próximo número de lote no padrão LT-AAMMDD-###, contando
-// recebimentos + produções já lançados no mesmo dia NA MESMA EMPRESA.
+// recebimento_itens + produções já lançados no mesmo dia NA MESMA EMPRESA.
 export async function proximoLote(dataStr, empresaId) {
   const prefixo = `LT-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
   const [r1, r2] = await Promise.all([
-    supabase.from('recebimentos').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
+    supabase.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
     supabase.from('producoes').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
   ]);
   const n = (r1.data?.length || 0) + (r2.data?.length || 0);

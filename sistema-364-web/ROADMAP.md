@@ -59,6 +59,21 @@ Todas essas tabelas já receberam `empresa_id` + RLS multiempresa
 Isso é trabalho de outra sessão/pessoa; vale sincronizar antes de construir as telas
 para não duplicar esforço.
 
+### Recebimento — cabeçalho + itens (descoberta já existente no banco, jul/2026)
+
+Durante o diagnóstico para o módulo central de Suprimentos, foi encontrado que a
+tabela `recebimentos` já havia sido dividida manualmente, direto no Supabase, em
+`recebimentos` (cabeçalho: data, fornecedor, nota fiscal, responsável, temperatura,
+anexo da nota) + `recebimento_itens` (linhas: matéria-prima, lote, validade, custo,
+status sanitário, condição da embalagem, local de armazenamento, foto, aprovador) —
+sem que essa alteração fosse commitada no repositório nem refletida no frontend. Isso
+deixou o formulário de novo recebimento, a tela de Estoque e o relatório de compras
+por fornecedor gravando/lendo colunas que não existiam mais na tabela `recebimentos`.
+Corrigido: `app/recebimentos/page.js`, `app/estoque/page.js`, `app/relatorios/page.js`
+e `lib/format.js` (`proximoLote`) agora leem/gravam corretamente em
+`recebimentos` + `recebimento_itens`; `supabase/atualizacao_10_catchup_recebimento_itens.sql`
+documenta o schema real (idempotente — não faz nada se já aplicado).
+
 ### SQL a rodar no Supabase (ordem)
 
 1. `supabase/schema.sql`
@@ -71,11 +86,15 @@ para não duplicar esforço.
 8. `supabase/atualizacao_07_views_empresa.sql` (requer Postgres 15+; confirmar com `select version();`)
 9. `supabase/atualizacao_08_producao_avancada.sql`
 10. `supabase/atualizacao_09_recebimento_qualidade.sql`
+11. `supabase/atualizacao_10_catchup_recebimento_itens.sql`
 
-> Nota: em jul/2026 todos os 10 arquivos acima já foram executados no projeto Supabase
-> em uso (`yvouevyfhtmbtankoofx`). Os dados (fornecedores, produtos, usuários,
-> permissões, empresas) continuam no banco mesmo depois de uma restauração do código
-> local — só rode o SQL de novo se estiver apontando para um projeto Supabase novo/vazio.
+> Nota: em jul/2026 todos os 10 primeiros arquivos acima já foram executados no projeto
+> Supabase em uso (`yvouevyfhtmbtankoofx`), e o efeito do 11º (`recebimentos` dividida em
+> cabeçalho + `recebimento_itens`) também já estava presente no banco antes mesmo de o
+> arquivo existir no repo (ver seção "Recebimento — cabeçalho + itens" acima) — rodá-lo
+> lá é um no-op seguro. Os dados (fornecedores, produtos, usuários, permissões, empresas)
+> continuam no banco mesmo depois de uma restauração do código local — só rode o SQL de
+> novo do zero se estiver apontando para um projeto Supabase novo/vazio.
 
 ## Próximos passos
 

@@ -46,8 +46,17 @@ function Conteudo({ setFicha }) {
     if (!empresaAtual) return;
     setLoading(true);
     const [r1, r2, r3, r4] = await Promise.all([
-      supabase.from('recebimentos')
-        .select('*, materias_primas(nome, unidade, preco_alvo_kg), fornecedores(nome), responsavel:funcionarios!recebimentos_responsavel_id_fkey(nome), aprovado_por:funcionarios!recebimentos_aprovado_por_id_fkey(nome)')
+      supabase.from('recebimento_itens')
+        .select(`
+          *,
+          materias_primas(nome, unidade, preco_alvo_kg),
+          aprovado_por:funcionarios!recebimento_itens_aprovado_por_id_fkey(nome),
+          recebimentos!inner(
+            data, fornecedor_id, nota_fiscal, responsavel_id, temperatura_c, nota_fiscal_arquivo_url,
+            fornecedores(nome),
+            responsavel:funcionarios!recebimentos_responsavel_id_fkey(nome)
+          )
+        `)
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
       supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
@@ -55,7 +64,12 @@ function Conteudo({ setFicha }) {
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
     if (r1.error) console.error(r1.error);
-    setLista(r1.data || []);
+    setLista((r1.data || []).map(item => ({
+      ...item,
+      ...item.recebimentos,
+      fornecedores: item.recebimentos?.fornecedores,
+      responsavel: item.recebimentos?.responsavel,
+    })));
     setMps(r2.data || []);
     setFornecedores(r3.data || []);
     setFuncionarios(r4.data || []);
@@ -69,45 +83,55 @@ function Conteudo({ setFicha }) {
     setSalvando(true);
     try {
       const lote = await proximoLote(form.data, empresaAtual.id);
-      const { data: inserido, error } = await supabase.from('recebimentos').insert([{
-        lote,
+
+      const { data: cabecalho, error: errCabecalho } = await supabase.from('recebimentos').insert([{
         data: form.data,
         fornecedor_id: form.fornecedor_id || null,
+        nota_fiscal: form.nota_fiscal || null,
+        responsavel_id: form.responsavel_id || null,
+        temperatura_c: form.temperatura_c ? Number(form.temperatura_c) : null,
+        empresa_id: empresaAtual.id,
+      }]).select('id').single();
+
+      if (errCabecalho) { alert('Erro ao salvar: ' + errCabecalho.message); return; }
+
+      const { data: item, error: errItem } = await supabase.from('recebimento_itens').insert([{
+        recebimento_id: cabecalho.id,
+        lote,
         materia_prima_id: form.materia_prima_id,
         quantidade: Number(form.quantidade),
         peso_nota_kg: form.peso_nota_kg ? Number(form.peso_nota_kg) : null,
         custo_unitario: Number(form.custo_unitario),
         numero_lote_fornecedor: form.numero_lote_fornecedor || null,
-        temperatura_c: form.temperatura_c ? Number(form.temperatura_c) : null,
         condicao_embalagem: form.condicao_embalagem || null,
         status_recebimento: form.status_recebimento,
         local_armazenamento: form.local_armazenamento || null,
-        nota_fiscal: form.nota_fiscal || null,
         validade: form.validade || null,
-        responsavel_id: form.responsavel_id || null,
         aprovado_por_id: form.aprovado_por_id || null,
         empresa_id: empresaAtual.id,
       }]).select('id').single();
 
-      if (error) { alert('Erro ao salvar: ' + error.message); return; }
+      if (errItem) {
+        alert('Erro ao salvar: ' + errItem.message);
+        await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
+        return;
+      }
 
-      const patch = {};
       if (form.notaFiscalArquivo) {
         try {
-          patch.nota_fiscal_arquivo_url = await uploadArquivoRecebimento(empresaAtual.id, inserido.id, 'nota-fiscal', form.notaFiscalArquivo);
+          const url = await uploadArquivoRecebimento(empresaAtual.id, cabecalho.id, 'nota-fiscal', form.notaFiscalArquivo);
+          await supabase.from('recebimentos').update({ nota_fiscal_arquivo_url: url }).eq('id', cabecalho.id);
         } catch (upErr) {
           alert('Recebimento salvo, mas o anexo da nota fiscal falhou: ' + upErr.message);
         }
       }
       if (form.fotoProdutoArquivo) {
         try {
-          patch.foto_produto_url = await uploadArquivoRecebimento(empresaAtual.id, inserido.id, 'foto', form.fotoProdutoArquivo);
+          const url = await uploadArquivoRecebimento(empresaAtual.id, item.id, 'foto', form.fotoProdutoArquivo);
+          await supabase.from('recebimento_itens').update({ foto_produto_url: url }).eq('id', item.id);
         } catch (upErr) {
           alert('Recebimento salvo, mas o anexo da foto falhou: ' + upErr.message);
         }
-      }
-      if (Object.keys(patch).length) {
-        await supabase.from('recebimentos').update(patch).eq('id', inserido.id);
       }
 
       setForm(FORM_VAZIO());
@@ -119,9 +143,17 @@ function Conteudo({ setFicha }) {
 
   async function excluir(r) {
     if (!confirm('Excluir este recebimento? O saldo de estoque será recalculado.')) return;
-    await removerAnexosRecebimento([r.nota_fiscal_arquivo_url, r.foto_produto_url]);
-    const { error } = await supabase.from('recebimentos').delete().eq('id', r.id);
-    if (error) alert('Erro ao excluir: ' + error.message);
+    await removerAnexosRecebimento([r.foto_produto_url]);
+    const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
+    if (error) { alert('Erro ao excluir: ' + error.message); return; }
+
+    const { count } = await supabase.from('recebimento_itens')
+      .select('id', { count: 'exact', head: true })
+      .eq('recebimento_id', r.recebimento_id);
+    if (!count) {
+      await removerAnexosRecebimento([r.nota_fiscal_arquivo_url]);
+      await supabase.from('recebimentos').delete().eq('id', r.recebimento_id);
+    }
     carregar();
   }
 
