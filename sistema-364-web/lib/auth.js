@@ -16,7 +16,7 @@ export const MODULOS = [
   { id: 'clientes', label: 'Clientes', href: '/clientes', ic: '▦', desc: 'Cadastro de clientes e revendas' },
   { id: 'pedidos', label: 'Pedidos de Venda', href: '/pedidos', ic: '▩', desc: 'Pedidos, faturamento e baixa de estoque' },
   // 'funcionarios' foi unificado ao cadastro de colaboradores (Ponto) — ver ROADMAP.md
-  { id: 'despesas', label: 'Despesas', href: '/despesas', ic: '◇', desc: 'Despesas operacionais' },
+  { id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', desc: 'Categorias de conta e contas a pagar' },
   { id: 'relatorios', label: 'Relatórios', href: '/relatorios', ic: '▢', desc: 'Produção, compras e financeiro' },
   { id: 'ponto', label: 'Ponto', href: '/ponto/colaboradores', ic: '◔', desc: 'Controle de ponto, colaboradores e escalas' },
 ];
