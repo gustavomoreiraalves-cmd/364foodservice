@@ -1,0 +1,19 @@
+code: "364-command-center"
+name: "364 Command Center"
+description: "Diretoria digital do Grupo 364 — 10 agentes que recebem, classificam e analisam demandas de gestão estratégica, financeira, operacional, comercial e administrativa, consolidando recomendações sempre sujeitas à aprovação final de Gustavo Moreira Alves."
+
+language: "Português (Brasil)"
+
+skills:
+  - web_search
+  - web_fetch
+
+data:
+  - pipeline/data/research-brief.md
+  - pipeline/data/domain-framework.md
+  - pipeline/data/quality-criteria.md
+  - pipeline/data/output-examples.md
+  - pipeline/data/anti-patterns.md
+
+pipeline: pipeline/pipeline.yaml
+party: squad-party.csv

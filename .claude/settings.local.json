@@ -30,7 +30,10 @@
       "Bash(ls -la \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/\" | head -20)",
       "Bash(git init *)",
       "Bash(git config *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(find \"/Users/gustavomoreiraalves/Library/CloudStorage/GoogleDrive-gustavomoreiraalves@gmail.com/Outros computadores/Meu MacBook Pro/364 Steakhouse/2026/364 food services/Sistema de Gestão/Sistema Web/sistema-364-web\" -maxdepth 1 -name \".env.local\" 2>/dev/null; echo \"---main repo check done---\")",
+      "Bash(rm -rf /private/tmp/claude-501/-Users-gustavomoreiraalves-Library-CloudStorage-GoogleDrive-gustavomoreiraalves-gmail-com-Outros-computadores-Meu-MacBook-Pro-364-Steakhouse-2026-364-food-services-Sistema-de-Gest-o-Sistema-Web-sistem-rib7fs/c0bd23af-9e3d-4518-b9c4-b3bc1e7670ce/scratchpad/caveman-check)",
+      "Bash(git clone *)"
     ]
   }
 }

@@ -1,0 +1,95 @@
+squad: "364-command-center"
+name: "364 Command Center — Pipeline"
+description: "Fluxo de recepção, classificação, análise especializada, consolidação, revisão e aprovação de demandas de gestão do Grupo 364."
+
+steps:
+  - step: 1
+    name: "recebimento-classificacao"
+    file: "pipeline/steps/step-01-recebimento-classificacao.md"
+    type: "agent"
+    agent: "atlas-364"
+  - step: 2
+    name: "verificacao-dados"
+    file: "pipeline/steps/step-02-verificacao-dados.md"
+    type: "agent"
+    agent: "insight-364"
+  - step: 3
+    name: "selecao-agentes"
+    file: "pipeline/steps/step-03-selecao-agentes.md"
+    type: "agent"
+    agent: "atlas-364"
+  - step: 4
+    name: "analise-cfo"
+    file: "pipeline/steps/step-04-analise-cfo.md"
+    type: "agent"
+    agent: "cfo-364"
+  - step: 5
+    name: "analise-coo"
+    file: "pipeline/steps/step-05-analise-coo.md"
+    type: "agent"
+    agent: "coo-364"
+  - step: 6
+    name: "analise-guardiao"
+    file: "pipeline/steps/step-06-analise-guardiao.md"
+    type: "agent"
+    agent: "guardiao-364"
+  - step: 7
+    name: "analise-growth"
+    file: "pipeline/steps/step-07-analise-growth.md"
+    type: "agent"
+    agent: "growth-364"
+  - step: 8
+    name: "analise-brand"
+    file: "pipeline/steps/step-08-analise-brand.md"
+    type: "agent"
+    agent: "brand-364"
+  - step: 9
+    name: "analise-people"
+    file: "pipeline/steps/step-09-analise-people.md"
+    type: "agent"
+    agent: "people-364"
+  - step: 10
+    name: "analise-insight"
+    file: "pipeline/steps/step-10-analise-insight.md"
+    type: "agent"
+    agent: "insight-364"
+  - step: 11
+    name: "analise-pmo"
+    file: "pipeline/steps/step-11-analise-pmo.md"
+    type: "agent"
+    agent: "pmo-364"
+  - step: 12
+    name: "consolidacao"
+    file: "pipeline/steps/step-12-consolidacao.md"
+    type: "agent"
+    agent: "atlas-364"
+  - step: 13
+    name: "plano-de-acao"
+    file: "pipeline/steps/step-13-plano-de-acao.md"
+    type: "agent"
+    agent: "atlas-364"
+  - step: 14
+    name: "revisao-conselho"
+    file: "pipeline/steps/step-14-revisao-conselho.md"
+    type: "agent"
+    agent: "conselho-364"
+    on_reject: 13
+  - step: 15
+    name: "checkpoint-aprovacao-gustavo"
+    file: "pipeline/steps/step-15-checkpoint-aprovacao-gustavo.md"
+    type: "checkpoint"
+  - step: 16
+    name: "geracao-documentos"
+    file: "pipeline/steps/step-16-geracao-documentos.md"
+    type: "agent"
+    agent: "atlas-364"
+  - step: 17
+    name: "registro-decisao"
+    file: "pipeline/steps/step-17-registro-decisao.md"
+    type: "agent"
+    agent: "atlas-364"
+
+checkpoints:
+  - step: 15
+    name: "checkpoint-aprovacao-gustavo"
+    output_file: "squads/364-command-center/output/executivo/15-aprovacao-gustavo.md"

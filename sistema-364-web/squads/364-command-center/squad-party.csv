@@ -1,0 +1,11 @@
+id,name,title,icon,execution,path
+atlas-364,Atlas 364,Diretor Executivo e Orquestrador,🧭,inline,./agents/atlas-364.agent.md
+cfo-364,CFO 364,Diretor Financeiro,💰,subagent,./agents/cfo-364.agent.md
+coo-364,COO 364,Diretor de Operações,⚙️,subagent,./agents/coo-364.agent.md
+guardiao-364,Guardião 364,Especialista em Produção Qualidade e Rastreabilidade,🛡️,subagent,./agents/guardiao-364.agent.md
+growth-364,Growth 364,Diretor Comercial,📈,subagent,./agents/growth-364.agent.md
+brand-364,Brand 364,Diretor de Marketing,🎯,subagent,./agents/brand-364.agent.md
+people-364,People 364,Diretor de Pessoas e Cultura,🤝,subagent,./agents/people-364.agent.md
+insight-364,Insight 364,Analista de Dados,📊,subagent,./agents/insight-364.agent.md
+pmo-364,PMO 364,Gestor de Projetos,🗂️,subagent,./agents/pmo-364.agent.md
+conselho-364,Conselho 364,Auditor e Revisor,⚖️,inline,./agents/conselho-364.agent.md

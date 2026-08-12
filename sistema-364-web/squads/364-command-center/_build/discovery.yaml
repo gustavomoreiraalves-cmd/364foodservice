@@ -1,0 +1,28 @@
+squad_code: "364-command-center"
+purpose: "Squad responsável por auxiliar na gestão estratégica, financeira, operacional, comercial e administrativa do Grupo 364 — funcionando como uma diretoria digital que recebe demandas, aciona especialistas, consolida recomendações e submete toda decisão crítica à aprovação humana de Gustavo Moreira Alves antes de qualquer execução, publicação, alteração de dados ou modificação de arquivos oficiais."
+domain: "mixed"
+
+company:
+  name: "Grupo 364"
+  tone: "Casual, caloroso e apaixonado, com ênfase em qualidade e sabor (364 Steakhouse); defumação artesanal, conveniência e padronização (364 Food Services); estrutura, confiança e capacidade de execução (364 Buffet e Eventos)."
+  products: "Hambúrgueres artesanais, carnes grelhadas estilo churrasco americano, delivery, catering para eventos, temperos e acessórios de churrasco, produção de alimentos defumados/processados (364 Food Services), operação de foodtruck (Afya), buffet e eventos corporativos e sociais."
+
+language: "Português (Brasil)"
+
+context:
+  # squad de gestão — mixed domain (estratégico + financeiro + operacional + comercial)
+  data_sources: "Planilhas financeiras e operacionais, sistema de gestão (Sistema 364), relatórios de vendas por canal, fichas técnicas e ordens de produção da 364 Food Services, relatórios de RH e cultura, dados fornecidos manualmente por Gustavo e pelos gestores de cada unidade."
+  decisions: "Decisões estratégicas, financeiras, operacionais, comerciais, de marketing, de pessoas, de produção/qualidade e de projetos para as empresas do Grupo 364, sempre com aprovação final de Gustavo Moreira Alves."
+  output_format: "Relatórios executivos estruturados (resumo, evidências, riscos, recomendação, plano de ação), análises setoriais por especialista, planos de ação com responsáveis/prazos/indicadores, e documentos finais salvos por categoria em output/."
+  audience: "Gustavo Moreira Alves (aprovador final) e a liderança das unidades do Grupo 364 (364 Steakhouse, 364 Food Services, 364 Foodtruck/Afya, 364 Buffet e Eventos, novos projetos)."
+  frequency: "Sob demanda — acionado sempre que Gustavo ou a liderança trouxer uma questão de gestão para análise."
+
+tools_needed:
+  - "web_search"
+  - "web_fetch"
+
+investigation:
+  enabled: false
+  profiles: []
+
+target_formats: []

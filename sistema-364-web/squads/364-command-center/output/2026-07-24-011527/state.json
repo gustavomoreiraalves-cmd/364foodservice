@@ -1,0 +1,120 @@
+{
+  "squad": "364-command-center",
+  "status": "completed",
+  "step": {
+    "current": 17,
+    "total": 17,
+    "label": "registro-decisao"
+  },
+  "agents": [
+    {
+      "id": "atlas-364",
+      "name": "Atlas 364",
+      "icon": "🧭",
+      "status": "done",
+      "desk": {
+        "col": 1,
+        "row": 1
+      }
+    },
+    {
+      "id": "cfo-364",
+      "name": "CFO 364",
+      "icon": "💰",
+      "status": "done",
+      "desk": {
+        "col": 2,
+        "row": 1
+      }
+    },
+    {
+      "id": "coo-364",
+      "name": "COO 364",
+      "icon": "⚙️",
+      "status": "done",
+      "desk": {
+        "col": 3,
+        "row": 1
+      }
+    },
+    {
+      "id": "guardiao-364",
+      "name": "Guardião 364",
+      "icon": "🛡️",
+      "status": "done",
+      "desk": {
+        "col": 1,
+        "row": 2
+      }
+    },
+    {
+      "id": "growth-364",
+      "name": "Growth 364",
+      "icon": "📈",
+      "status": "done",
+      "desk": {
+        "col": 2,
+        "row": 2
+      }
+    },
+    {
+      "id": "brand-364",
+      "name": "Brand 364",
+      "icon": "🎯",
+      "status": "done",
+      "desk": {
+        "col": 3,
+        "row": 2
+      }
+    },
+    {
+      "id": "people-364",
+      "name": "People 364",
+      "icon": "🤝",
+      "status": "done",
+      "desk": {
+        "col": 1,
+        "row": 3
+      }
+    },
+    {
+      "id": "insight-364",
+      "name": "Insight 364",
+      "icon": "📊",
+      "status": "done",
+      "desk": {
+        "col": 2,
+        "row": 3
+      }
+    },
+    {
+      "id": "pmo-364",
+      "name": "PMO 364",
+      "icon": "🗂️",
+      "status": "done",
+      "desk": {
+        "col": 3,
+        "row": 3
+      }
+    },
+    {
+      "id": "conselho-364",
+      "name": "Conselho 364",
+      "icon": "⚖️",
+      "status": "done",
+      "desk": {
+        "col": 1,
+        "row": 4
+      }
+    }
+  ],
+  "handoff": {
+    "from": "atlas-364",
+    "to": null,
+    "message": "Pipeline concluído: decisão registrada em memories.md e runs.md.",
+    "completedAt": "2026-07-26T00:05:00"
+  },
+  "startedAt": "2026-07-24T01:15:27",
+  "updatedAt": "2026-07-26T00:05:00",
+  "completedAt": "2026-07-26T00:05:00"
+}
