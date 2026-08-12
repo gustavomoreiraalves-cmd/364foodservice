@@ -25,7 +25,7 @@ function Conteudo() {
         supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
         supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id), inspecoes_qualidade(status)').eq('empresa_id', eid),
-        supabase.from('contas_a_pagar').select('valor_total').eq('empresa_id', eid),
+        supabase.from('contas_a_pagar').select('valor_total').is('recebimento_id', null).eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
         supabase.from('materias_primas').select('*').eq('empresa_id', eid),

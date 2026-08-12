@@ -99,7 +99,12 @@ function Conteudo() {
           empresa_id: empresaAtual.id,
         }))
       );
-      if (e2) { alert('Conta criada, mas houve erro ao gerar as parcelas: ' + e2.message); }
+      if (e2) {
+        await supabase.from('contas_a_pagar').delete().eq('id', conta.id);
+        alert('Erro ao gerar as parcelas — o lançamento foi desfeito, tente novamente: ' + e2.message);
+        carregar();
+        return;
+      }
 
       setLancamento(LANCAMENTO_VAZIO());
       carregar();
