@@ -24,7 +24,7 @@ function Conteudo() {
       const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps] = await Promise.all([
         supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
-        supabase.from('recebimentos').select('fornecedor_id, materia_prima_id, quantidade, custo_unitario').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, status_recebimento, recebimentos(fornecedor_id)').eq('empresa_id', eid),
         supabase.from('despesas').select('valor').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
@@ -64,7 +64,8 @@ function Conteudo() {
   const validos = d.pedidos.filter(p => p.status !== 'Cancelado');
   const receitaTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * Number(i.preco_unitario), 0), 0);
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
-  const comprasTotal = d.recebimentos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
+  const recebimentosValidos = d.recebimentos.filter(r => r.status_recebimento == null || ['Aceito', 'Aceito com ressalva'].includes(r.status_recebimento));
+  const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
   const despesasTotal = d.despesas.reduce((s, x) => s + Number(x.valor), 0);
   const lucroBruto = receitaTotal - cmvTotal;
   const lucroLiquido = lucroBruto - despesasTotal;
@@ -128,7 +129,7 @@ function Conteudo() {
             <thead><tr><th>Fornecedor</th><th>Nº de recebimentos</th><th>Total comprado</th></tr></thead>
             <tbody>
               {d.fornecedores.length ? d.fornecedores.map(f => {
-                const recs = d.recebimentos.filter(r => r.fornecedor_id === f.id);
+                const recs = recebimentosValidos.filter(r => r.recebimentos?.fornecedor_id === f.id);
                 const total = recs.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
                 return (
                   <tr key={f.id}>
