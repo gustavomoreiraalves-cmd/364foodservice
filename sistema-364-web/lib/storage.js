@@ -57,3 +57,32 @@ export async function signedUrlColaborador(path, segundos = 300) {
   if (error) throw error;
   return data.signedUrl;
 }
+
+// ---------- FINANCEIRO: anexos de Contas a Pagar (nota fiscal avulsa, comprovante de pagamento) ----------
+// Reaproveita o bucket privado 'recebimentos' — mesma policy de signed URL
+// (o primeiro segmento do path continua sendo o empresa_id), só muda o
+// prefixo pra não colidir com os anexos de recebimento.
+
+export async function uploadArquivoContaAPagar(empresaId, registroId, prefixo, file) {
+  const ext = extensaoSegura(file.name);
+  const path = `${empresaId}/contas-a-pagar/${registroId}/${prefixo}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export async function signedUrlContaAPagar(path, segundos = 300) {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, segundos);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function removerAnexosContaAPagar(paths) {
+  const validos = (paths || []).filter(Boolean);
+  if (!validos.length) return;
+  await supabase.storage.from(BUCKET).remove(validos);
+}
