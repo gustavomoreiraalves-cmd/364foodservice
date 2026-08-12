@@ -1,4 +1,4 @@
-import { hoje } from './format';
+import { hoje } from './format.js';
 
 export const CATEGORIAS_CONTA = ['Custos Fixos', 'Custos Diretos', 'Custos Variáveis', 'Investimentos'];
 
