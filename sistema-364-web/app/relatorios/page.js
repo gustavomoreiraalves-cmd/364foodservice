@@ -21,11 +21,11 @@ function Conteudo() {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps] = await Promise.all([
+      const [pedidos, producoes, recebimentos, contasAPagar, fornecedores, fichas, mps] = await Promise.all([
         supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
         supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id), inspecoes_qualidade(status)').eq('empresa_id', eid),
-        supabase.from('despesas').select('valor').eq('empresa_id', eid),
+        supabase.from('contas_a_pagar').select('valor_total').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
         supabase.from('materias_primas').select('*').eq('empresa_id', eid),
@@ -38,7 +38,7 @@ function Conteudo() {
           fornecedor_id: r.recebimentos?.fornecedor_id,
           status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
         })),
-        despesas: despesas.data || [],
+        contasAPagar: contasAPagar.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
         mps: mps.data || [],
@@ -70,7 +70,7 @@ function Conteudo() {
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
   const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
-  const despesasTotal = d.despesas.reduce((s, x) => s + Number(x.valor), 0);
+  const despesasTotal = d.contasAPagar.reduce((s, x) => s + Number(x.valor_total), 0);
   const lucroBruto = receitaTotal - cmvTotal;
   const lucroLiquido = lucroBruto - despesasTotal;
   const entradasCaixa = d.pedidos
