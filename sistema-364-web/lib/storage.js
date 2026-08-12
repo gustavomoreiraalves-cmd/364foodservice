@@ -37,3 +37,23 @@ export async function removerAnexosRecebimento(paths) {
   if (!validos.length) return;
   await supabase.storage.from(BUCKET).remove(validos);
 }
+
+// ---------- PONTO: foto cadastral do colaborador (bucket privado 'colaboradores') ----------
+
+export async function uploadFotoColaborador(empresaId, colaboradorId, file) {
+  const ext = extensaoSegura(file.name);
+  const path = `${empresaId}/${colaboradorId}/foto-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from('colaboradores').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export async function signedUrlColaborador(path, segundos = 300) {
+  const { data, error } = await supabase.storage.from('colaboradores').createSignedUrl(path, segundos);
+  if (error) throw error;
+  return data.signedUrl;
+}

@@ -57,11 +57,7 @@ export default function AppShell({ modulo, titulo, desc, children }) {
               <span className="ic">{m.ic}</span>{m.label}
             </a>
           ))}
-          {isAdmin && (
-            <a href="/usuarios" className={pathname === '/usuarios' ? 'active' : ''}>
-              <span className="ic">⚙</span>Usuários
-            </a>
-          )}
+          {/* Gestão de usuários migrou para Ponto → Colaboradores (painel "Acesso") */}
         </nav>
         <div className="sidebar-foot">
           <div className="userbadge">Logado como <b>{nome}</b></div>

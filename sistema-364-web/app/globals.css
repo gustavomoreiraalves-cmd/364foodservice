@@ -148,3 +148,48 @@ tr:hover td{background:#241f19;}
 .ficha .assinaturas{display:flex; gap:50px; margin-top:70px;}
 .ficha .assinatura{flex:1; border-top:1px solid #000; text-align:center; font-size:10px; padding-top:5px; text-transform:uppercase; letter-spacing:1px; font-family:'Segoe UI',Arial,sans-serif;}
 .ficha-foot{margin-top:26px; font-size:9px; color:#555; text-align:center; border-top:1px solid #ccc; padding-top:6px; font-family:'Segoe UI',Arial,sans-serif;}
+
+/* MÓDULO PONTO — sub-navegação */
+.ponto-tabs{display:flex; gap:6px; margin-bottom:20px; flex-wrap:wrap;}
+.ponto-tab{
+  text-decoration:none; font-size:12.5px; padding:7px 14px; border-radius:var(--radius);
+  border:1px solid var(--border); color:var(--paper-dim); background:var(--char2);
+}
+.ponto-tab:hover{background:var(--char3); color:var(--paper);}
+.ponto-tab.ativo{background:var(--smoke); color:var(--amber-bright); font-weight:600; border-color:var(--amber);}
+
+/* QUIOSQUE (tablet fullscreen, fora do AppShell) */
+.quiosque{
+  min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:radial-gradient(ellipse at top, #221d17, var(--char) 70%);
+  text-align:center; padding:24px; gap:18px;
+}
+.quiosque .qk-brand{font-family:Georgia,serif; font-size:30px; font-weight:700; letter-spacing:2px; color:var(--amber-bright);}
+.quiosque .qk-unidade{font-size:13px; text-transform:uppercase; letter-spacing:2px; color:var(--paper-dim);}
+.quiosque .qk-relogio{font-family:Georgia,serif; font-size:64px; color:var(--paper); line-height:1;}
+.quiosque .qk-data{font-size:14px; color:var(--paper-dim);}
+.quiosque .qk-status{display:flex; gap:14px; font-size:11px; color:var(--paper-dim); text-transform:uppercase; letter-spacing:1px;}
+.quiosque .qk-status .on{color:#8fbd6f;}
+.quiosque .qk-status .off{color:#e5806c;}
+.quiosque .btn.qk-registrar{
+  font-size:20px; padding:22px 54px; border-radius:8px; letter-spacing:1px; margin-top:8px;
+}
+.quiosque .qk-video-wrap{position:relative; width:min(92vw,460px); aspect-ratio:3/4; border-radius:10px; overflow:hidden; border:2px solid var(--border); background:#000;}
+.quiosque .qk-video-wrap video{width:100%; height:100%; object-fit:cover; transform:scaleX(-1);}
+.quiosque .qk-instrucao{font-size:18px; color:var(--paper); min-height:26px;}
+.quiosque .qk-confirma{background:var(--char2); border:1px solid var(--border); border-radius:10px; padding:26px 34px; max-width:460px;}
+.quiosque .qk-confirma .nome{font-family:Georgia,serif; font-size:30px; color:var(--amber-bright); margin-bottom:4px;}
+.quiosque .qk-tipos{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:18px 0;}
+.quiosque .qk-tipo{
+  padding:16px 10px; border-radius:8px; border:1px solid var(--border); background:var(--char3);
+  color:var(--paper); font-size:15px; cursor:pointer;
+}
+.quiosque .qk-tipo.sel{border-color:var(--amber); background:var(--smoke); color:var(--amber-bright); font-weight:600;}
+.quiosque .qk-comprovante{background:#28351f; border:1px solid #4a5f3c; border-radius:10px; padding:30px 40px; max-width:460px;}
+.quiosque .qk-comprovante .ok{font-size:22px; color:#8fbd6f; margin-bottom:8px;}
+.quiosque .qk-comprovante .det{font-size:13px; color:var(--paper-dim); margin-top:10px; font-family:'Courier New',monospace;}
+.quiosque .qk-erro{color:#e5806c; font-size:15px;}
+.quiosque input.qk-input{
+  background:var(--char3); border:1px solid var(--border); border-radius:8px; color:var(--paper);
+  font-size:28px; text-align:center; letter-spacing:8px; padding:14px 10px; width:min(80vw,300px);
+}
