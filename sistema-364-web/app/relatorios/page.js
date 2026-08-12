@@ -24,7 +24,7 @@ function Conteudo() {
       const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps] = await Promise.all([
         supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
-        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, status_recebimento, recebimentos(fornecedor_id)').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id), inspecoes_qualidade(status)').eq('empresa_id', eid),
         supabase.from('despesas').select('valor').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
@@ -33,7 +33,11 @@ function Conteudo() {
       setD({
         pedidos: pedidos.data || [],
         producoes: producoes.data || [],
-        recebimentos: recebimentos.data || [],
+        recebimentos: (recebimentos.data || []).map(r => ({
+          ...r,
+          fornecedor_id: r.recebimentos?.fornecedor_id,
+          status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
+        })),
         despesas: despesas.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
@@ -64,7 +68,7 @@ function Conteudo() {
   const validos = d.pedidos.filter(p => p.status !== 'Cancelado');
   const receitaTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * Number(i.preco_unitario), 0), 0);
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
-  const recebimentosValidos = d.recebimentos.filter(r => r.status_recebimento == null || ['Aceito', 'Aceito com ressalva'].includes(r.status_recebimento));
+  const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
   const despesasTotal = d.despesas.reduce((s, x) => s + Number(x.valor), 0);
   const lucroBruto = receitaTotal - cmvTotal;

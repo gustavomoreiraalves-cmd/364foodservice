@@ -1,9 +1,9 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 14: COLABORADOR COMO CADASTRO-MESTRE DE ACESSO
+-- 364 — ATUALIZAÇÃO 20: COLABORADOR COMO CADASTRO-MESTRE DE ACESSO
 -- O login do sistema passa a ser gerenciado pelo cadastro de
 -- colaborador (/ponto/colaboradores → painel "Acesso"), que também
 -- sincroniza permissões, empresas e a tabela funcionarios.
--- Rode depois de atualizacao_13_ponto_storage.sql.
+-- Rode depois de atualizacao_19_ponto_storage.sql.
 -- =========================================================
 
 -- vínculo colaborador ↔ login (1 login pertence a no máximo 1 colaborador)

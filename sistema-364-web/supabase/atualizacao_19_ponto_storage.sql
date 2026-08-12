@@ -1,7 +1,7 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 13: PONTO — POLICIES DO BUCKET "colaboradores"
+-- 364 — ATUALIZAÇÃO 19: PONTO — POLICIES DO BUCKET "colaboradores"
 -- Rode depois de criar o bucket privado "colaboradores" no Storage
--- (painel Supabase) e das atualizações 11 e 12.
+-- (painel Supabase) e das atualizações 17 e 18.
 -- Padrão igual ao bucket "recebimentos": usuários autenticados com o
 -- módulo ponto podem enviar/ler; alterar/excluir é admin-only.
 -- =========================================================

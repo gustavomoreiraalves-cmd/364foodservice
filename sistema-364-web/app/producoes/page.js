@@ -42,7 +42,7 @@ function Conteudo({ setFicha }) {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
       supabase.from('materias_primas').select('*').eq('empresa_id', eid),
-      supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, status_recebimento').eq('empresa_id', eid),
+      supabase.from('stock_balances').select('materia_prima_id, quantidade, custo_unitario').eq('empresa_id', eid),
       supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
     ]);

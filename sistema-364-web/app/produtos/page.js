@@ -5,8 +5,18 @@ import { fmtMoney, proximoCodigoProduto } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 
-const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '' };
+const MP_VAZIA = {
+  nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '',
+  controle_recebimento: 'simples', exige_temperatura: false, exige_inspecao: false,
+  exige_foto: false, exige_documento_sanitario: false, dias_minimos_validade: '',
+  permite_recebimento_parcial: true,
+};
 const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', preco_venda: '', validade_dias: 90 };
+const CONTROLES_RECEBIMENTO = [
+  { valor: 'simples', label: 'Tipo A — Simples (sem lote/validade)' },
+  { valor: 'validade', label: 'Tipo B — Validade controlada (FEFO)' },
+  { valor: 'lote', label: 'Tipo C — Lote completo (rastreável)' },
+];
 
 export default function ProdutosPage() {
   return (
@@ -50,6 +60,15 @@ function Conteudo() {
       unidade: formMP.unidade,
       custo_unitario: Number(formMP.custo_unitario),
       preco_alvo_kg: formMP.preco_alvo_kg ? Number(formMP.preco_alvo_kg) : null,
+      controle_recebimento: formMP.controle_recebimento,
+      controla_validade: formMP.controle_recebimento !== 'simples',
+      controla_lote: formMP.controle_recebimento === 'lote',
+      exige_temperatura: formMP.exige_temperatura,
+      exige_inspecao: formMP.exige_inspecao,
+      exige_foto: formMP.exige_foto,
+      exige_documento_sanitario: formMP.exige_documento_sanitario,
+      dias_minimos_validade: formMP.dias_minimos_validade ? Number(formMP.dias_minimos_validade) : null,
+      permite_recebimento_parcial: formMP.permite_recebimento_parcial,
       empresa_id: empresaAtual.id,
     }]);
     if (error) { alert('Erro ao salvar: ' + error.message); return; }
@@ -133,14 +152,38 @@ function Conteudo() {
           </div>
           <div><label>Custo unitário padrão (R$)</label><input type="number" step="0.01" required value={formMP.custo_unitario} onChange={e => setFormMP({ ...formMP, custo_unitario: e.target.value })} /></div>
           <div><label>Preço-alvo (R$/kg)</label><input type="number" step="0.01" placeholder="Opcional" value={formMP.preco_alvo_kg} onChange={e => setFormMP({ ...formMP, preco_alvo_kg: e.target.value })} /></div>
+          <div><label>Regra de recebimento</label>
+            <select value={formMP.controle_recebimento} onChange={e => setFormMP({ ...formMP, controle_recebimento: e.target.value })}>
+              {CONTROLES_RECEBIMENTO.map(c => <option key={c.valor} value={c.valor}>{c.label}</option>)}
+            </select>
+          </div>
+          <div><label>Validade mínima na entrada (dias)</label><input type="number" placeholder="Opcional" value={formMP.dias_minimos_validade} onChange={e => setFormMP({ ...formMP, dias_minimos_validade: e.target.value })} /></div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={formMP.exige_temperatura} onChange={e => setFormMP({ ...formMP, exige_temperatura: e.target.checked })} /> Exige temperatura
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={formMP.exige_inspecao} onChange={e => setFormMP({ ...formMP, exige_inspecao: e.target.checked })} /> Exige inspeção
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={formMP.exige_foto} onChange={e => setFormMP({ ...formMP, exige_foto: e.target.checked })} /> Exige foto
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={formMP.exige_documento_sanitario} onChange={e => setFormMP({ ...formMP, exige_documento_sanitario: e.target.checked })} /> Exige documento sanitário
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={formMP.permite_recebimento_parcial} onChange={e => setFormMP({ ...formMP, permite_recebimento_parcial: e.target.checked })} /> Permite recebimento parcial
+            </label>
+          </div>
           <div><button className="btn" type="submit">Adicionar matéria-prima</button></div>
         </form>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-          O preço-alvo é usado no Recebimento para avisar quando o custo do lote vier acima do esperado.
+          O preço-alvo é usado no Recebimento para avisar quando o custo do lote vier acima do esperado. A regra de
+          recebimento define os campos exigidos na tela de Recebimento para este item (Simples, Validade controlada ou Lote completo).
         </p>
         <div className="table-wrap" style={{ marginTop: 14 }}>
           <table>
-            <thead><tr><th>Nome</th><th>Categoria</th><th>Unidade</th><th>Custo padrão</th><th>Preço-alvo</th><th></th></tr></thead>
+            <thead><tr><th>Nome</th><th>Categoria</th><th>Unidade</th><th>Custo padrão</th><th>Preço-alvo</th><th>Regra de recebimento</th><th></th></tr></thead>
             <tbody>
               {mps.length ? mps.map(m => (
                 <tr key={m.id}>
@@ -149,9 +192,10 @@ function Conteudo() {
                   <td>{m.unidade}</td>
                   <td className="num">{fmtMoney(m.custo_unitario)}</td>
                   <td className="num">{m.preco_alvo_kg != null ? fmtMoney(m.preco_alvo_kg) : '—'}</td>
+                  <td className="muted">{CONTROLES_RECEBIMENTO.find(c => c.valor === m.controle_recebimento)?.label || m.controle_recebimento || '—'}</td>
                   <td><button className="btn danger" onClick={() => delMP(m.id)}>Excluir</button></td>
                 </tr>
-              )) : <tr className="empty-row"><td colSpan={6}>Nenhuma matéria-prima.</td></tr>}
+              )) : <tr className="empty-row"><td colSpan={7}>Nenhuma matéria-prima.</td></tr>}
             </tbody>
           </table>
         </div>

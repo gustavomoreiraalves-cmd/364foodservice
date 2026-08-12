@@ -9,6 +9,8 @@ export const MODULOS = [
   { id: 'fornecedores', label: 'Fornecedores', href: '/fornecedores', ic: '▤', desc: 'Cadastro de fornecedores e categorias' },
   { id: 'recebimentos', label: 'Recebimento', href: '/recebimentos', ic: '▣', desc: 'Entrada de matéria-prima e geração de lotes' },
   { id: 'estoque', label: 'Estoque', href: '/estoque', ic: '▥', desc: 'Saldo de matéria-prima e produto acabado' },
+  { id: 'depositos', label: 'Depósitos', href: '/depositos', ic: '▥', desc: 'Espaços de armazenamento por unidade (CD, câmaras, etc.)' },
+  { id: 'centros_custo', label: 'Centros de custo', href: '/centros-custo', ic: '◇', desc: 'Centros de custo por empresa e unidade' },
   { id: 'produtos', label: 'Produtos', href: '/produtos', ic: '▧', desc: 'Catálogo, ficha técnica, custo e preço de venda' },
   { id: 'producoes', label: 'Produção', href: '/producoes', ic: '▨', desc: 'Lançamento de lotes produzidos e cálculo de custo' },
   { id: 'clientes', label: 'Clientes', href: '/clientes', ic: '▦', desc: 'Cadastro de clientes e revendas' },

@@ -1,9 +1,9 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 11: PONTO FASE 1 — CADASTROS
+-- 364 — ATUALIZAÇÃO 17: PONTO FASE 1 — CADASTROS
 -- Empregadores (CNPJ real), unidades operacionais, centros de
 -- custo, colaboradores, escalas e auditoria imutável.
 -- Rode este arquivo inteiro no SQL Editor do Supabase
--- (depois de atualizacao_10_recebimento_itens.sql).
+-- (depois de atualizacao_16_estoque_ledger.sql).
 --
 -- AÇÃO MANUAL NECESSÁRIA no painel do Supabase:
 --   Storage → criar bucket privado "colaboradores"
@@ -108,7 +108,7 @@ create table if not exists public.colaboradores (
   metodos_permitidos text[] not null default array['facial'], -- 'facial','pin','manual_gestor'
   biometria_status text not null default 'pendente'
     check (biometria_status in ('pendente','cadastrada','bloqueada')),
-  -- PIN de contingência fica em ponto_pins (atualizacao_12), acessível só pelo servidor
+  -- PIN de contingência fica em ponto_pins (atualizacao_18), acessível só pelo servidor
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

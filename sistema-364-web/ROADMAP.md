@@ -44,19 +44,12 @@
       acesso via signed URL sob demanda). Matérias-primas ganharam `categoria` e
       `preco_alvo_kg`, usado para avisar quando o custo do lote vem acima do esperado.
 - [x] **Recebimento por nota com múltiplas matérias-primas** — reestruturado para o
-      padrão cabeçalho + itens (igual Pedidos): `recebimentos` agora é só o cabeçalho
-      da nota (data, fornecedor, nº da nota fiscal, anexo, recebido por, temperatura);
-      os campos por matéria-prima (lote do fornecedor, pesos, custo, condição, status,
-      local, validade, foto, aprovado por) migraram para a nova tabela
-      `recebimento_itens`, permitindo lançar várias matérias-primas na mesma nota, cada
-      uma com seu próprio lote (`LT-AAMMDD-###`, numerado em sequência dentro da nota)
-      e seu próprio status — uma pode ser aceita e outra rejeitada na mesma entrega.
-      `vw_estoque_materia_prima`, o trigger de embalagem→produção, `proximoLote` e as
-      páginas de Estoque/Produção/Relatórios foram atualizados para ler de
-      `recebimento_itens`. Testado no navegador: nota com 2 itens de status diferentes,
-      lotes sequenciais corretos, saldo de estoque e relatório de compras respeitando o
-      status por item, exclusão de item isolado (nota permanece) e exclusão da nota
-      inteira (cascade remove os itens), ficha impressa com tabela de itens.
+      padrão cabeçalho + itens (igual Pedidos). Uma primeira versão simples desse
+      formato foi implementada de forma independente por duas sessões em paralelo;
+      a versão que ficou valendo é a mais completa, descrita nas seções "Recebimento
+      — cabeçalho + itens" e "Módulo central de Suprimentos" logo abaixo (formulário
+      dinâmico por matéria-prima, depósito real, inspeção de qualidade separada,
+      estoque como ledger).
 
 ### Produção avançada (descoberta já existente no banco, não construída pelo frontend ainda)
 
@@ -73,6 +66,21 @@ Todas essas tabelas já receberam `empresa_id` + RLS multiempresa
 Isso é trabalho de outra sessão/pessoa; vale sincronizar antes de construir as telas
 para não duplicar esforço.
 
+### Recebimento — cabeçalho + itens (descoberta já existente no banco, jul/2026)
+
+Durante o diagnóstico para o módulo central de Suprimentos, foi encontrado que a
+tabela `recebimentos` já havia sido dividida manualmente, direto no Supabase, em
+`recebimentos` (cabeçalho: data, fornecedor, nota fiscal, responsável, temperatura,
+anexo da nota) + `recebimento_itens` (linhas: matéria-prima, lote, validade, custo,
+status sanitário, condição da embalagem, local de armazenamento, foto, aprovador) —
+sem que essa alteração fosse commitada no repositório nem refletida no frontend. Isso
+deixou o formulário de novo recebimento, a tela de Estoque e o relatório de compras
+por fornecedor gravando/lendo colunas que não existiam mais na tabela `recebimentos`.
+Corrigido: `app/recebimentos/page.js`, `app/estoque/page.js`, `app/relatorios/page.js`
+e `lib/format.js` (`proximoLote`) agora leem/gravam corretamente em
+`recebimentos` + `recebimento_itens`; `supabase/atualizacao_10_catchup_recebimento_itens.sql`
+documenta o schema real (idempotente — não faz nada se já aplicado).
+
 ### SQL a rodar no Supabase (ordem)
 
 1. `supabase/schema.sql`
@@ -85,37 +93,54 @@ para não duplicar esforço.
 8. `supabase/atualizacao_07_views_empresa.sql` (requer Postgres 15+; confirmar com `select version();`)
 9. `supabase/atualizacao_08_producao_avancada.sql`
 10. `supabase/atualizacao_09_recebimento_qualidade.sql`
-11. `supabase/atualizacao_10_recebimento_itens.sql`
-12. `supabase/atualizacao_11_ponto_cadastros.sql` (módulo Ponto — requer bucket privado `colaboradores` no Storage)
-13. `supabase/atualizacao_12_ponto_marcacoes.sql` (módulo Ponto — dispositivos, biometria, marcações NSR+hash)
-14. `supabase/atualizacao_13_ponto_storage.sql` (módulo Ponto — policies do bucket `colaboradores`)
-15. `supabase/atualizacao_14_colaborador_acesso.sql` (colaborador como cadastro-mestre de acesso — `colaboradores.user_id`)
-16. `supabase/atualizacao_15_unificar_colaboradores.sql` (backfill: cria colaborador para cada funcionário ativo com CPF que ainda não tinha um, casando por CPF; migra permissão `funcionarios` → `ponto`)
+11. `supabase/atualizacao_10_catchup_recebimento_itens.sql`
+12. `supabase/atualizacao_11_fundacao_suprimentos.sql`
+13. `supabase/atualizacao_12_audit_log.sql`
+14. `supabase/atualizacao_13_rls_permissao_modulo.sql`
+15. `supabase/atualizacao_14_recebimento_multiitem.sql`
+16. `supabase/atualizacao_15_inspecoes_qualidade.sql`
+17. `supabase/atualizacao_16_estoque_ledger.sql`
+18. `supabase/atualizacao_17_ponto_cadastros.sql` (módulo Ponto — requer bucket privado `colaboradores` no Storage)
+19. `supabase/atualizacao_18_ponto_marcacoes.sql` (módulo Ponto — dispositivos, biometria, marcações NSR+hash)
+20. `supabase/atualizacao_19_ponto_storage.sql` (módulo Ponto — policies do bucket `colaboradores`)
+21. `supabase/atualizacao_20_colaborador_acesso.sql` (colaborador como cadastro-mestre de acesso — `colaboradores.user_id`)
+22. `supabase/atualizacao_21_unificar_colaboradores.sql` (backfill: cria colaborador para cada funcionário ativo com CPF que ainda não tinha um, casando por CPF; migra permissão `funcionarios` → `ponto`)
 
-> Nota: em 30/jul/2026 as atualizações 11, 12 e 13 foram executadas no projeto
+> Nota: duas sessões distintas trabalharam em paralelo em jul/2026 — uma no módulo
+> Ponto (reconhecimento facial), outra no módulo central de Suprimentos — cada uma
+> sem visibilidade do commit da outra. Ambas as sequências de SQL já foram executadas
+> integralmente no projeto Supabase em uso (`yvouevyfhtmbtankoofx`); os arquivos aqui
+> foram renumerados sequencialmente (17-21, antes 11-15) só para eliminar a colisão de
+> número no repositório — o conteúdo é idêntico ao que já rodou. Motivo de terem sido
+> descobertas juntas: ao reconciliar as duas branches percebemos que a divisão de
+> `recebimentos` em cabeçalho + `recebimento_itens` (que a sequência de Suprimentos
+> documenta em `atualizacao_10_catchup_recebimento_itens.sql`) e o módulo Ponto foram
+> ambos aplicados manualmente no banco por sessões diferentes, sem que uma soubesse da
+> outra — daí a colisão de numeração ao juntar as branches.
+>
+> Nota: em 30/jul/2026 as atualizações 17, 18 e 19 (Ponto) foram executadas no projeto
 > `yvouevyfhtmbtankoofx` e o bucket privado `colaboradores` foi criado no Storage.
 > A tabela de auditoria do módulo chama-se `ponto_audit_logs` porque já existia
 > uma `audit_logs` (fundação Release 0, estrutura diferente) no banco — as duas
 > coexistem sem conflito.
-
-> Nota: em jul/2026 todos os 11 arquivos acima já foram executados no projeto Supabase
-> em uso (`yvouevyfhtmbtankoofx`). Os dados (fornecedores, produtos, usuários,
-> permissões, empresas) continuam no banco mesmo depois de uma restauração do código
-> local — só rode o SQL de novo se estiver apontando para um projeto Supabase novo/vazio.
+>
+> Nota: os dados (fornecedores, produtos, usuários, permissões, empresas) continuam no
+> banco mesmo depois de uma restauração do código local — só rode o SQL de novo do
+> zero se estiver apontando para um projeto Supabase novo/vazio.
 
 ## Módulo de Ponto com Reconhecimento Facial (jul/2026 — Fase 1 + início da Fase 2)
 
 Implementado conforme a especificação de requisitos do controle de jornada (REP-P /
 Portaria MTP 671, LGPD). Módulo `ponto` novo na sidebar (permissão própria).
 
-- **Cadastros** (`atualizacao_11`): `empregadores` (CNPJ real, nível grupo — as
+- **Cadastros** (`atualizacao_17`): `empregadores` (CNPJ real, nível grupo — as
   marcas continuam sendo a dimensão de isolamento por `empresa_id`), `unidades`
   estendida (endereço, lat/long, fuso, empregador), `centros_custo`,
   `colaboradores` (canônico, 1 por CPF, dados trabalhistas completos),
   `colaborador_unidades` (vigência), `escalas`/`escala_dias`/`colaborador_escalas`
   (histórico com exclusion constraint contra vigências sobrepostas), `ponto_audit_logs`
   imutável + trigger genérica `fn_audit()` em todas as tabelas do módulo.
-- **Marcações** (`atualizacao_12`): `ponto_dispositivos` (tablets, token com hash),
+- **Marcações** (`atualizacao_18`): `ponto_dispositivos` (tablets, token com hash),
   `ponto_pins` (PIN de contingência, só servidor), `ponto_biometrias` (descritores
   128-d cifrados AES-256-GCM — nunca foto bruta), LGPD (`ponto_avisos_privacidade` +
   `ponto_consentimentos`), `ponto_marcacoes` **imutável** com **NSR sequencial por
@@ -146,7 +171,7 @@ NSR), offline robusto no quiosque, assinatura ICP-Brasil, geofencing.
 
 O cadastro de colaborador passou a gerenciar também o **acesso ao sistema**
 (painel "Acesso", admin-only, em `/ponto/colaboradores`): cria login novo ou
-vincula um login existente (`colaboradores.user_id`, atualizacao_14), define
+vincula um login existente (`colaboradores.user_id`, atualizacao_20), define
 permissões por aba (`permissoes`) e empresas (`usuario_empresas`), troca senha e
 revoga acesso. Ao salvar, a tabela `funcionarios` é sincronizada (1 linha por
 empresa concedida, com `colaborador_id`, nome/email/telefone/cpf/cargo do
@@ -171,7 +196,7 @@ Despesas (FKs `responsavel_id`/`aprovado_por_id`) — mas deixou de ter tela
 própria: agora ela é só uma projeção do colaborador, sincronizada
 automaticamente (ver seção anterior).
 
-`atualizacao_15_unificar_colaboradores.sql` fez o backfill único: criou um
+`atualizacao_21_unificar_colaboradores.sql` fez o backfill único: criou um
 colaborador para cada funcionário ativo com CPF que ainda não tinha
 `colaborador_id`, casando por CPF quando um colaborador com o mesmo CPF já
 existia (evita duplicar pessoa — foi o caso do próprio Gustavo, cadastrado
@@ -186,6 +211,75 @@ is null and ativo` se for preciso tratá-los manualmente.
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
 concluído acima) — próximos módulos vêm em mensagens separadas, mesma dinâmica.
+
+### Módulo central de Suprimentos (em andamento, jul/2026)
+
+Plano em 7 etapas para transformar Recebimento num motor único, configurável por item,
+que atende todas as empresas/unidades do Grupo 364 (recebimento com controle dinâmico
+por item, estoque como ledger, requisições internas, transferências, consumo direto,
+centros de custo, indicadores). Etapas:
+
+- [x] **Etapa 1 — Fundação**: `depositos`, `centros_custo`, regra de recebimento por
+      item em `materias_primas` (`controle_recebimento`: simples/validade/lote +
+      exigências de temperatura/inspeção/foto/documento sanitário), seed real de
+      `unidades` (Matriz por empresa + CD do Grupo 364), `audit_logs` (append-only),
+      reforço de RLS por permissão de módulo nas tabelas novas (`atualizacao_11/12/13`).
+      Telas novas: `/depositos`, `/centros-custo`; `/produtos` ganhou os campos de
+      regra de recebimento no formulário de matéria-prima.
+- [x] **Etapa 2.1 — Recebimento multi-item + depósito real**: `/recebimentos` deixou
+      de gravar 1 item por envio e passou a aceitar N itens numa mesma nota fiscal
+      (cabeçalho preenchido uma vez, itens adicionados a uma lista antes de
+      "Registrar recebimento"), com o formulário do item mudando dinamicamente
+      conforme `controle_recebimento` da matéria-prima selecionada (Simples esconde
+      validade/lote/qualidade; Validade controlada mostra validade+condição+status;
+      Lote completo mostra tudo, incluindo lote do fornecedor). `deposito_id` liga o
+      item a um depósito real (Etapa 1), com `local_armazenamento` mantido como
+      complemento (endereço específico dentro do depósito). `temperatura_c` migrou do
+      cabeçalho para o item (a exigência é por item, não por nota) — a coluna antiga
+      em `recebimentos` fica órfã até a Etapa 2.2. Lotes sequenciais de uma mesma
+      submissão são gerados em lote via `proximosLotes()` (evita 1 consulta por item
+      e corrida entre itens). Testado ponta a ponta em produção (nota com 2 itens de
+      regras diferentes, exclusão limpa depois). `supabase/atualizacao_14_recebimento_multiitem.sql`.
+- [x] **Etapa 2.2 — Inspeção de qualidade como entidade separada**: `inspecoes_qualidade`
+      com o status sanitário completo (pendente/aprovado/aprovado_com_ressalva/
+      quarentena/rejeitado/devolvido — antes só 3 valores soltos em
+      `status_recebimento`), incluindo motivo de rejeição/quarentena, documento
+      sanitário e foto próprios (antes só a foto vivia em `recebimento_itens`). Os
+      dados existentes foram migrados (status antigo → novo, mapeamento 1:1) e as
+      colunas antigas (`status_recebimento`, `condicao_embalagem`, `temperatura_c`,
+      `aprovado_por_id`, `foto_produto_url` em `recebimento_itens`; `temperatura_c`
+      órfã em `recebimentos`) foram removidas — não há mais duplicidade de dados de
+      qualidade. `vw_estoque_materia_prima` e o trigger de embalagem→produção passam a
+      considerar `inspecoes_qualidade.status`: só aprovado/aprovado_com_ressalva contam
+      no saldo — quarentena e rejeitado ficam registrados mas fora do estoque
+      disponível (não podem ser "usados"). Durante o levantamento também foram achados
+      e corrigidos 2 bugs preexistentes (não desta etapa, remanescentes da divisão
+      cabeçalho+itens original): o Dashboard (`app/page.js`) e a Produção
+      (`app/producoes/page.js`, que consequentemente sempre calculava custo pelo valor
+      cadastrado em vez do custo médio real) ainda liam a tabela `recebimentos` no
+      formato antigo. Testado ponta a ponta em produção (item em quarentena com
+      motivo e temperatura, exclusão limpa depois). `supabase/atualizacao_15_inspecoes_qualidade.sql`.
+- [x] **Etapa 3 — Estoque como ledger**: `stock_movements` (histórico append-only —
+      sem UPDATE/DELETE nunca, só estorno/ajuste) + `stock_balances` (saldo
+      materializado por empresa/depósito/matéria-prima/lote, mantido por trigger a
+      cada movimento). Trigger em `inspecoes_qualidade`: quando um item é aprovado
+      (na criação ou numa atualização futura de status), gera automaticamente a
+      entrada no estoque — fecha "ao concluir o recebimento, gerar entrada
+      automaticamente" sem depender do frontend lembrar de fazer isso. Backfill dos
+      6 itens já aprovados. `vw_estoque_materia_prima` (mesmo formato de colunas)
+      passa a somar `stock_balances` em vez de recalcular via join toda vez —
+      `/estoque` não precisou mudar a query da tabela principal. Custo médio em
+      `/estoque` e `/producoes` também migrou de recalcular via join com
+      `inspecoes_qualidade` para ler direto do ledger (mais simples, já pré-filtrado).
+      Cada movimento gera automaticamente um registro em `audit_logs` (criada na
+      Etapa 1, esse foi o primeiro uso real dela). Testado ponta a ponta via API
+      direta (Chrome instável no momento do teste): inspeção aprovada → movimento →
+      saldo → view, tudo automático; dados de teste limpos depois.
+      `supabase/atualizacao_16_estoque_ledger.sql`.
+- [ ] **Etapa 4 — Requisições internas** (`/requisicoes`)
+- [ ] **Etapa 5 — Transferências entre unidades/depósitos** (`/transferencias`)
+- [ ] **Etapa 6 — Consumo direto com centro de custo obrigatório** (`/consumos`)
+- [ ] **Etapa 7 — Indicadores** (dashboard do CD, alertas de validade/mínimo)
 
 - [ ] **Testar upload real de anexo** (nota fiscal/foto) no Recebimento em produção —
       o fluxo foi implementado e verificado por leitura de código, mas o teste
