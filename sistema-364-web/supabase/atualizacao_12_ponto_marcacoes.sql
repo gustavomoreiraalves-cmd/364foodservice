@@ -1,8 +1,8 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 18: PONTO — DISPOSITIVOS, BIOMETRIA E
+-- 364 — ATUALIZAÇÃO 12: PONTO — DISPOSITIVOS, BIOMETRIA E
 -- MARCAÇÕES (NSR sequencial + hash encadeado, imutáveis)
 -- Rode este arquivo inteiro no SQL Editor do Supabase
--- (depois de atualizacao_17_ponto_cadastros.sql).
+-- (depois de atualizacao_11_ponto_cadastros.sql).
 --
 -- ATENÇÃO:
 -- * Dispositivos (token), biometrias (descritor) e marcações são

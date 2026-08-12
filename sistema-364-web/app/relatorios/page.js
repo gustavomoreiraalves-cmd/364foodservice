@@ -15,39 +15,47 @@ export default function RelatoriosPage() {
 
 function Conteudo() {
   const { empresaAtual } = useEmpresaAtual();
-  const [d, setD] = useState(null);
+  const [dTodos, setDTodos] = useState(null);
+  const [periodo, setPeriodo] = useState(''); // '' = acumulado (tudo); 'AAAA-MM' = mês específico
 
   useEffect(() => {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps] = await Promise.all([
-        supabase.from('pedidos').select('status, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
+      const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps, produtos] = await Promise.all([
+        supabase.from('pedidos').select('status, data, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
-        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id), inspecoes_qualidade(status)').eq('empresa_id', eid),
-        supabase.from('despesas').select('valor').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, status_recebimento, recebimentos(fornecedor_id, data)').eq('empresa_id', eid),
+        supabase.from('despesas').select('valor, data').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
         supabase.from('materias_primas').select('*').eq('empresa_id', eid),
+        supabase.from('produtos').select('id, nome').eq('empresa_id', eid),
       ]);
-      setD({
+      setDTodos({
         pedidos: pedidos.data || [],
         producoes: producoes.data || [],
-        recebimentos: (recebimentos.data || []).map(r => ({
-          ...r,
-          fornecedor_id: r.recebimentos?.fornecedor_id,
-          status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
-        })),
+        recebimentos: recebimentos.data || [],
         despesas: despesas.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
         mps: mps.data || [],
+        produtos: produtos.data || [],
       });
     }
     carregar();
   }, [empresaAtual?.id]);
 
-  if (!d) return <p className="muted">Carregando…</p>;
+  if (!dTodos) return <p className="muted">Carregando…</p>;
+
+  const noPeriodo = data => !periodo || (data || '').slice(0, 7) === periodo;
+  const d = {
+    ...dTodos,
+    pedidos: dTodos.pedidos.filter(p => noPeriodo(p.data)),
+    producoes: dTodos.producoes.filter(p => noPeriodo(p.data)),
+    recebimentos: dTodos.recebimentos.filter(r => noPeriodo(r.recebimentos?.data)),
+    despesas: dTodos.despesas.filter(x => noPeriodo(x.data)),
+  };
 
   // custo unitário do produto: média dos lotes produzidos; sem produção, custo teórico pela ficha técnica
   function custoUnitProduto(produtoId) {
@@ -68,7 +76,7 @@ function Conteudo() {
   const validos = d.pedidos.filter(p => p.status !== 'Cancelado');
   const receitaTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * Number(i.preco_unitario), 0), 0);
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
-  const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
+  const recebimentosValidos = d.recebimentos.filter(r => r.status_recebimento == null || ['Aceito', 'Aceito com ressalva'].includes(r.status_recebimento));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
   const despesasTotal = d.despesas.reduce((s, x) => s + Number(x.valor), 0);
   const lucroBruto = receitaTotal - cmvTotal;
@@ -77,11 +85,37 @@ function Conteudo() {
     .filter(p => ['Faturado', 'Enviado'].includes(p.status))
     .reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * Number(i.preco_unitario), 0), 0);
 
+  const margemProdutos = d.produtos.map(prod => {
+    const itens = validos.flatMap(p => (p.pedido_itens || []).filter(i => i.produto_id === prod.id));
+    const qtd = itens.reduce((s, i) => s + Number(i.quantidade), 0);
+    if (!qtd) return null;
+    const receita = itens.reduce((s, i) => s + Number(i.quantidade) * Number(i.preco_unitario), 0);
+    const custoUnit = custoUnitProduto(prod.id);
+    const custo = qtd * custoUnit;
+    const margem = receita - custo;
+    return { id: prod.id, nome: prod.nome, qtd, precoMedio: receita / qtd, custoUnit, margem, margemPct: receita ? (margem / receita) * 100 : 0 };
+  }).filter(Boolean).sort((a, b) => b.margem - a.margem);
+
+  const rotulo = periodo
+    ? new Date(periodo + '-02').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    : 'acumulado';
+
   return (
     <>
+      <div className="panel">
+        <h3>Período</h3>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+          <div>
+            <label>Mês</label>
+            <input type="month" value={periodo} onChange={e => setPeriodo(e.target.value)} />
+          </div>
+          {periodo && <button className="btn secondary" onClick={() => setPeriodo('')}>Ver tudo (acumulado)</button>}
+        </div>
+      </div>
+
       <div className="grid2">
         <div className="panel">
-          <h3>DRE simplificado (acumulado)</h3>
+          <h3>DRE simplificado ({rotulo})</h3>
           <table>
             <tbody>
               <tr><td>Receita de vendas</td><td className="num">{fmtMoney(receitaTotal)}</td></tr>
@@ -93,7 +127,7 @@ function Conteudo() {
           </table>
         </div>
         <div className="panel">
-          <h3>Fluxo de caixa (acumulado)</h3>
+          <h3>Fluxo de caixa ({rotulo})</h3>
           <table>
             <tbody>
               <tr><td>Entradas (vendas faturadas/enviadas)</td><td className="num">{fmtMoney(entradasCaixa)}</td></tr>
@@ -143,6 +177,27 @@ function Conteudo() {
                   </tr>
                 );
               }) : <tr className="empty-row"><td colSpan={3}>Sem fornecedores.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Margem por produto ({rotulo})</h3>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Produto</th><th>Qtd vendida</th><th>Preço médio</th><th>Custo médio</th><th>Margem R$</th><th>Margem %</th></tr></thead>
+            <tbody>
+              {margemProdutos.length ? margemProdutos.map(m => (
+                <tr key={m.id}>
+                  <td>{m.nome}</td>
+                  <td className="num">{m.qtd}</td>
+                  <td className="num">{fmtMoney(m.precoMedio)}</td>
+                  <td className="num">{fmtMoney(m.custoUnit)}</td>
+                  <td className="num">{fmtMoney(m.margem)}</td>
+                  <td className="num">{m.margemPct.toFixed(1)}%</td>
+                </tr>
+              )) : <tr className="empty-row"><td colSpan={6}>Sem vendas no período.</td></tr>}
             </tbody>
           </table>
         </div>

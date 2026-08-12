@@ -24,20 +24,14 @@ function Conteudo() {
       const [pedidos, estoqueMP, recebimentos, produtos, clientes] = await Promise.all([
         supabase.from('pedidos').select('*, clientes(nome), pedido_itens(quantidade, preco_unitario)').eq('empresa_id', eid).order('created_at', { ascending: false }),
         supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid),
-        supabase.from('recebimento_itens')
-          .select('id, quantidade, validade, lote, materia_prima_id, materias_primas(nome, unidade), recebimentos!inner(data, fornecedores(nome))')
-          .eq('empresa_id', eid).order('created_at', { ascending: false }),
+        supabase.from('recebimentos').select('*, materias_primas(nome, unidade), fornecedores(nome)').eq('empresa_id', eid).order('created_at', { ascending: false }),
         supabase.from('produtos').select('id').eq('empresa_id', eid),
         supabase.from('clientes').select('id').eq('empresa_id', eid),
       ]);
       setDados({
         pedidos: pedidos.data || [],
         estoqueMP: estoqueMP.data || [],
-        recebimentos: (recebimentos.data || []).map(r => ({
-          ...r,
-          data: r.recebimentos?.data,
-          fornecedores: r.recebimentos?.fornecedores,
-        })),
+        recebimentos: recebimentos.data || [],
         nProdutos: produtos.data?.length || 0,
         nClientes: clientes.data?.length || 0,
       });

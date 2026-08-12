@@ -1,12 +1,12 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 21: UNIFICAÇÃO DE CADASTROS
+-- 364 — ATUALIZAÇÃO 15: UNIFICAÇÃO DE CADASTROS
 -- A tela /funcionarios é aposentada (vira redirect, como /usuarios).
 -- O cadastro de colaboradores (Ponto → Colaboradores) passa a ser o
 -- único ponto de cadastro de pessoas. A tabela `funcionarios`
 -- continua existindo por baixo (FKs responsavel_id em recebimentos,
 -- producoes, pedidos, despesas não podem quebrar) e é sincronizada
 -- automaticamente a partir do colaborador (já era assim desde a
--- atualização 20 — painel "Acesso").
+-- atualização 14 — painel "Acesso").
 --
 -- Este script faz o backfill: cria um colaborador para cada
 -- funcionário ativo que ainda não tem um (casando por CPF quando
