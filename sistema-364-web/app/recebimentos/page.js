@@ -6,6 +6,7 @@ import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebiment
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import { useEmpresaAtual } from '../../lib/empresa';
+import { CATEGORIAS_CONTA, gerarParcelas } from '../../lib/financeiro';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_QUALIDADE = [
@@ -26,8 +27,16 @@ const STATUS_TAG = {
   devolvido: 'bad',
 };
 const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
+// Só itens com esse status efetivo (após a inspeção) contam pra estoque/ledger
+// (trigger_inspecao_gera_movimento) — mesmo critério usado aqui pra saber
+// qual valor entra na conta a pagar gerada pelo recebimento.
+const STATUS_QUALIDADE_APROVADO = ['aprovado', 'aprovado_com_ressalva'];
 
-const HEADER_VAZIO = () => ({ data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null });
+const HEADER_VAZIO = () => ({
+  data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null,
+  condicao_pagamento: 'À vista', numero_parcelas: 2, intervalo_dias: 30,
+  categoria_conta_pagar: 'Custos Diretos',
+});
 const ITEM_VAZIO = () => ({
   materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
   deposito_id: '', local_armazenamento: '', observacoes: '',
@@ -130,6 +139,10 @@ function Conteudo({ setFicha }) {
   async function registrar(e) {
     e.preventDefault();
     if (!itens.length) { alert('Adicione ao menos um item antes de registrar o recebimento.'); return; }
+    if (header.condicao_pagamento === 'Parcelado' && (Number(header.numero_parcelas) < 2 || Number(header.intervalo_dias) < 1)) {
+      alert('Informe um número de parcelas válido (mínimo 2) e um intervalo de dias válido (mínimo 1) para condição parcelada.');
+      return;
+    }
     setSalvando(true);
     try {
       const { data: cabecalho, error: errCabecalho } = await supabase.from('recebimentos').insert([{
@@ -194,6 +207,9 @@ function Conteudo({ setFicha }) {
           inspecaoId: inspecaoInserida.id,
           fotoProdutoArquivo: it.fotoProdutoArquivo,
           documentoSanitarioArquivo: it.documentoSanitarioArquivo,
+          quantidade: Number(it.quantidade),
+          custoUnitario: Number(it.custo_unitario),
+          statusEfetivo: ehSimples ? 'aprovado' : it.status_qualidade,
         });
       }
 
@@ -224,6 +240,37 @@ function Conteudo({ setFicha }) {
         }
       }
 
+      const totalAceito = Math.round(inseridos
+        .filter(it => STATUS_QUALIDADE_APROVADO.includes(it.statusEfetivo))
+        .reduce((s, it) => s + it.quantidade * it.custoUnitario, 0) * 100) / 100;
+
+      if (totalAceito > 0) {
+        const nomeFornecedor = fornecedores.find(f => f.id === header.fornecedor_id)?.nome || '';
+        const { data: conta, error: e3 } = await supabase.from('contas_a_pagar').insert([{
+          descricao: `Nota ${header.nota_fiscal || cabecalho.id.slice(0, 8)} — ${nomeFornecedor}`,
+          categoria_conta: header.categoria_conta_pagar,
+          fornecedor_id: header.fornecedor_id,
+          recebimento_id: cabecalho.id,
+          valor_total: totalAceito,
+          responsavel_id: header.responsavel_id || null,
+          empresa_id: empresaAtual.id,
+        }]).select('id').single();
+
+        if (e3) {
+          alert('Recebimento registrado, mas houve erro ao gerar a conta a pagar: ' + e3.message);
+        } else {
+          const numeroParcelas = header.condicao_pagamento === 'Parcelado' ? Number(header.numero_parcelas) : 1;
+          const parcelas = gerarParcelas(header.data, totalAceito, numeroParcelas, Number(header.intervalo_dias));
+          const { error: e4 } = await supabase.from('contas_a_pagar_parcelas').insert(
+            parcelas.map(p => ({ conta_a_pagar_id: conta.id, numero: p.numero, valor: p.valor, vencimento: p.vencimento, empresa_id: empresaAtual.id }))
+          );
+          if (e4) {
+            await supabase.from('contas_a_pagar').delete().eq('id', conta.id);
+            alert('Recebimento registrado, mas houve erro ao gerar as parcelas — a conta a pagar foi desfeita: ' + e4.message);
+          }
+        }
+      }
+
       setHeader(HEADER_VAZIO());
       setItens([]);
       carregar();
@@ -234,16 +281,22 @@ function Conteudo({ setFicha }) {
 
   async function excluirItem(r) {
     if (!confirm('Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
-    await removerAnexosRecebimento([r.inspecao?.foto_url, r.inspecao?.documento_sanitario_url]);
     const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
     if (error) { alert('Erro ao excluir: ' + error.message); return; }
+    await removerAnexosRecebimento([r.inspecao?.foto_url, r.inspecao?.documento_sanitario_url]);
 
     const { count } = await supabase.from('recebimento_itens')
       .select('id', { count: 'exact', head: true })
       .eq('recebimento_id', r.recebimento_id);
     if (!count) {
-      await removerAnexosRecebimento([r.cabecalho?.nota_fiscal_arquivo_url]);
-      await supabase.from('recebimentos').delete().eq('id', r.recebimento_id);
+      const { error: errHeader } = await supabase.from('recebimentos').delete().eq('id', r.recebimento_id);
+      if (errHeader) {
+        alert(errHeader.message.includes('parcela paga')
+          ? 'Item excluído, mas a nota não pôde ser removida: já tem parcela paga em Contas a Pagar. Ajuste em Financeiro antes.'
+          : 'Item excluído, mas houve erro ao remover a nota: ' + errHeader.message);
+      } else {
+        await removerAnexosRecebimento([r.cabecalho?.nota_fiscal_arquivo_url]);
+      }
     }
     carregar();
   }
@@ -318,6 +371,27 @@ function Conteudo({ setFicha }) {
           </div>
           <div><label>Anexo da nota fiscal (PDF ou imagem)</label>
             <input type="file" accept="application/pdf,image/*" onChange={e => setHeader({ ...header, notaFiscalArquivo: e.target.files?.[0] || null })} />
+          </div>
+          <div><label>Condição de pagamento</label>
+            <select value={header.condicao_pagamento} onChange={e => setHeader({ ...header, condicao_pagamento: e.target.value })}>
+              <option>À vista</option>
+              <option>Parcelado</option>
+            </select>
+          </div>
+          {header.condicao_pagamento === 'Parcelado' && (
+            <>
+              <div><label>Nº de parcelas</label>
+                <input type="number" min="2" value={header.numero_parcelas} onChange={e => setHeader({ ...header, numero_parcelas: e.target.value })} />
+              </div>
+              <div><label>Intervalo entre parcelas (dias)</label>
+                <input type="number" min="1" value={header.intervalo_dias} onChange={e => setHeader({ ...header, intervalo_dias: e.target.value })} />
+              </div>
+            </>
+          )}
+          <div><label>Categoria da conta a pagar</label>
+            <select value={header.categoria_conta_pagar} onChange={e => setHeader({ ...header, categoria_conta_pagar: e.target.value })}>
+              {CATEGORIAS_CONTA.map(c => <option key={c}>{c}</option>)}
+            </select>
           </div>
         </form>
 
