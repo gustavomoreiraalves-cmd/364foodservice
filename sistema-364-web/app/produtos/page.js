@@ -2,11 +2,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, proximoCodigoProduto } from '../../lib/format';
+import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 
 const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '' };
-const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', preco_venda: '', validade_dias: 90 };
+const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', preco_venda: '', validade_dias: 90, producao_interna: false };
 
 export default function ProdutosPage() {
   return (
@@ -25,18 +26,22 @@ function Conteudo() {
   const [formMP, setFormMP] = useState(MP_VAZIA);
   const [formProd, setFormProd] = useState(PROD_VAZIO);
   const [itemFicha, setItemFicha] = useState({});
+  const [regras, setRegras] = useState([]);
+  const [regraForm, setRegraForm] = useState({});
 
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', empresaAtual.id).order('codigo'),
       supabase.from('ficha_tecnica').select('*, materias_primas(nome, unidade)').eq('empresa_id', empresaAtual.id),
+      supabase.from('produto_regras_validade').select('*').eq('empresa_id', empresaAtual.id),
     ]);
     setMps(r1.data || []);
     setProdutos(r2.data || []);
     setFichas(r3.data || []);
+    setRegras(r4.data || []);
     setLoading(false);
   }
 
@@ -74,6 +79,7 @@ function Conteudo() {
       unidade: formProd.unidade,
       preco_venda: Number(formProd.preco_venda),
       validade_dias: Number(formProd.validade_dias) || 90,
+      producao_interna: !!formProd.producao_interna,
       empresa_id: empresaAtual.id,
     }]);
     if (error) { alert('Erro ao salvar: ' + error.message); return; }
@@ -105,6 +111,38 @@ function Conteudo() {
 
   async function delItemFicha(id) {
     await supabase.from('ficha_tecnica').delete().eq('id', id);
+    carregar();
+  }
+
+  async function toggleProducaoInterna(p) {
+    const { error } = await supabase.from('produtos').update({ producao_interna: !p.producao_interna }).eq('id', p.id);
+    if (error) { alert('Erro ao atualizar: ' + error.message); return; }
+    carregar();
+  }
+
+  function regraDe(produtoId, conservacao) {
+    return regras.find(r => r.produto_id === produtoId && r.conservacao === conservacao);
+  }
+
+  async function salvarRegra(produtoId, conservacao) {
+    const chave = `${produtoId}:${conservacao}`;
+    const atual = regraDe(produtoId, conservacao);
+    const f = regraForm[chave] || {
+      permitido: atual ? atual.permitido : true,
+      valor: atual?.validade_valor || '',
+      unidade: atual?.validade_unidade || 'dias',
+    };
+    if (f.permitido && !Number(f.valor)) { alert('Informe o prazo de validade para conservação permitida.'); return; }
+    const { error } = await supabase.from('produto_regras_validade').upsert([{
+      empresa_id: empresaAtual.id,
+      produto_id: produtoId,
+      conservacao,
+      permitido: !!f.permitido,
+      validade_valor: f.permitido ? Number(f.valor) : null,
+      validade_unidade: f.permitido ? f.unidade : null,
+      ativo: true,
+    }], { onConflict: 'produto_id,conservacao' });
+    if (error) { alert('Erro ao salvar regra: ' + error.message); return; }
     carregar();
   }
 
@@ -169,6 +207,10 @@ function Conteudo() {
           </div>
           <div><label>Preço de venda (R$)</label><input type="number" step="0.01" required value={formProd.preco_venda} onChange={e => setFormProd({ ...formProd, preco_venda: e.target.value })} /></div>
           <div><label>Validade do produto (dias)</label><input type="number" value={formProd.validade_dias} onChange={e => setFormProd({ ...formProd, validade_dias: e.target.value })} /></div>
+          <div><label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={formProd.producao_interna} onChange={e => setFormProd({ ...formProd, producao_interna: e.target.checked })} />
+            Produto de produção interna
+          </label></div>
           <div><button className="btn" type="submit">Adicionar produto</button></div>
         </form>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
@@ -186,14 +228,56 @@ function Conteudo() {
           return (
             <div className="items-list" style={{ marginBottom: 12 }} key={p.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                <div><b>{p.codigo}</b> — {p.nome} <span className="muted">({p.categoria || 'sem categoria'})</span></div>
+                <div>
+                  <b>{p.codigo}</b> — {p.nome} <span className="muted">({p.categoria || 'sem categoria'})</span>
+                  {p.producao_interna && <span style={{ marginLeft: 8, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber-bright)', border: '1px solid var(--amber)', borderRadius: 4, padding: '2px 6px' }}>Produção interna</span>}
+                </div>
                 <div className="row-actions">
                   <span className="muted" style={{ fontSize: 11.5 }}>
                     Custo teórico: {fmtMoney(custoT)} · Preço: {fmtMoney(p.preco_venda)} · Margem: {margem.toFixed(1)}%
                   </span>
+                  <button className="btn secondary small" onClick={() => toggleProducaoInterna(p)}>
+                    {p.producao_interna ? 'Remover de produção interna' : 'Marcar como produção interna'}
+                  </button>
                   <button className="btn danger" onClick={() => delProduto(p.id)}>Excluir produto</button>
                 </div>
               </div>
+              {p.producao_interna && (
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ marginBottom: 6 }}>Conservação e validade (usadas na Produção Interna)</label>
+                  {CONSERVACOES.map(c => {
+                    const chave = `${p.id}:${c.id}`;
+                    const atual = regraDe(p.id, c.id);
+                    const f = regraForm[chave] || {
+                      permitido: atual ? atual.permitido : false,
+                      valor: atual?.validade_valor || '',
+                      unidade: atual?.validade_unidade || 'dias',
+                    };
+                    const setF = novo => setRegraForm({ ...regraForm, [chave]: { ...f, ...novo } });
+                    return (
+                      <div className="item-line" key={c.id} style={{ gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ minWidth: 90 }}>{c.label}</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', margin: 0 }}>
+                          <input type="checkbox" checked={!!f.permitido} onChange={e => setF({ permitido: e.target.checked })} />
+                          Permitido
+                        </label>
+                        {f.permitido && (
+                          <>
+                            <input type="number" min="1" style={{ width: 80 }} placeholder="Prazo" value={f.valor} onChange={e => setF({ valor: e.target.value })} />
+                            <select value={f.unidade} onChange={e => setF({ unidade: e.target.value })}>
+                              <option value="dias">dias</option><option value="horas">horas</option>
+                            </select>
+                          </>
+                        )}
+                        <button className="btn secondary small" type="button" onClick={() => salvarRegra(p.id, c.id)}>Salvar</button>
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          {atual ? (atual.permitido ? `Regra atual: ${atual.validade_valor} ${atual.validade_unidade}` : 'Regra atual: não permitido') : 'Sem regra definida'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div style={{ marginTop: 10 }}>
                 <label style={{ marginBottom: 6 }}>Ficha técnica (matéria-prima por unidade produzida)</label>
                 {itens.length ? itens.map(f => (
