@@ -22,11 +22,11 @@ function Conteudo() {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [pedidos, producoes, recebimentos, despesas, fornecedores, fichas, mps, produtos] = await Promise.all([
+      const [pedidos, producoes, recebimentos, contasAPagar, fornecedores, fichas, mps, produtos] = await Promise.all([
         supabase.from('pedidos').select('status, data, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
-        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, status_recebimento, recebimentos(fornecedor_id, data)').eq('empresa_id', eid),
-        supabase.from('despesas').select('valor, data').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id, data), inspecoes_qualidade(status)').eq('empresa_id', eid),
+        supabase.from('contas_a_pagar').select('valor_total, created_at').is('recebimento_id', null).eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
         supabase.from('materias_primas').select('*').eq('empresa_id', eid),
@@ -35,8 +35,13 @@ function Conteudo() {
       setDTodos({
         pedidos: pedidos.data || [],
         producoes: producoes.data || [],
-        recebimentos: recebimentos.data || [],
-        despesas: despesas.data || [],
+        recebimentos: (recebimentos.data || []).map(r => ({
+          ...r,
+          fornecedor_id: r.recebimentos?.fornecedor_id,
+          data: r.recebimentos?.data,
+          status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
+        })),
+        contasAPagar: contasAPagar.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
         mps: mps.data || [],
@@ -53,8 +58,8 @@ function Conteudo() {
     ...dTodos,
     pedidos: dTodos.pedidos.filter(p => noPeriodo(p.data)),
     producoes: dTodos.producoes.filter(p => noPeriodo(p.data)),
-    recebimentos: dTodos.recebimentos.filter(r => noPeriodo(r.recebimentos?.data)),
-    despesas: dTodos.despesas.filter(x => noPeriodo(x.data)),
+    recebimentos: dTodos.recebimentos.filter(r => noPeriodo(r.data)),
+    contasAPagar: dTodos.contasAPagar.filter(x => noPeriodo(x.created_at)),
   };
 
   // custo unitário do produto: média dos lotes produzidos; sem produção, custo teórico pela ficha técnica
@@ -76,9 +81,9 @@ function Conteudo() {
   const validos = d.pedidos.filter(p => p.status !== 'Cancelado');
   const receitaTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * Number(i.preco_unitario), 0), 0);
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
-  const recebimentosValidos = d.recebimentos.filter(r => r.status_recebimento == null || ['Aceito', 'Aceito com ressalva'].includes(r.status_recebimento));
+  const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
-  const despesasTotal = d.despesas.reduce((s, x) => s + Number(x.valor), 0);
+  const despesasTotal = d.contasAPagar.reduce((s, x) => s + Number(x.valor_total), 0);
   const lucroBruto = receitaTotal - cmvTotal;
   const lucroLiquido = lucroBruto - despesasTotal;
   const entradasCaixa = d.pedidos
@@ -167,7 +172,7 @@ function Conteudo() {
             <thead><tr><th>Fornecedor</th><th>Nº de recebimentos</th><th>Total comprado</th></tr></thead>
             <tbody>
               {d.fornecedores.length ? d.fornecedores.map(f => {
-                const recs = recebimentosValidos.filter(r => r.recebimentos?.fornecedor_id === f.id);
+                const recs = recebimentosValidos.filter(r => r.fornecedor_id === f.id);
                 const total = recs.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
                 return (
                   <tr key={f.id}>

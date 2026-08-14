@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase } from './supabase.js';
 
 export function fmtMoney(v) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
