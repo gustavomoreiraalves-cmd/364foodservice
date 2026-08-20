@@ -5,6 +5,10 @@
 # Uso: tests/rls/verificar.sh
 set -euo pipefail
 
+# Os `drop ... if exists` das migrações emitem um NOTICE por objeto ausente.
+# São esperados e escondem o que importa na saída.
+export PGOPTIONS='-c client_min_messages=warning'
+
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 RAIZ="$(cd "$AQUI/../.." && pwd)"
 BANCO="${BANCO_TESTE_RLS:-rls_test_364}"
@@ -20,13 +24,13 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 # A migração sob teste é o arquivo real que vai para produção.
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_20_rls_escopo_empresa.sql" 2>&1 | grep -v 'NOTICE:' || true
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_20_rls_escopo_empresa.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
 # O bloco de rollback vive comentado no fim da migração; extrai e aplica para
 # provar que ele é SQL válido e restaura o estado anterior.
 sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_20_rls_escopo_empresa.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql" 2>&1 | grep -v 'NOTICE:' || true
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql"
 rm -f "$AQUI/.rollback.sql"
 
 restauradas=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_policies where policyname in ('escalas_compartilhadas','via_escala');")

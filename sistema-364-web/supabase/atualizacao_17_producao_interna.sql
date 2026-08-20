@@ -14,7 +14,22 @@
 --
 -- Rode este arquivo inteiro no SQL Editor do Supabase,
 -- depois de atualizacao_16_financeiro_contas_a_pagar.sql.
+--
+-- CORRIGIDO EM 20/08/2026, antes da primeira aplicação bem-sucedida:
+--   • `audit_logs` já existe em produção com outra estrutura (usuario_id,
+--     recurso, recurso_id, valores_anteriores, valores_novos, justificativa).
+--     A versão anterior deste arquivo assumia ator_user_id/entidade/... e o
+--     `create table if not exists` não corrigia nada, porque a tabela existe.
+--     `fn_registrar_auditoria` é `language sql`, então o Postgres valida o
+--     corpo na criação: a migração abortava exatamente ali. Agora o arquivo
+--     usa as colunas reais, e o `create table` reflete essa estrutura para
+--     bancos novos.
+--   • O arquivo passa a rodar dentro de uma transação. Sem isso, uma falha no
+--     meio deixava metade do schema aplicado e sem nenhum arquivo que o
+--     descrevesse — foi assim que `tem_permissao` acabou em produção sozinha.
 -- =========================================================
+
+begin;
 
 -- ---------- PRODUTOS: flag de produção interna + modelo de etiqueta ----------
 alter table produtos add column if not exists producao_interna boolean not null default false;
@@ -161,19 +176,25 @@ create table if not exists producao_descartes (
 );
 
 -- ---------- AUDITORIA GLOBAL (mesma estrutura do ponto_audit_logs) ----------
+-- Estrutura espelhada do que já existe em produção. Em produção este bloco é
+-- inerte (a tabela existe); em banco novo ele cria a mesma forma, para que a
+-- função de auditoria abaixo valha nos dois.
 create table if not exists audit_logs (
-  id bigint generated always as identity primary key,
-  ator_user_id uuid,
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid not null references empresas(id),
+  unidade_id uuid references unidades(id),
+  usuario_id uuid,
   acao text not null,
-  entidade text not null,
-  entidade_id text,
-  empresa_id uuid,
-  valores_antes jsonb,
-  valores_depois jsonb,
-  motivo text,
+  recurso text not null,
+  recurso_id uuid,
+  valores_anteriores jsonb,
+  valores_novos jsonb,
+  justificativa text,
+  request_id text,
+  ip text,
   created_at timestamptz not null default now()
 );
-create index if not exists audit_logs_entidade_idx on audit_logs (entidade, entidade_id);
+create index if not exists audit_logs_recurso_idx on audit_logs (recurso, recurso_id);
 
 drop trigger if exists trg_audit_logs_imutavel on audit_logs;
 create trigger trg_audit_logs_imutavel
@@ -251,15 +272,17 @@ as $$
   select coalesce(auth.jwt() -> 'user_metadata' ->> 'nome', auth.jwt() ->> 'email');
 $$;
 
+-- `p_entidade_id` é uuid porque `audit_logs.recurso_id` é uuid: passar text
+-- aqui forçaria um cast implícito que o Postgres não faz em insert.
 create or replace function public.fn_registrar_auditoria(
-  p_entidade text, p_entidade_id text, p_acao text,
+  p_entidade text, p_entidade_id uuid, p_acao text,
   p_empresa_id uuid, p_antes jsonb, p_depois jsonb, p_motivo text default null
 )
 returns void
 language sql security definer
 set search_path = public
 as $$
-  insert into audit_logs (ator_user_id, acao, entidade, entidade_id, empresa_id, valores_antes, valores_depois, motivo)
+  insert into audit_logs (usuario_id, acao, recurso, recurso_id, empresa_id, valores_anteriores, valores_novos, justificativa)
   values (auth.uid(), p_acao, p_entidade, p_entidade_id, p_empresa_id, p_antes, p_depois, p_motivo);
 $$;
 
@@ -346,7 +369,7 @@ begin
       returning * into v;
   end if;
 
-  perform public.fn_registrar_auditoria('producoes_internas', p_id::text, 'FINALIZAR',
+  perform public.fn_registrar_auditoria('producoes_internas', p_id, 'FINALIZAR',
                                         v.empresa_id, v_antes, to_jsonb(v), p_motivo_validade);
   return v;
 end $$;
@@ -377,7 +400,7 @@ begin
   end if;
   v_antes := to_jsonb(v);
   update producoes_internas set status = 'cancelada', cancelada_em = now() where id = p_id returning * into v;
-  perform public.fn_registrar_auditoria('producoes_internas', p_id::text, 'CANCELAR',
+  perform public.fn_registrar_auditoria('producoes_internas', p_id, 'CANCELAR',
                                         v.empresa_id, v_antes, to_jsonb(v), p_motivo);
 end $$;
 
@@ -411,7 +434,7 @@ begin
   insert into producao_descartes (empresa_id, producao_interna_id, quantidade, unidade_medida, motivo, observacao, usuario_id, usuario_nome)
   values (v.empresa_id, p_id, p_quantidade, p_unidade, p_motivo, p_observacao, auth.uid(), public.fn_nome_usuario());
   update producoes_internas set status = 'descartada' where id = p_id returning * into v;
-  perform public.fn_registrar_auditoria('producoes_internas', p_id::text, 'DESCARTE',
+  perform public.fn_registrar_auditoria('producoes_internas', p_id, 'DESCARTE',
                                         v.empresa_id, v_antes, to_jsonb(v), p_motivo);
 end $$;
 
@@ -458,13 +481,15 @@ begin
   insert into etiqueta_impressoes (empresa_id, source_type, source_id, tipo, quantidade, modelo, impressora, motivo, usuario_id, usuario_nome)
   values (v_empresa, p_source_type, p_source_id, p_tipo, p_quantidade, p_modelo, p_impressora, p_motivo, auth.uid(), public.fn_nome_usuario());
 
-  perform public.fn_registrar_auditoria('etiqueta_impressoes', p_source_id::text,
+  perform public.fn_registrar_auditoria('etiqueta_impressoes', p_source_id,
                                         case when p_tipo = 'reimpressao' then 'REIMPRESSAO' else 'IMPRESSAO' end,
                                         v_empresa, null,
                                         jsonb_build_object('source_type', p_source_type, 'quantidade', p_quantidade,
                                                            'modelo', p_modelo, 'impressora', p_impressora),
                                         p_motivo);
 end $$;
+
+commit;
 
 -- =========================================================
 -- PERMISSÕES GRANULARES (opcionais — 'admin' passa em todas)
