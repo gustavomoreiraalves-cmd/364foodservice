@@ -29,7 +29,7 @@ export default function EscalasPage() {
 }
 
 function Conteudo() {
-  const { empresaAtual } = useEmpresaAtual();
+  const { empresaAtual, empresas: empresasGrupo } = useEmpresaAtual();
   const [escalas, setEscalas] = useState([]);
   const [dias, setDias] = useState([]);
   const [colaboradores, setColaboradores] = useState([]);
@@ -45,7 +45,8 @@ function Conteudo() {
     if (!empresaAtual) return;
     setLoading(true);
     const [{ data: escs }, { data: ds }, { data: colabs }, { data: atribs }] = await Promise.all([
-      supabase.from('escalas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      // compartilhadas entre todas as empresas do grupo — sem filtro por empresa_id
+      supabase.from('escalas').select('*').order('nome'),
       supabase.from('escala_dias').select('*'),
       supabase.from('colaboradores').select('id, nome, status').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('colaborador_escalas').select('*').order('data_inicio', { ascending: false }),
@@ -71,7 +72,7 @@ function Conteudo() {
   async function salvarEscala(e) {
     e.preventDefault();
     const { data, error } = await supabase.from('escalas').insert([{
-      empresa_id: empresaAtual.id,
+      empresa_id: empresaAtual.id, // só registro de origem — a escala fica visível a todas as empresas
       nome: fEscala.nome,
       tipo: fEscala.tipo,
       ciclo_dias: fEscala.tipo === '12x36' ? 2 : null,
@@ -129,6 +130,7 @@ function Conteudo() {
 
   const nomeColab = id => colaboradores.find(c => c.id === id)?.nome || '—';
   const nomeEscala = id => escalas.find(s => s.id === id)?.nome || '—';
+  const nomeEmpresa = id => empresasGrupo?.find(e => e.id === id)?.nome || '—';
   const rotuloDia = (escala, dia) => escala?.tipo === '12x36' ? `Dia ${dia + 1} do ciclo` : DIAS_SEMANA[dia];
 
   if (loading) return <p className="muted">Carregando…</p>;
@@ -136,7 +138,10 @@ function Conteudo() {
   return (
     <>
       <div className="panel">
-        <h3>Escalas — {empresaAtual?.nome}</h3>
+        <h3>Escalas do Grupo 364</h3>
+        <p className="muted" style={{ fontSize: 11.5, margin: '-6px 0 12px' }}>
+          Compartilhadas entre todas as empresas — cadastre uma vez e atribua a colaboradores de qualquer marca.
+        </p>
         {!mostrarForm ? (
           <button className="btn" onClick={() => setMostrarForm(true)}>Criar escala</button>
         ) : (
@@ -185,7 +190,7 @@ function Conteudo() {
 
         <div className="table-wrap" style={{ marginTop: 14 }}>
           <table>
-            <thead><tr><th>Nome</th><th>Tipo</th><th>Horários</th><th>Tolerância</th><th>Situação</th></tr></thead>
+            <thead><tr><th>Nome</th><th>Tipo</th><th>Horários</th><th>Tolerância</th><th>Origem</th><th>Situação</th></tr></thead>
             <tbody>
               {escalas.length ? escalas.map(s => {
                 const meusDias = dias.filter(d => d.escala_id === s.id).sort((a, b) => a.dia - b.dia);
@@ -197,10 +202,11 @@ function Conteudo() {
                       {meusDias.filter(d => d.trabalha).map(d => `${rotuloDia(s, d.dia).slice(0, 3)} ${d.entrada?.slice(0, 5) || '?'}–${d.saida?.slice(0, 5) || '?'}`).join(' · ') || '—'}
                     </td>
                     <td className="muted">{s.tolerancia_minutos} min</td>
+                    <td className="muted">{s.empresa_id ? nomeEmpresa(s.empresa_id) : '—'}</td>
                     <td>{s.ativo ? <span className="tag ok">Ativa</span> : <span className="tag bad">Inativa</span>}</td>
                   </tr>
                 );
-              }) : <tr className="empty-row"><td colSpan={5}>Nenhuma escala cadastrada.</td></tr>}
+              }) : <tr className="empty-row"><td colSpan={6}>Nenhuma escala cadastrada.</td></tr>}
             </tbody>
           </table>
         </div>

@@ -200,6 +200,34 @@ do sistema atual. Ficou lá como arquivo morto, sem lógica real (todos os
 valores hardcoded em 0); a versão de verdade foi feita direto em
 `sistema-364-web/app/relatorios/page.js`, plugada no Supabase.
 
+### Quiosque: comprovante por e-mail (20/ago/2026)
+
+Após registrar o ponto, a tela de comprovante mostra um aviso por 10s
+perguntando se envia o comprovante por e-mail para o endereço já cadastrado
+no colaborador (mascarado na tela, ex.: `t*****a@e*****o.com`); sem resposta
+em 10s, conta como recusa e nada é enviado. `app/api/ponto/quiosque/
+comprovante-email/route.js` reconstrói o comprovante a partir do banco
+(nunca confia no que o tablet manda) e usa `lib/pontoServer.js#enviarEmail`
+(Gmail/Google Workspace SMTP via `nodemailer`).
+
+**Pendente:** preencher `GMAIL_USER` e `GMAIL_APP_PASSWORD` no `.env.local`
+(conta Google Workspace do Grupo 364 + [senha de app](https://myaccount.google.com/apppasswords),
+já que a conta precisa ter verificação em 2 etapas ativa). Sem isso o envio
+falha com erro claro na tela ("Configure GMAIL_USER e GMAIL_APP_PASSWORD"),
+sem quebrar o registro do ponto em si.
+
+### Escalas compartilhadas entre empresas do grupo (20/ago/2026)
+
+`escalas` deixou de ser filtrada por `empresa_id`: `atualizacao_19_escalas_
+compartilhadas.sql` tornou a coluna opcional e trocou a policy de RLS por
+uma que só exige `tem_modulo('ponto')` (sem restrição de empresa). Cadastro
+único em Ponto → Escalas, disponível pra atribuir a colaboradores de
+qualquer marca — evita recriar a mesma "6x1 08h às 17h" em cada empresa.
+`empresa_id` continua gravado na criação só como registro de origem
+(coluna "Origem" na lista). A atribuição colaborador↔escala
+(`colaborador_escalas`) não mudou — continua escopada pela empresa do
+colaborador.
+
 ## Próximos passos
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,

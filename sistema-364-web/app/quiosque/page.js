@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import CameraCapture from '../../components/CameraCapture';
 import {
   carregarModelos, detectarComLandmarks, extrairDescritor, melhorMatch, calcularEAR,
-  LIMIAR_MATCH, MARGEM_SEGUNDO, ZONA_CINZENTA, LIMIAR_EAR, EAR_ABERTO,
+  LIMIAR_MATCH, MARGEM_SEGUNDO, ZONA_CINZENTA, LIMIAR_EAR, EAR_ABERTO, QUALIDADE_MINIMA,
 } from '../../lib/facial';
 import { TIPOS_MARCACAO } from '../../lib/ponto';
 
@@ -84,9 +84,16 @@ function TelaAtivacao({ aoAtivar }) {
   );
 }
 
+const POSES_CADASTRO = [
+  'Olhe de frente para a câmera',
+  'Vire levemente o rosto para a direita',
+  'Vire levemente o rosto para a esquerda',
+];
+
 function TelaQuiosque({ token, info, aoDesautorizar }) {
-  // fases: idle | camera | confirmar | gravando | comprovante | pin
+  // fases: idle | camera | confirmar | gravando | comprovante | pin | cadastro_biometria
   const [fase, setFase] = useState('idle');
+  const [colabCadastro, setColabCadastro] = useState(null); // colaborador sem biometria, identificado via PIN
   const [agora, setAgora] = useState(new Date());
   const offsetRef = useRef(0);
   const [online, setOnline] = useState(true);
@@ -98,6 +105,9 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
   const [erro, setErro] = useState('');
   const [confirmacao, setConfirmacao] = useState(null); // {colaborador, tipoSugerido, tipoSel, score, liveness, descritor}
   const [comprovante, setComprovante] = useState(null);
+  const [emailDecidido, setEmailDecidido] = useState(null); // null=aguardando | true=enviar | false=recusado
+  const [emailContagem, setEmailContagem] = useState(10);
+  const [emailStatus, setEmailStatus] = useState('');
   const videoRef = useRef(null);
   const cancelarLoopRef = useRef(false);
 
@@ -267,6 +277,22 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
     if (mensagemErro) setErro(mensagemErro);
   }
 
+  // usado tanto pelo PIN direto (colaborador já tem biometria) quanto depois
+  // de concluir o autocadastro de biometria no quiosque
+  async function irParaConfirmar(colaborador, metodo) {
+    let tipoSugerido = 'entrada';
+    try {
+      const resp = await fetch('/api/ponto/quiosque/contexto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-token': token },
+        body: JSON.stringify({ colaboradorId: colaborador.id }),
+      });
+      if (resp.ok) tipoSugerido = (await resp.json()).tipoSugerido;
+    } catch { /* mantém padrão */ }
+    setConfirmacao({ colaborador, tipoSel: tipoSugerido, score: null, liveness: null, descritor: null, metodo });
+    setFase('confirmar');
+  }
+
   async function confirmarMarcacao() {
     setFase('gravando');
     const idempotencia = crypto.randomUUID();
@@ -294,9 +320,12 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
         const json = await resp.json();
         if (!resp.ok) { ultimoErro = json.error || 'Erro ao registrar.'; break; }
         setComprovante(json.comprovante);
+        setEmailDecidido(json.comprovante.temEmail ? null : false);
+        setEmailContagem(10);
+        setEmailStatus('');
         setConfirmacao(null);
         setFase('comprovante');
-        setTimeout(() => setFase(f => f === 'comprovante' ? 'idle' : f), 8000);
+        setTimeout(() => setFase(f => f === 'comprovante' ? 'idle' : f), 16000);
         return;
       } catch {
         ultimoErro = 'Falha de conexão. Tentando de novo…';
@@ -306,6 +335,32 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
     setConfirmacao(null);
     setFase('idle');
     setErro(ultimoErro);
+  }
+
+  // contagem de 10s pra decidir se envia o comprovante por e-mail; sem
+  // resposta, conta como recusa (não envia nada sem confirmação)
+  useEffect(() => {
+    if (fase !== 'comprovante' || emailDecidido !== null) return;
+    if (emailContagem <= 0) { setEmailDecidido(false); return; }
+    const t = setTimeout(() => setEmailContagem(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [fase, emailDecidido, emailContagem]);
+
+  async function decidirEnvioEmail(enviar) {
+    setEmailDecidido(true);
+    if (!enviar) { setEmailStatus(''); setEmailDecidido(false); return; }
+    setEmailStatus('Enviando…');
+    try {
+      const resp = await fetch('/api/ponto/quiosque/comprovante-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-token': token },
+        body: JSON.stringify({ colaboradorId: comprovante.colaboradorId, nsr: comprovante.nsr }),
+      });
+      const json = await resp.json();
+      setEmailStatus(resp.ok ? `Enviado para ${json.emailMascarado}.` : (json.error || 'Falha ao enviar.'));
+    } catch {
+      setEmailStatus('Falha de conexão ao enviar.');
+    }
   }
 
   // timeout da confirmação
@@ -386,6 +441,18 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
             {new Date(comprovante.dataHoraLocal).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </div>
           <div className="det">NSR {comprovante.nsr} · {comprovante.hashPrefixo}</div>
+
+          {emailDecidido === null && (
+            <div className="qk-email-prompt" style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 13 }}>Enviar este comprovante por e-mail para {comprovante.emailMascarado}?</p>
+              <div className="row-actions" style={{ justifyContent: 'center', gap: 12 }}>
+                <button className="btn qk-registrar" onClick={() => decidirEnvioEmail(true)}>Enviar ({emailContagem}s)</button>
+                <button className="btn secondary" onClick={() => decidirEnvioEmail(false)}>Não enviar</button>
+              </div>
+            </div>
+          )}
+          {emailStatus && <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>{emailStatus}</p>}
+
           <button className="btn secondary small" style={{ marginTop: 14 }} onClick={() => setFase('idle')}>Fechar</button>
         </div>
       )}
@@ -393,19 +460,20 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
       {fase === 'pin' && (
         <TelaPin token={token}
           aoIdentificar={async (colaborador) => {
-            let tipoSugerido = 'entrada';
-            try {
-              const resp = await fetch('/api/ponto/quiosque/contexto', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-device-token': token },
-                body: JSON.stringify({ colaboradorId: colaborador.id }),
-              });
-              if (resp.ok) tipoSugerido = (await resp.json()).tipoSugerido;
-            } catch { /* mantém padrão */ }
-            setConfirmacao({ colaborador, tipoSel: tipoSugerido, score: null, liveness: null, descritor: null, metodo: 'pin' });
-            setFase('confirmar');
+            if (colaborador.biometriaStatus !== 'cadastrada') {
+              setColabCadastro(colaborador);
+              setFase('cadastro_biometria');
+              return;
+            }
+            irParaConfirmar(colaborador, 'pin');
           }}
           aoCancelar={() => setFase('idle')} />
+      )}
+
+      {fase === 'cadastro_biometria' && colabCadastro && (
+        <TelaCadastroBiometria token={token} colaborador={colabCadastro}
+          aoConcluir={() => { irParaConfirmar(colabCadastro, 'pin'); setColabCadastro(null); }}
+          aoCancelar={() => { setColabCadastro(null); setFase('idle'); }} />
       )}
     </div>
   );
@@ -450,5 +518,112 @@ function TelaPin({ token, aoIdentificar, aoCancelar }) {
         <button className="btn secondary" type="button" onClick={aoCancelar}>Voltar</button>
       </div>
     </form>
+  );
+}
+
+// Colaborador identificado por matrícula+PIN mas sem biometria cadastrada:
+// mostra o aviso de privacidade e captura as amostras direto no quiosque.
+function TelaCadastroBiometria({ token, colaborador, aoConcluir, aoCancelar }) {
+  const [etapa, setEtapa] = useState('aviso'); // aviso | captura | enviando
+  const [aviso, setAviso] = useState(null);
+  const [ciente, setCiente] = useState(false);
+  const [modelosProntos, setModelosProntos] = useState(false);
+  const [amostras, setAmostras] = useState([]);
+  const [msg, setMsg] = useState('');
+  const [erro, setErro] = useState('');
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    fetch('/api/ponto/quiosque/aviso-privacidade', { headers: { 'x-device-token': token } })
+      .then(r => r.json())
+      .then(json => { if (json.aviso) setAviso(json.aviso); else setErro(json.error || 'Erro ao carregar aviso.'); })
+      .catch(() => setErro('Falha de conexão ao carregar o aviso de privacidade.'));
+  }, [token]);
+
+  useEffect(() => {
+    if (etapa !== 'captura') return;
+    setMsg('Carregando reconhecimento…');
+    carregarModelos().then(() => { setModelosProntos(true); setMsg(POSES_CADASTRO[0]); })
+      .catch(err => setErro('Falha ao carregar os modelos: ' + err.message));
+  }, [etapa]);
+
+  async function capturarAmostra() {
+    if (!modelosProntos || !videoRef.current) return;
+    setMsg('Analisando…');
+    const resultado = await extrairDescritor(videoRef.current);
+    if (!resultado) { setMsg('Nenhum rosto detectado. ' + POSES_CADASTRO[amostras.length]); return; }
+    if (resultado.score < QUALIDADE_MINIMA) {
+      setMsg(`Qualidade baixa (${resultado.score.toFixed(2)}). Melhore a iluminação. ${POSES_CADASTRO[amostras.length]}`);
+      return;
+    }
+    const novas = [...amostras, resultado];
+    setAmostras(novas);
+    if (novas.length < POSES_CADASTRO.length) { setMsg(POSES_CADASTRO[novas.length]); return; }
+
+    setMsg('Amostras completas. Enviando…');
+    setEtapa('enviando');
+    try {
+      const resp = await fetch('/api/ponto/quiosque/biometria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-token': token },
+        body: JSON.stringify({
+          colaboradorId: colaborador.id,
+          descritores: novas.map(a => a.descritor),
+          qualidades: novas.map(a => a.score),
+        }),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error || 'Erro ao salvar biometria.');
+      aoConcluir();
+    } catch (err) {
+      setErro(err.message);
+      setEtapa('captura');
+      setAmostras([]);
+      setMsg(POSES_CADASTRO[0]);
+    }
+  }
+
+  return (
+    <div className="qk-confirma" style={{ maxWidth: 420 }}>
+      <div className="nome">Olá, {colaborador.primeiroNome}!</div>
+
+      {etapa === 'aviso' && (
+        <>
+          <p style={{ fontSize: 13 }}>Você ainda não tem biometria facial cadastrada. Antes de continuar, leia o aviso de privacidade:</p>
+          {!aviso && !erro && <p className="muted">Carregando…</p>}
+          {aviso && (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '10px 14px', fontSize: 12, margin: '8px 0 14px', whiteSpace: 'pre-wrap', textAlign: 'left', maxHeight: 160, overflowY: 'auto' }}>
+              {aviso.texto}
+            </div>
+          )}
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, cursor: 'pointer', textAlign: 'left' }}>
+            <input type="checkbox" checked={ciente} onChange={e => setCiente(e.target.checked)} />
+            <span>Estou ciente do tratamento dos meus dados biométricos conforme o aviso acima.</span>
+          </label>
+          {erro && <p className="qk-erro">{erro}</p>}
+          <div className="row-actions" style={{ justifyContent: 'center', gap: 12, marginTop: 14 }}>
+            <button className="btn qk-registrar" disabled={!ciente || !aviso} onClick={() => setEtapa('captura')}>Iniciar captura facial</button>
+            <button className="btn secondary" onClick={aoCancelar}>Voltar</button>
+          </div>
+        </>
+      )}
+
+      {(etapa === 'captura' || etapa === 'enviando') && (
+        <>
+          <div className="qk-video-wrap" style={{ maxWidth: 320, margin: '0 auto' }}>
+            <CameraCapture onVideoPronto={v => { videoRef.current = v; }} onErro={e => setErro(e)} />
+          </div>
+          <p style={{ fontSize: 14, minHeight: 22 }}>{msg}</p>
+          <p className="muted" style={{ fontSize: 12 }}>Amostras capturadas: {amostras.length} de {POSES_CADASTRO.length}</p>
+          {erro && <p className="qk-erro">{erro}</p>}
+          <div className="row-actions" style={{ justifyContent: 'center', gap: 12 }}>
+            <button className="btn qk-registrar" disabled={!modelosProntos || etapa === 'enviando'} onClick={capturarAmostra}>
+              {etapa === 'enviando' ? 'Enviando…' : 'Capturar amostra'}
+            </button>
+            <button className="btn secondary" onClick={aoCancelar}>Cancelar</button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

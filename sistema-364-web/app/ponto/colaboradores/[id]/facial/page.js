@@ -5,6 +5,7 @@ import { supabase } from '../../../../../lib/supabase';
 import AppShell from '../../../../../components/AppShell';
 import PontoTabs from '../../../../../components/PontoTabs';
 import CameraCapture from '../../../../../components/CameraCapture';
+import PromptDialog from '../../../../../components/PromptDialog';
 import { useIsAdmin } from '../../../../../lib/ponto';
 import { carregarModelos, extrairDescritor, QUALIDADE_MINIMA } from '../../../../../lib/facial';
 
@@ -36,6 +37,7 @@ function Conteudo() {
   const [erro, setErro] = useState('');
   const videoRef = useRef(null);
   const [modelosProntos, setModelosProntos] = useState(false);
+  const [pedirMotivoBloqueio, setPedirMotivoBloqueio] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -102,9 +104,8 @@ function Conteudo() {
     }
   }
 
-  async function bloquear() {
-    const motivo = prompt('Motivo do bloqueio/exclusão da biometria:');
-    if (!motivo) return;
+  async function bloquear(motivo) {
+    setPedirMotivoBloqueio(false);
     const { data: { session } } = await supabase.auth.getSession();
     const resp = await fetch('/api/ponto/biometria', {
       method: 'DELETE',
@@ -135,7 +136,7 @@ function Conteudo() {
           <div className="row-actions" style={{ marginTop: 14 }}>
             <button className="btn" disabled={!ciente} onClick={() => setEtapa('captura')}>Iniciar captura</button>
             {colab.biometria_status !== 'pendente' && isAdmin && (
-              <button className="btn danger" onClick={bloquear}>Bloquear/excluir biometria atual</button>
+              <button className="btn danger" onClick={() => setPedirMotivoBloqueio(true)}>Bloquear/excluir biometria atual</button>
             )}
           </div>
           {colab.biometria_status === 'cadastrada' && (
@@ -170,6 +171,16 @@ function Conteudo() {
           <p style={{ fontSize: 15 }}>✔ Biometria cadastrada com sucesso. O colaborador já pode registrar ponto no quiosque.</p>
           <button className="btn" onClick={() => router.push('/ponto/colaboradores')}>Voltar aos colaboradores</button>
         </>
+      )}
+
+      {pedirMotivoBloqueio && (
+        <PromptDialog
+          titulo="Bloquear/excluir biometria atual"
+          label="Motivo"
+          placeholder="Ex.: recadastro por má qualidade, saída do colaborador"
+          aoConfirmar={bloquear}
+          aoCancelar={() => setPedirMotivoBloqueio(false)}
+        />
       )}
     </div>
   );

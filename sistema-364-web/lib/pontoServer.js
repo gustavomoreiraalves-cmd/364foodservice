@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -80,6 +81,39 @@ export function decifrarDescritor(texto) {
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
   const plano = Buffer.concat([decipher.update(Buffer.from(dadoB64, 'base64')), decipher.final()]);
   return Array.from(new Float32Array(plano.buffer, plano.byteOffset, plano.byteLength / 4));
+}
+
+// ---------- E-mail (comprovante de marcação via Gmail/Google Workspace SMTP) ----------
+let transporterEmail = null;
+function transporter() {
+  if (transporterEmail) return transporterEmail;
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) throw new Error('Configure GMAIL_USER e GMAIL_APP_PASSWORD no .env.local.');
+  transporterEmail = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass },
+  });
+  return transporterEmail;
+}
+
+export async function enviarEmail({ to, assunto, html }) {
+  await transporter().sendMail({
+    from: `"364 Grupo — Ponto" <${process.env.GMAIL_USER}>`,
+    to,
+    subject: assunto,
+    html,
+  });
+}
+
+export function mascararEmail(email) {
+  const [user, domain] = String(email).split('@');
+  if (!user || !domain) return email;
+  const mask = s => (s.length <= 2 ? s[0] + '*' : s[0] + '*'.repeat(s.length - 2) + s.slice(-1));
+  const [domNome, ...domResto] = domain.split('.');
+  return `${mask(user)}@${mask(domNome)}${domResto.length ? '.' + domResto.join('.') : ''}`;
 }
 
 // Auditoria de eventos aplicativos (não-DML), ex.: geração de token de device.

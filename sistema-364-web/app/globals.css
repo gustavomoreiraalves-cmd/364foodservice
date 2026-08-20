@@ -67,6 +67,11 @@ a{color:var(--amber-bright);}
 .panel{background:var(--char2); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:22px;}
 .panel h3{font-size:14px; color:var(--amber-bright); text-transform:uppercase; letter-spacing:.8px; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:8px;}
 
+/* MODAL (substitui window.prompt/confirm — bloqueados em contextos de iframe/preview) */
+.modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:1000;}
+.modal-box{background:var(--char2); border:1px solid var(--amber); border-radius:var(--radius); padding:20px 22px; width:min(92vw,380px);}
+.modal-box p{font-size:13px; margin:0 0 12px;}
+
 /* FORMS */
 .form-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; align-items:end;}
 label{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--paper-dim); margin-bottom:4px;}

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { autenticarDispositivo, cifrarDescritor } from '../../../../../lib/pontoServer';
+import { autenticarDispositivo, cifrarDescritor, mascararEmail } from '../../../../../lib/pontoServer';
 
 const TIPOS = ['entrada', 'intervalo_inicio', 'intervalo_fim', 'saida'];
 
@@ -31,7 +31,7 @@ export async function POST(request) {
 
   // valida colaborador de novo no servidor (não confia no quiosque)
   const { data: colab } = await sb.from('colaboradores')
-    .select('id, nome, empresa_id, empregador_id, status, registra_ponto, biometria_status, metodos_permitidos')
+    .select('id, nome, email, empresa_id, empregador_id, status, registra_ponto, biometria_status, metodos_permitidos')
     .eq('id', colaboradorId).maybeSingle();
   if (!colab || colab.status !== 'ativo' || !colab.registra_ponto) {
     await registrarTentativa(sb, disp, 'colaborador_bloqueado', { colaborador_proximo_id: colaboradorId });
@@ -102,6 +102,9 @@ export async function POST(request) {
       dataHoraLocal: m.data_hora_local,
       hashPrefixo: (m.record_hash || '').slice(0, 12),
       primeiroNome: colab.nome.split(' ')[0],
+      colaboradorId: colab.id,
+      temEmail: !!colab.email,
+      emailMascarado: colab.email ? mascararEmail(colab.email) : null,
     },
   });
 }

@@ -16,7 +16,7 @@ export const MODULOS = [
   // 'funcionarios' foi unificado ao cadastro de colaboradores (Ponto) — ver ROADMAP.md
   { id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', desc: 'Categorias de conta e contas a pagar' },
   { id: 'relatorios', label: 'Relatórios', href: '/relatorios', ic: '▢', desc: 'Produção, compras e financeiro' },
-  { id: 'ponto', label: 'Ponto', href: '/ponto/colaboradores', ic: '◔', desc: 'Controle de ponto, colaboradores e escalas' },
+  { id: 'ponto', label: 'RH', href: '/ponto/colaboradores', ic: '◔', desc: 'Controle de ponto, colaboradores e escalas' },
 ];
 
 // Logins sem "@" viram e-mail interno (ex.: admin -> admin@364.local)

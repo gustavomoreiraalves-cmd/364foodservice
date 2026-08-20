@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
 import PontoTabs from '../../../components/PontoTabs';
+import PromptDialog from '../../../components/PromptDialog';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { MODULOS } from '../../../lib/auth';
 import { formatarCpf, useIsAdmin } from '../../../lib/ponto';
@@ -29,10 +30,26 @@ export default function ColaboradoresPage() {
   );
 }
 
+// dados do colaborador -> shape do form (edição carrega os valores atuais)
+function colaboradorParaForm(c) {
+  return {
+    nome: c.nome || '', cpf: c.cpf || '', data_nascimento: c.data_nascimento || '',
+    email: c.email || '', telefone: c.telefone || '',
+    matricula: c.matricula || '', pis: c.pis || '', cargo: c.cargo || '',
+    tipo_contrato: c.tipo_contrato || 'clt', data_admissao: c.data_admissao || '',
+    carga_horaria_semanal: c.carga_horaria_semanal ?? '44', banco_horas: !!c.banco_horas,
+    tolerancia_minutos: c.tolerancia_minutos ?? '10',
+    empregador_id: c.empregador_id || '', unidade_principal_id: c.unidade_principal_id || '',
+    centro_custo_id: c.centro_custo_id || '', gestor_id: c.gestor_id || '',
+    registra_ponto: c.registra_ponto ?? true,
+  };
+}
+
 function Conteudo() {
   const { empresaAtual, empresas: empresasDisponiveis } = useEmpresaAtual();
   const isAdmin = useIsAdmin();
   const [acessoDe, setAcessoDe] = useState(null); // colaborador com painel de acesso aberto
+  const [editando, setEditando] = useState(null); // colaborador com painel de edição aberto
   const [lista, setLista] = useState([]);
   const [empregadores, setEmpregadores] = useState([]);
   const [unidades, setUnidades] = useState([]);
@@ -43,6 +60,7 @@ function Conteudo() {
   const [fotoFile, setFotoFile] = useState(null);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [pinDe, setPinDe] = useState(null); // colaborador para o qual definir PIN
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -102,6 +120,38 @@ function Conteudo() {
     }
   }
 
+  async function atualizar(e) {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      const payload = {
+        ...form,
+        cpf: form.cpf.replace(/\D/g, ''),
+        data_nascimento: form.data_nascimento || null,
+        data_admissao: form.data_admissao || null,
+        unidade_principal_id: form.unidade_principal_id || null,
+        centro_custo_id: form.centro_custo_id || null,
+        gestor_id: form.gestor_id || null,
+        carga_horaria_semanal: form.carga_horaria_semanal === '' ? null : Number(form.carga_horaria_semanal),
+        tolerancia_minutos: Number(form.tolerancia_minutos) || 10,
+      };
+      const { error } = await supabase.from('colaboradores').update(payload).eq('id', editando.id);
+      if (error) throw error;
+      if (fotoFile) {
+        const path = await uploadFotoColaborador(empresaAtual.id, editando.id, fotoFile);
+        await supabase.from('colaboradores').update({ foto_cadastral_path: path }).eq('id', editando.id);
+      }
+      setEditando(null);
+      setFotoFile(null);
+      setForm(FORM_VAZIO);
+      carregar();
+    } catch (err) {
+      alert('Erro ao atualizar colaborador: ' + err.message);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function mudarStatus(c, status) {
     const { error } = await supabase.from('colaboradores').update({ status, ...(status === 'desligado' ? { data_desligamento: new Date().toISOString().slice(0, 10), registra_ponto: false } : {}) }).eq('id', c.id);
     if (error) { alert('Erro: ' + error.message); return; }
@@ -131,10 +181,9 @@ function Conteudo() {
     }
   }
 
-  async function definirPin(c) {
-    const pin = prompt(`PIN de contingência para ${c.nome} (4 a 6 dígitos):`);
-    if (pin === null) return;
+  async function definirPin(c, pin) {
     if (!/^\d{4,6}$/.test(pin)) { alert('O PIN deve ter de 4 a 6 dígitos.'); return; }
+    setPinDe(null);
     const { data: { session } } = await supabase.auth.getSession();
     const resp = await fetch('/api/ponto/colaboradores/pin', {
       method: 'POST',
@@ -175,72 +224,8 @@ function Conteudo() {
           <button className="btn" onClick={() => setMostrarForm(true)}>Cadastrar colaborador</button>
         ) : (
           <form onSubmit={adicionar}>
-            <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px' }}>Dados pessoais</p>
-            <div className="form-grid">
-              <div><label>Nome completo</label><input required value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} /></div>
-              <div><label>CPF</label><input required value={formatarCpf(form.cpf)} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" /></div>
-              <div><label>Data de nascimento</label><input type="date" value={form.data_nascimento} onChange={e => setForm({ ...form, data_nascimento: e.target.value })} /></div>
-              <div><label>E-mail</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
-              <div><label>Telefone</label><input value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} /></div>
-              <div><label>Foto cadastral</label><input type="file" accept="image/*" onChange={e => setFotoFile(e.target.files?.[0] || null)} /></div>
-            </div>
-            <p className="muted" style={{ fontSize: 11.5, margin: '14px 0 10px' }}>Dados trabalhistas</p>
-            <div className="form-grid">
-              <div><label>Empregador (CNPJ)</label>
-                <select required value={form.empregador_id} onChange={e => setForm({ ...form, empregador_id: e.target.value })}>
-                  <option value="">— selecionar —</option>
-                  {empregadores.map(x => <option key={x.id} value={x.id}>{x.nome_fantasia || x.razao_social}</option>)}
-                </select>
-              </div>
-              <div><label>Matrícula</label><input value={form.matricula} onChange={e => setForm({ ...form, matricula: e.target.value })} /></div>
-              <div><label>PIS</label><input value={form.pis} onChange={e => setForm({ ...form, pis: e.target.value })} /></div>
-              <div><label>Cargo</label><input value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })} /></div>
-              <div><label>Tipo de contrato</label>
-                <select value={form.tipo_contrato} onChange={e => setForm({ ...form, tipo_contrato: e.target.value })}>
-                  <option value="clt">CLT</option>
-                  <option value="estagio">Estágio</option>
-                  <option value="pj">PJ</option>
-                  <option value="temporario">Temporário</option>
-                  <option value="socio">Sócio</option>
-                </select>
-              </div>
-              <div><label>Data de admissão</label><input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} /></div>
-              <div><label>Carga horária semanal</label><input type="number" step="0.5" value={form.carga_horaria_semanal} onChange={e => setForm({ ...form, carga_horaria_semanal: e.target.value })} /></div>
-              <div><label>Unidade principal</label>
-                <select value={form.unidade_principal_id} onChange={e => setForm({ ...form, unidade_principal_id: e.target.value })}>
-                  <option value="">— selecionar —</option>
-                  {unidades.map(u => <option key={u.id} value={u.id}>{u.nome}</option>)}
-                </select>
-              </div>
-              <div><label>Centro de custo</label>
-                <select value={form.centro_custo_id} onChange={e => setForm({ ...form, centro_custo_id: e.target.value })}>
-                  <option value="">— selecionar —</option>
-                  {centros.map(c => <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>)}
-                </select>
-              </div>
-              <div><label>Gestor imediato</label>
-                <select value={form.gestor_id} onChange={e => setForm({ ...form, gestor_id: e.target.value })}>
-                  <option value="">— selecionar —</option>
-                  {lista.filter(c => c.status === 'ativo').map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                </select>
-              </div>
-            </div>
-            <p className="muted" style={{ fontSize: 11.5, margin: '14px 0 10px' }}>Controle de ponto</p>
-            <div className="form-grid">
-              <div><label>Registra ponto</label>
-                <select value={form.registra_ponto ? 'sim' : 'nao'} onChange={e => setForm({ ...form, registra_ponto: e.target.value === 'sim' })}>
-                  <option value="sim">Sim</option>
-                  <option value="nao">Não</option>
-                </select>
-              </div>
-              <div><label>Banco de horas</label>
-                <select value={form.banco_horas ? 'sim' : 'nao'} onChange={e => setForm({ ...form, banco_horas: e.target.value === 'sim' })}>
-                  <option value="nao">Não</option>
-                  <option value="sim">Sim</option>
-                </select>
-              </div>
-              <div><label>Tolerância (minutos)</label><input type="number" value={form.tolerancia_minutos} onChange={e => setForm({ ...form, tolerancia_minutos: e.target.value })} /></div>
-            </div>
+            <CamposColaborador form={form} setForm={setForm} empregadores={empregadores} unidades={unidades} centros={centros}
+              gestores={lista.filter(c => c.status === 'ativo')} onFoto={setFotoFile} />
             <div className="row-actions" style={{ marginTop: 14 }}>
               <button className="btn" type="submit" disabled={salvando}>{salvando ? 'Salvando…' : 'Salvar colaborador'}</button>
               <button className="btn secondary" type="button" onClick={() => { setMostrarForm(false); setForm(FORM_VAZIO); }}>Cancelar</button>
@@ -248,6 +233,20 @@ function Conteudo() {
           </form>
         )}
       </div>
+
+      {editando && (
+        <div className="panel" style={{ borderColor: 'var(--amber)' }}>
+          <h3>Editar colaborador — {editando.nome}</h3>
+          <form onSubmit={atualizar}>
+            <CamposColaborador form={form} setForm={setForm} empregadores={empregadores} unidades={unidades} centros={centros}
+              gestores={lista.filter(c => c.status === 'ativo' && c.id !== editando.id)} onFoto={setFotoFile} />
+            <div className="row-actions" style={{ marginTop: 14 }}>
+              <button className="btn" type="submit" disabled={salvando}>{salvando ? 'Salvando…' : 'Salvar alterações'}</button>
+              <button className="btn secondary" type="button" onClick={() => { setEditando(null); setForm(FORM_VAZIO); setFotoFile(null); }}>Cancelar</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {acessoDe && (
         <AcessoPanel
@@ -298,9 +297,10 @@ function Conteudo() {
                     </td>
                     <td>
                       <div className="row-actions">
+                        <button className="btn secondary small" onClick={() => { setEditando(c); setForm(colaboradorParaForm(c)); setFotoFile(null); setMostrarForm(false); }}>Editar</button>
                         {isAdmin && <button className="btn secondary small" onClick={() => setAcessoDe(c)}>Acesso</button>}
                         <Link className="btn secondary small" href={`/ponto/colaboradores/${c.id}/facial`}>Biometria facial</Link>
-                        <button className="btn secondary small" onClick={() => definirPin(c)}>PIN</button>
+                        <button className="btn secondary small" onClick={() => setPinDe(c)}>PIN</button>
                         {c.foto_cadastral_path && <button className="btn secondary small" onClick={() => verFoto(c)}>Foto</button>}
                       </div>
                     </td>
@@ -316,6 +316,91 @@ function Conteudo() {
           O botão <b>Acesso</b> (admin) gerencia login, permissões por aba e empresas — substitui a antiga tela de Usuários.
         </p>
       </div>
+
+      {pinDe && (
+        <PromptDialog
+          titulo={`PIN de contingência — ${pinDe.nome}`}
+          label="PIN (4 a 6 dígitos)"
+          placeholder="0000"
+          tipo="password"
+          aoConfirmar={pin => definirPin(pinDe, pin)}
+          aoCancelar={() => setPinDe(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// Campos de cadastro trabalhista, reaproveitados no formulário de criação e no de edição.
+function CamposColaborador({ form, setForm, empregadores, unidades, centros, gestores, onFoto }) {
+  return (
+    <>
+      <p className="muted" style={{ fontSize: 11.5, margin: '0 0 10px' }}>Dados pessoais</p>
+      <div className="form-grid">
+        <div><label>Nome completo</label><input required value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} /></div>
+        <div><label>CPF</label><input required value={formatarCpf(form.cpf)} onChange={e => setForm({ ...form, cpf: e.target.value })} placeholder="000.000.000-00" /></div>
+        <div><label>Data de nascimento</label><input type="date" value={form.data_nascimento} onChange={e => setForm({ ...form, data_nascimento: e.target.value })} /></div>
+        <div><label>E-mail</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+        <div><label>Telefone</label><input value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} /></div>
+        <div><label>Foto cadastral</label><input type="file" accept="image/*" onChange={e => onFoto(e.target.files?.[0] || null)} /></div>
+      </div>
+      <p className="muted" style={{ fontSize: 11.5, margin: '14px 0 10px' }}>Dados trabalhistas</p>
+      <div className="form-grid">
+        <div><label>Empregador (CNPJ)</label>
+          <select required value={form.empregador_id} onChange={e => setForm({ ...form, empregador_id: e.target.value })}>
+            <option value="">— selecionar —</option>
+            {empregadores.map(x => <option key={x.id} value={x.id}>{x.nome_fantasia || x.razao_social}</option>)}
+          </select>
+        </div>
+        <div><label>Matrícula</label><input value={form.matricula} onChange={e => setForm({ ...form, matricula: e.target.value })} /></div>
+        <div><label>PIS</label><input value={form.pis} onChange={e => setForm({ ...form, pis: e.target.value })} /></div>
+        <div><label>Cargo</label><input value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })} /></div>
+        <div><label>Tipo de contrato</label>
+          <select value={form.tipo_contrato} onChange={e => setForm({ ...form, tipo_contrato: e.target.value })}>
+            <option value="clt">CLT</option>
+            <option value="estagio">Estágio</option>
+            <option value="pj">PJ</option>
+            <option value="temporario">Temporário</option>
+            <option value="socio">Sócio</option>
+          </select>
+        </div>
+        <div><label>Data de admissão</label><input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} /></div>
+        <div><label>Carga horária semanal</label><input type="number" step="0.5" value={form.carga_horaria_semanal} onChange={e => setForm({ ...form, carga_horaria_semanal: e.target.value })} /></div>
+        <div><label>Unidade principal</label>
+          <select value={form.unidade_principal_id} onChange={e => setForm({ ...form, unidade_principal_id: e.target.value })}>
+            <option value="">— selecionar —</option>
+            {unidades.map(u => <option key={u.id} value={u.id}>{u.nome}</option>)}
+          </select>
+        </div>
+        <div><label>Centro de custo</label>
+          <select value={form.centro_custo_id} onChange={e => setForm({ ...form, centro_custo_id: e.target.value })}>
+            <option value="">— selecionar —</option>
+            {centros.map(c => <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>)}
+          </select>
+        </div>
+        <div><label>Gestor imediato</label>
+          <select value={form.gestor_id} onChange={e => setForm({ ...form, gestor_id: e.target.value })}>
+            <option value="">— selecionar —</option>
+            {gestores.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 11.5, margin: '14px 0 10px' }}>Controle de ponto</p>
+      <div className="form-grid">
+        <div><label>Registra ponto</label>
+          <select value={form.registra_ponto ? 'sim' : 'nao'} onChange={e => setForm({ ...form, registra_ponto: e.target.value === 'sim' })}>
+            <option value="sim">Sim</option>
+            <option value="nao">Não</option>
+          </select>
+        </div>
+        <div><label>Banco de horas</label>
+          <select value={form.banco_horas ? 'sim' : 'nao'} onChange={e => setForm({ ...form, banco_horas: e.target.value === 'sim' })}>
+            <option value="nao">Não</option>
+            <option value="sim">Sim</option>
+          </select>
+        </div>
+        <div><label>Tolerância (minutos)</label><input type="number" value={form.tolerancia_minutos} onChange={e => setForm({ ...form, tolerancia_minutos: e.target.value })} /></div>
+      </div>
     </>
   );
 }
@@ -328,6 +413,7 @@ function AcessoPanel({ colaborador, empresasDisponiveis, aoFechar }) {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState({ usuario: '', senha: '', vincularUserId: '', admin: false, permissoes: [], empresas: [] });
+  const [pedirMotivo, setPedirMotivo] = useState(false);
 
   async function api(method, body, query) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -404,9 +490,8 @@ function AcessoPanel({ colaborador, empresasDisponiveis, aoFechar }) {
     }
   }
 
-  async function revogar() {
-    const motivo = prompt('Motivo da revogação do acesso:');
-    if (motivo === null) return;
+  async function revogar(motivo) {
+    setPedirMotivo(false);
     try {
       await api('DELETE', { colaboradorId: colaborador.id, motivo });
       alert('Acesso revogado: login bloqueado, permissões removidas e funcionários inativados.');
@@ -483,10 +568,20 @@ function AcessoPanel({ colaborador, empresasDisponiveis, aoFechar }) {
 
           <div className="row-actions" style={{ marginTop: 16 }}>
             <button className="btn" type="submit" disabled={salvando}>{salvando ? 'Salvando…' : (info?.acesso ? 'Salvar alterações' : 'Conceder acesso')}</button>
-            {info?.acesso && <button className="btn danger" type="button" onClick={revogar}>Revogar acesso</button>}
+            {info?.acesso && <button className="btn danger" type="button" onClick={() => setPedirMotivo(true)}>Revogar acesso</button>}
             <button className="btn secondary" type="button" onClick={() => aoFechar(false)}>Fechar</button>
           </div>
         </form>
+      )}
+
+      {pedirMotivo && (
+        <PromptDialog
+          titulo="Motivo da revogação do acesso"
+          label="Motivo"
+          placeholder="Ex.: desligamento, troca de função"
+          aoConfirmar={revogar}
+          aoCancelar={() => setPedirMotivo(false)}
+        />
       )}
     </div>
   );

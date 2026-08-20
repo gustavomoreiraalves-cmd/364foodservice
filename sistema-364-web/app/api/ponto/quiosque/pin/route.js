@@ -13,7 +13,7 @@ export async function POST(request) {
 
   const hoje = new Date().toISOString().slice(0, 10);
   const { data: colabs } = await sb.from('colaboradores')
-    .select('id, nome, matricula, status, registra_ponto, metodos_permitidos')
+    .select('id, nome, matricula, status, registra_ponto, metodos_permitidos, biometria_status')
     .eq('matricula', String(matricula).trim())
     .eq('status', 'ativo')
     .eq('registra_ponto', true);
@@ -32,7 +32,13 @@ export async function POST(request) {
 
     const { data: reg } = await sb.from('ponto_pins').select('pin_hash, salt').eq('colaborador_id', colab.id).maybeSingle();
     if (reg && sha256Hex(String(pin) + reg.salt) === reg.pin_hash) {
-      return NextResponse.json({ colaborador: { id: colab.id, primeiroNome: colab.nome.split(' ')[0] } });
+      return NextResponse.json({
+        colaborador: {
+          id: colab.id,
+          primeiroNome: colab.nome.split(' ')[0],
+          biometriaStatus: colab.biometria_status,
+        },
+      });
     }
   }
 
