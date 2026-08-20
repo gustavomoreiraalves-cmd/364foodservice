@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-12T00:00:00Z",
+  "title": "Design System: Sistema 364",
+  "extensions": {
+    "colorMeta": {
+      "amber": {
+        "role": "primary",
+        "displayName": "Amber",
+        "canonical": "#c68a2e",
+        "tonalRamp": ["#291d0a", "#422e10", "#634518", "#8c6122", "#c68a2e", "#e0a949", "#edc98c", "#faecd9"]
+      },
+      "amber-bright": {
+        "role": "primary",
+        "displayName": "Amber Bright",
+        "canonical": "#e0a949",
+        "tonalRamp": ["#291d0a", "#422e10", "#634518", "#8c6122", "#c68a2e", "#e0a949", "#edc98c", "#faecd9"]
+      },
+      "char": {
+        "role": "neutral",
+        "displayName": "Char",
+        "canonical": "#1c1815",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "char-2": {
+        "role": "neutral",
+        "displayName": "Char 2 (surface)",
+        "canonical": "#252019",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "char-3": {
+        "role": "neutral",
+        "displayName": "Char 3 (hover surface)",
+        "canonical": "#2f2921",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "smoke": {
+        "role": "neutral",
+        "displayName": "Smoke (selected surface)",
+        "canonical": "#3c352b",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#f4efe6",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "paper-dim": {
+        "role": "neutral",
+        "displayName": "Dim Paper",
+        "canonical": "#c9c0af",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#6b6053", "#a49a89", "#f4efe6"]
+      },
+      "ember-red": {
+        "role": "danger",
+        "displayName": "Ember Red",
+        "canonical": "#a13d2b",
+        "tonalRamp": ["#200a06", "#3a150e", "#5c2216", "#7f2d1f", "#a13d2b", "#c25842", "#e5806c", "#f5c3b7"]
+      },
+      "coral-alert": {
+        "role": "danger",
+        "displayName": "Coral Alert",
+        "canonical": "#e5806c",
+        "tonalRamp": ["#200a06", "#3a150e", "#5c2216", "#7f2d1f", "#a13d2b", "#c25842", "#e5806c", "#f5c3b7"]
+      },
+      "field-green": {
+        "role": "success",
+        "displayName": "Field Green",
+        "canonical": "#8fbd6f",
+        "tonalRamp": ["#0f150a", "#1a2412", "#28351f", "#4a6636", "#6f9752", "#8fbd6f", "#b3d69c", "#ddeecf"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "canonical": "#413a2f",
+        "tonalRamp": ["#100d0b", "#1c1815", "#252019", "#2f2921", "#3c352b", "#413a2f", "#6b6053", "#a49a89"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Numbers and identity: brand mark, page titles, KPI values, kiosk clock." },
+      "title": { "displayName": "Title", "purpose": "Serif uppercase panel/section headers, in amber-bright." },
+      "body": { "displayName": "Body", "purpose": "Table cells, form copy, running text." },
+      "label": { "displayName": "Label", "purpose": "Uppercase micro-labels: field labels, table headers, tags, KPI labels." }
+    },
+    "shadows": [],
+    "breakpoints": [
+      { "name": "stack", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one call-to-action fill in the system: amber background, dark text, bold uppercase-leaning label.",
+      "html": "<button class=\"ds-btn-primary\">Salvar</button>",
+      "css": ".ds-btn-primary { all: unset; cursor: pointer; background: #c68a2e; color: #1c1815; font-weight: 700; padding: 9px 16px; border-radius: 3px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; } .ds-btn-primary:hover { background: #e0a949; } .ds-btn-primary:focus-visible { outline: 2px solid #e0a949; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: default; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Transparent, bordered — used for lower-emphasis actions like Cancel or Sair.",
+      "html": "<button class=\"ds-btn-secondary\">Cancelar</button>",
+      "css": ".ds-btn-secondary { all: unset; cursor: pointer; background: transparent; border: 1px solid #413a2f; color: #c9c0af; padding: 9px 16px; border-radius: 3px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; } .ds-btn-secondary:hover { border-color: #c68a2e; color: #e0a949; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Reserved for destructive row-level actions — outline by default, fills solid on hover as a deliberate friction point.",
+      "html": "<button class=\"ds-btn-danger\">Excluir</button>",
+      "css": ".ds-btn-danger { all: unset; cursor: pointer; background: transparent; border: 1px solid #a13d2b; color: #e5806c; padding: 5px 9px; border-radius: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; } .ds-btn-danger:hover { background: #a13d2b; color: #f4efe6; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Char background field with a hairline border; focus is a color-only state change, no glow.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-label\">Nome</label><input class=\"ds-input\" placeholder=\"Digite aqui\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; } .ds-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #c9c0af; } .ds-input { background: #1c1815; border: 1px solid #413a2f; color: #f4efe6; padding: 8px 9px; border-radius: 3px; font-size: 13px; font-family: inherit; } .ds-input:focus { outline: none; border-color: #c68a2e; }"
+    },
+    {
+      "name": "KPI Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The signature dashboard tile — a left accent border in amber (or ember-red for warning metrics) is the one deliberate side-border accent in the system.",
+      "html": "<div class=\"ds-kpi\"><div class=\"ds-kpi-label\">Receita do mês</div><div class=\"ds-kpi-value\">R$ 42.180</div></div>",
+      "css": ".ds-kpi { background: #252019; border: 1px solid #413a2f; border-left: 3px solid #c68a2e; border-radius: 3px; padding: 14px 16px; } .ds-kpi-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: #c9c0af; } .ds-kpi-value { font-family: Georgia, 'Times New Roman', serif; font-size: 24px; color: #f4efe6; margin-top: 4px; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A bordered content container with an amber-bright uppercase serif header rule — used for tables, forms, and grouped content.",
+      "html": "<div class=\"ds-panel\"><h3 class=\"ds-panel-title\">Últimos recebimentos</h3><p style=\"color:#c9c0af;font-size:12.5px;margin:0;\">Nenhum registro ainda.</p></div>",
+      "css": ".ds-panel { background: #252019; border: 1px solid #413a2f; border-radius: 3px; padding: 18px 20px; } .ds-panel-title { font-family: Georgia, 'Times New Roman', serif; font-size: 14px; color: #e0a949; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 14px; border-bottom: 1px solid #413a2f; padding-bottom: 8px; }"
+    },
+    {
+      "name": "Status Tag",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "Full-pill status marker: a saturated text color on its own muted, near-black tint of the same hue. Ok/warn/bad are the only three states.",
+      "html": "<span class=\"ds-tag ds-tag-ok\">Faturado</span> <span class=\"ds-tag ds-tag-warn\">Pendente</span> <span class=\"ds-tag ds-tag-bad\">Cancelado</span>",
+      "css": ".ds-tag { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; } .ds-tag-ok { background: #28351f; color: #8fbd6f; } .ds-tag-warn { background: #3a2b13; color: #e0a949; } .ds-tag-bad { background: #3a1c15; color: #e5806c; }"
+    },
+    {
+      "name": "Sidebar Nav Link",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "Default/hover/active states for the main sidebar — active uses the Smoke surface and bold amber-bright text.",
+      "html": "<div style=\"display:flex;flex-direction:column;gap:1px;width:180px;\"><a class=\"ds-nav-link\">Fornecedores</a><a class=\"ds-nav-link ds-nav-link-active\">Produção</a></div>",
+      "css": ".ds-nav-link { text-decoration: none; cursor: pointer; padding: 9px 10px; border-radius: 3px; color: #c9c0af; font-size: 13px; display: block; } .ds-nav-link:hover { background: #2f2921; color: #f4efe6; } .ds-nav-link-active { background: #3c352b; color: #e0a949; font-weight: 600; }"
+    },
+    {
+      "name": "Kiosk Register Button",
+      "kind": "custom",
+      "refersTo": "quiosque",
+      "description": "Signature oversized touch-target CTA from the tablet kiosk sub-world — same amber fill as the primary button, but scaled for a thumb, not a mouse, with the kiosk's larger 8px radius.",
+      "html": "<button class=\"ds-qk-register\">Registrar Ponto</button>",
+      "css": ".ds-qk-register { all: unset; cursor: pointer; background: #c68a2e; color: #1c1815; font-weight: 700; font-size: 20px; padding: 22px 54px; border-radius: 8px; letter-spacing: 1px; text-align: center; text-transform: uppercase; } .ds-qk-register:hover { background: #e0a949; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Foreman's Board",
+    "overview": "Sistema 364 is the shift lead's board on the wall of a working kitchen: dark, no-nonsense, built to be scanned at a glance while hands are busy with something else. It exists to track lots, costs, shifts, and stock across four brands sharing one back office — precision under pressure, not persuasion. Every screen defaults to dense, tabular, low-glare: charcoal surfaces, paper-colored text, and a single warm amber signal for what needs a hand on it right now.\n\nThe palette is deliberately narrow — a handful of char/smoke tones, one paper text color, one recurring accent — so that amber reading as \"active, primary, or worth noticing\" never has to compete with decorative color elsewhere. The system rejects light backgrounds, drop shadows, and rounded-corner softness as its default register; those belong only to the one sub-world built for a different physical context (the ponto kiosk touchscreen).",
+    "keyCharacteristics": [
+      "Dark charcoal ground with a single warm amber signal, not a multi-color palette.",
+      "Georgia serif reserved for numbers and headings; everything operational reads in a plain UI sans-serif.",
+      "Uppercase, letter-spaced micro-labels used relentlessly as the connective tissue between data points.",
+      "Flat by default — depth comes from tone steps and hairline borders, never shadows.",
+      "Sharp 3px corners on desktop/office screens; a distinct, larger-radius, big-touch-target language on the tablet kiosk."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Amber is the only accent color allowed to mean \"primary, active, or pay attention.\" Every other color in the system is either structural neutral (char/smoke/paper) or a narrow functional state (danger/success). Don't introduce a second decorative accent color.", "section": "colors" },
+      { "name": "The Serif-For-Numbers Rule", "body": "Georgia appears only on headings, brand marks, and numeric/identity display values — never on body copy, labels, or table cells. If it's data being scanned in bulk, it's sans-serif; if it's a headline number or a name, it's serif.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces never cast a shadow, at rest or on hover. A card sits \"above\" the page only because it's a lighter tone step with a border, not because it's lifted.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep amber as the only color that means \"primary, active, or attention\" — its frequent reuse across nav/buttons/KPIs/focus is the system's signature, not a bug to fix.",
+      "Do pair every dark surface step with a 1px border rather than a shadow to signal a boundary.",
+      "Do use the uppercase, letter-spaced Label style for anything that annotates data (field labels, table headers, KPI labels, tag text) rather than inventing a new caption style.",
+      "Do use Georgia only for numbers, headings, and identity marks — never for body copy or labels.",
+      "Do give the kiosk shell its own larger radius and touch-target scale rather than reusing office-shell 3px controls at tablet size."
+    ],
+    "donts": [
+      "Don't add box-shadow anywhere in the office or kiosk shell — depth is tone-step + border only.",
+      "Don't introduce a second decorative accent color alongside amber; new semantic states should draw from the existing danger/success pairs (ember-red/coral-alert, field-green) before adding a new hue.",
+      "Don't carry the kiosk's larger radius (8-10px) or oversized touch targets into the office shell, or the office shell's 3px sharpness into the kiosk — they're deliberately different form languages for different physical contexts.",
+      "Don't mix the print ficha's black-on-white paper world with the dark office/kiosk token set; it's an intentionally separate visual register for a printed artifact."
+    ]
+  }
+}
