@@ -1,8 +1,11 @@
 # Controle de lote e rastreabilidade dos defumados — design
 
 **Data:** 2026-08-20
-**Status:** aprovado, aguardando plano de implementação
+**Status:** aprovado; DDL de produção verificado; aguardando plano de implementação
 **Empresa piloto:** 364 Food Services
+
+O design cobre a funcionalidade inteira, mas o plano de implementação é **um por fase** — ver
+"Entrega em fases" no fim do documento.
 
 ## Problema
 
@@ -66,6 +69,57 @@ perde as constraints do banco (rendimento, pesos e quantidades viram texto solto
 saldo por lote uma agregação cara sobre jsonb e joga fora quatro tabelas que já existem e já
 têm RLS multiempresa. O processo é estável; essa flexibilidade não se paga.
 
+## Estado real do banco de produção
+
+O schema de produção divergiu do repositório. O DDL foi lido em 2026-08-20 pelo spec OpenAPI
+do PostgREST, e o resultado muda o tamanho da migração. Registrado aqui porque `schema.sql` e
+as migrações versionadas **não** descrevem o que está no ar.
+
+**As tabelas de produção avançada já têm quase tudo.** A ficha de defumação em papel foi
+modelada no banco quase campo a campo:
+
+```
+defumacoes        id, lote, data, hora_inicio, hora_fim, temperatura_c,
+                  responsavel_id, obs, empresa_id, created_at
+defumacao_itens   id, defumacao_id, materia_prima_id, peso_bruto_kg,
+                  perda_limpeza_kg, sobra_kg, peso_final_kg, empresa_id
+embalagens        id, lote, data, responsavel_id, sobra_kg, obs,
+                  empresa_id, created_at
+embalagem_itens   id, embalagem_id, produto_id, quantidade,
+                  peso_total_kg, empresa_id
+```
+
+Os quatro campos de rendimento e os três de processo (hora início, hora fim, temperatura) já
+existem. A migração fica bem menor do que o previsto.
+
+**Existe um livro-razão de estoque por lote que não está no repositório:**
+
+```
+stock_movements   empresa_id, unidade_id, deposito_id, materia_prima_id,
+                  lote, tipo, quantidade, custo_unitario,
+                  recebimento_item_id, motivo, responsavel_id
+stock_balances    empresa_id, unidade_id, deposito_id, materia_prima_id,
+                  lote, quantidade, custo_unitario
+```
+
+`stock_movements` **já tem `lote` e `recebimento_item_id`**, e `stock_balances` já é chaveado
+por lote. Metade da rastreabilidade de matéria-prima já está construída — só não tem tela nem
+continuidade nas etapas seguintes. Cobre apenas matéria-prima; produto acabado não tem
+equivalente.
+
+**`recebimento_itens` mudou.** Em produção tem `deposito_id` e `observacoes`, e **não** tem
+`status_recebimento`, `condicao_embalagem`, `foto_produto_url` nem `aprovado_por_id` — esses
+campos migraram para a tabela `inspecoes_qualidade` (`recebimento_item_id`, `status`,
+`temperatura_c`, `motivo_rejeicao`, `documento_sanitario_url`, `foto_url`, …). A tela
+`/recebimentos` já lê de lá; o repositório é que ficou para trás.
+
+**A atualização 17 não foi aplicada.** `producoes_internas`, `produto_regras_validade`,
+`etiqueta_impressoes` e `producao_descartes` estão ausentes, embora a 18 (biometria) e a 19
+(escalas) tenham rodado — aplicaram fora de ordem. `audit_logs` existe, criada por fora.
+
+**Volume de dados** (2026-08-20): 7 recebimento_itens, 1 defumação com 2 itens, 0 embalagens,
+1 produção, 2 pedidos, 6 movimentos de estoque, 10 produtos. O backfill é trivial.
+
 ## Modelo de dados
 
 ### Alterações em tabelas existentes
@@ -73,16 +127,28 @@ têm RLS multiempresa. O processo é estável; essa flexibilidade não se paga.
 | Tabela | Alteração |
 | --- | --- |
 | `recebimento_itens` | `+ volumes int` — quantas caixas chegaram; define quantas etiquetas imprimir |
-| `defumacoes` | `+ hora_inicio`, `+ hora_fim`, `+ temperatura_c`, `+ status` |
-| `defumacao_itens` | `+ recebimento_item_id` (lote de origem) e os quatro campos de rendimento da ficha: peso bruto, perda na limpeza, sobra aproveitável, peso defumado |
-| `embalagens` | `+ sobra_material_kg`, `+ status` |
-| `embalagem_itens` | `+ recebimento_item_id` (lote de origem), `+ data_fabricacao` |
+| `defumacoes` | `+ status` — o resto dos campos da ficha já existe |
+| `defumacao_itens` | `+ recebimento_item_id` — o lote de origem. Os quatro campos de rendimento já existem |
+| `embalagens` | `+ status` — `sobra_kg` já existe |
+| `embalagem_itens` | `+ recebimento_item_id` (lote de origem), `+ validade date` |
 | `produtos` | `+ conservacao_texto` — o dizer de conservação impresso, cadastrado por produto |
 | `empresas` | `+ sim_numero`, `+ sim_municipio` — registro no Serviço de Inspeção Municipal |
 | `etiqueta_impressoes` | ampliar o `check` de `source_type` para aceitar `recebimento_item`, `embalagem_item` e `expedicao_caixa` |
 
-`produto_regras_validade` (criada na atualização 17) é reaproveitada sem alteração: cadastra-se
-"congelado: 120 dias" no produto e o sistema calcula `data_fabricacao + 120` sozinho.
+`defumacoes.lote` e `embalagens.lote` já existem como `text not null`, no cabeçalho. Como uma
+ficha pode conter vários lotes de rastreabilidade (um por item), esses campos passam a ser o
+**número da ficha** — `DEF-AAMMDD-###` e `EMB-AAMMDD-###`, gerados pelo mesmo mecanismo de
+`proximoLote`. O lote rastreável fica em `defumacao_itens.recebimento_item_id` e
+`embalagem_itens.recebimento_item_id`. Como só existe 1 defumação lançada, o backfill é uma
+linha.
+
+`embalagem_itens.validade` é calculada na finalização, a partir de `embalagens.data` e da regra
+de conservação do produto, e **gravada**. Congelar o valor evita que mudar a regra do produto
+altere retroativamente validades já impressas — mesmo raciocínio do `validade_calculada` de
+`producoes_internas`.
+
+`produto_regras_validade` (atualização 17) é reaproveitada sem alteração: cadastra-se
+"congelado: 120 dias" no produto e o sistema calcula `data + 120` sozinho.
 
 ### Tabelas novas
 
@@ -104,13 +170,22 @@ sistema.
 
 ### Views novas
 
-- `vw_estoque_produto_lote` — saldo por produto e lote (`embalado − expedido`). Alimenta a
-  sugestão FEFO da expedição.
+- `vw_estoque_produto_lote` — saldo de produto acabado por produto e lote
+  (`embalado − expedido`). Alimenta a sugestão FEFO da expedição.
 - `vw_lote_rastro` — linha do tempo do lote em uma consulta: recebimento, defumação,
   embalagem, expedições e clientes.
 - `vw_rastreio_publico` — subconjunto seguro para a página pública: produto, lote,
   fabricação, validade, conservação e datas das etapas. Sem custo, sem fornecedor, sem
   cliente, sem preço.
+
+Saldo de **matéria-prima** por lote não ganha view nova: já sai de `stock_balances`, que é
+chaveado por lote e está em uso. A defumação lê o saldo de lá.
+
+Avaliada e adiada a unificação dos dois mundos — tornar `stock_movements.materia_prima_id`
+anulável e acrescentar `produto_id`, com check de que exatamente um está preenchido, faria
+matéria-prima e produto acabado compartilharem o mesmo livro-razão. É o desenho mais limpo,
+mas mexe numa tabela viva para ganho que este projeto não precisa. Fica como trabalho futuro;
+por ora produto acabado sai de view.
 
 ### Contagem dupla de estoque
 
@@ -278,7 +353,8 @@ driver configurado em cada máquina: confere-se na primeira e depois é só roda
 
 Impostas pelo banco, não apenas pela tela:
 
-1. Lote com `status_recebimento = 'Rejeitado'` não aparece na lista de defumação.
+1. Lote com `inspecoes_qualidade.status` de rejeição não aparece na lista de defumação. A
+   condição sanitária mora em `inspecoes_qualidade`, não mais em `recebimento_itens`.
 2. Peso defumado maior que peso bruto é erro.
 3. Rendimento abaixo de 40% gera alerta amarelo mas permite salvar — pode ser real, e travar
    faria o operador ajustar o número para passar.
@@ -320,6 +396,8 @@ Telas ficam com verificação manual, como o restante do projeto.
 
 Cada fase é utilizável sozinha e vai a produção antes da próxima começar.
 
+0. **Aplicar a atualização 17 em produção.** Pré-requisito, não fase — sem ela a Fase 1 não
+   compila contra o banco real.
 1. **Migração 20 + etiqueta de recebimento** — campo `volumes`, motor de etiqueta de duas
    colunas, QR. Curta de propósito: é o teste real da impressora com o rolo BOPP. Um erro de
    alinhamento aparece aqui, e não depois de quatro semanas de código.
@@ -331,12 +409,26 @@ Cada fase é utilizável sozinha e vai a produção antes da próxima começar.
 
 ## Pré-requisitos
 
-- **Ler o DDL real de `defumacoes`, `defumacao_itens`, `embalagens` e `embalagem_itens`.**
-  Essas quatro tabelas foram criadas direto no banco e não estão em nenhum arquivo do
-  repositório. Sabe-se que `defumacao_itens` tem `materia_prima_id` e `peso_final_kg`, e que
-  `embalagem_itens` tem `produto_id` e `quantidade`; o resto é inferência. Antes de escrever a
-  migração é preciso consultar o `information_schema` no Supabase. Enquanto isso, a migração
-  usa `add column if not exists` de forma defensiva.
-- **Confirmar que a atualização 17 já rodou em produção.** Esta migração é a `atualizacao_20` e
-  assume 17, 18 e 19 aplicadas.
+- **Aplicar a atualização 17 em produção — bloqueio duro da Fase 1.** Verificado em 2026-08-20:
+  não rodou. O design depende de `produto_regras_validade` (cálculo de validade),
+  `etiqueta_impressoes` e da RPC `registrar_impressao` (auditoria de impressão), todas criadas
+  por ela. A 18 e a 19 já rodaram, então a aplicação está fora de ordem; a 17 usa
+  `create table if not exists` em `audit_logs`, que já existe, então rodar agora é seguro.
 - Confirmar com o fornecedor de consumível que o ribbon é de resina.
+
+### Dívida técnica exposta pela investigação
+
+Não é escopo deste projeto, mas apareceu no caminho e vai atrapalhar quem mexer no banco
+depois:
+
+- **O repositório não descreve o schema de produção.** `stock_movements`, `stock_balances`,
+  `depositos`, `inspecoes_qualidade`, `centros_custo`, `colaboradores` e `audit_logs` existem
+  em produção sem migração versionada. Vale uma `atualizacao_00_baseline.sql` que registre o
+  estado real, senão a próxima pessoa escreve migração em cima de uma planta errada — foi
+  exatamente o que quase aconteceu aqui.
+- **`lib/format.js:custoMedioMP` filtra por `r.status_recebimento`**, coluna que não existe
+  mais em `recebimento_itens`. O filtro cai no ramo `== null` e deixa tudo passar, incluindo
+  lote rejeitado, que assim contamina o custo médio. Deveria ler
+  `inspecoes_qualidade.status`.
+- A migração 17 fora de ordem sugere que não há controle de quais migrações foram aplicadas.
+  Uma tabela `schema_migrations` simples resolveria.
