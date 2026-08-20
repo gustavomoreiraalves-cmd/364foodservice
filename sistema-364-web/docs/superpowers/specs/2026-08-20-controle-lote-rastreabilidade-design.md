@@ -426,9 +426,13 @@ depois:
   em produção sem migração versionada. Vale uma `atualizacao_00_baseline.sql` que registre o
   estado real, senão a próxima pessoa escreve migração em cima de uma planta errada — foi
   exatamente o que quase aconteceu aqui.
-- **`lib/format.js:custoMedioMP` filtra por `r.status_recebimento`**, coluna que não existe
+- ~~**`lib/format.js:custoMedioMP` filtra por `r.status_recebimento`**, coluna que não existe
   mais em `recebimento_itens`. O filtro cai no ramo `== null` e deixa tudo passar, incluindo
   lote rejeitado, que assim contamina o custo médio. Deveria ler
-  `inspecoes_qualidade.status`.
+  `inspecoes_qualidade.status`.~~ **Corrigido em 2026-08-20:** o status passou a sair de
+  `lib/qualidade.js` (`statusInspecao`/`inspecaoAprovada`), e as queries de
+  `/producoes/completa` e `/estoque` — que pediam a coluna inexistente e por isso falhavam
+  inteiras — agora trazem `inspecoes_qualidade(status)` junto. Coberto por
+  `tests/custo-medio.test.mjs`.
 - A migração 17 fora de ordem sugere que não há controle de quais migrações foram aplicadas.
   Uma tabela `schema_migrations` simples resolveria.

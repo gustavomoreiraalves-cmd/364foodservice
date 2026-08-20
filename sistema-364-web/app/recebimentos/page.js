@@ -7,17 +7,9 @@ import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA, gerarParcelas } from '../../lib/financeiro';
+import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
-const STATUS_QUALIDADE = [
-  { valor: 'pendente', label: 'Pendente' },
-  { valor: 'aprovado', label: 'Aprovado' },
-  { valor: 'aprovado_com_ressalva', label: 'Aprovado com ressalva' },
-  { valor: 'quarentena', label: 'Quarentena' },
-  { valor: 'rejeitado', label: 'Rejeitado' },
-  { valor: 'devolvido', label: 'Devolvido' },
-];
-const STATUS_LABEL = Object.fromEntries(STATUS_QUALIDADE.map(s => [s.valor, s.label]));
 const STATUS_TAG = {
   aprovado: 'ok',
   aprovado_com_ressalva: 'warn',
@@ -27,10 +19,6 @@ const STATUS_TAG = {
   devolvido: 'bad',
 };
 const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
-// Só itens com esse status efetivo (após a inspeção) contam pra estoque/ledger
-// (trigger_inspecao_gera_movimento) — mesmo critério usado aqui pra saber
-// qual valor entra na conta a pagar gerada pelo recebimento.
-const STATUS_QUALIDADE_APROVADO = ['aprovado', 'aprovado_com_ressalva'];
 
 const HEADER_VAZIO = () => ({
   data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null,
