@@ -700,7 +700,11 @@ Renomear `addProduto` para `salvarProduto` e fazer o insert virar update quando 
       unidade: formProd.unidade,
       custo_unitario: custo,
       preco_venda: Number(formProd.preco_venda),
-      validade_dias: Number(formProd.validade_dias) || 90,
+      // Mesma razão do preço-alvo na Task 5: um input type=number em branco
+      // devolve '', então teste de falsy apagaria um prazo zerado a cada edição.
+      validade_dias: formProd.validade_dias === '' || formProd.validade_dias === null || formProd.validade_dias === undefined
+        ? 90
+        : Number(formProd.validade_dias),
       producao_interna: !!formProd.producao_interna,
     };
 
