@@ -6,6 +6,9 @@ const ABAS = [
   { href: '/ponto/colaboradores', label: 'Colaboradores' },
   { href: '/ponto/escalas', label: 'Escalas' },
   { href: '/ponto/marcacoes', label: 'Marcações' },
+  { href: '/ponto/apuracao', label: 'Apuração' },
+  { href: '/ponto/fechamento', label: 'Fechamento' },
+  { href: '/ponto/painel', label: 'Painel do gestor' },
   { href: '/ponto/unidades', label: 'Unidades e empregadores' },
   { href: '/ponto/dispositivos', label: 'Dispositivos' },
 ];

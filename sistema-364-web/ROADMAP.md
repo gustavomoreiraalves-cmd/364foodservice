@@ -228,6 +228,34 @@ qualquer marca — evita recriar a mesma "6x1 08h às 17h" em cada empresa.
 (`colaborador_escalas`) não mudou — continua escopada pela empresa do
 colaborador.
 
+### Ponto Fase 2: apuração, banco de horas, fechamento e painel do gestor (20/ago/2026)
+
+Sem integração de folha de pagamento (não é necessária agora). Tudo calculado
+sob demanda em `lib/apuracao.js` a partir de dados imutáveis (colaboradores/
+escalas/escala_dias/ponto_marcacoes) — nunca persistido como fonte de
+verdade; só o fechamento grava um snapshot. Limitação conhecida: não trata
+escalas cujo horário cruza a meia-noite (nenhuma cadastrada hoje faz isso).
+Migration `atualizacao_20_apuracao_ajustes_fechamento.sql` (já aplicada em
+produção) criou `ponto_ajustes` e `ponto_fechamentos`.
+
+- **`/ponto/apuracao`** — espelho de ponto por colaborador/mês: dia a dia
+  previsto x realizado, atrasos, extras, faltas, saldo (banco de horas
+  quando marcado no cadastro). Botão **Ajustar** por dia grava em
+  `ponto_ajustes` (nunca toca `ponto_marcacoes`, que é imutável): corrigir
+  horário de uma marcação, abonar falta, ou compensação manual em minutos —
+  motivo sempre obrigatório, auditado via trigger. Botão "Imprimir espelho"
+  reaproveita `components/FichaPrint.js`.
+- **`/ponto/fechamento`** — consolida e trava a apuração do mês por
+  colaborador (`ponto_fechamentos`); fechado, a Apuração para de aceitar
+  ajustes até um admin reabrir informando o motivo.
+- **`/ponto/painel`** — ranking de mais atrasos e mais faltas no mês, e
+  banco de horas com maior saldo positivo/déficit (acumulado desde o
+  vínculo mais antigo até hoje, só para quem tem "Banco de horas" marcado).
+
+Testado ponta a ponta com dados reais (Gustavo Moreira, 364 Steakhouse):
+apuração de 26 dias, ajuste de falta abonada recalculando o saldo, fechar
+→ bloquear ajuste → reabrir, e o painel refletindo o mesmo total de faltas.
+
 ## Próximos passos
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
