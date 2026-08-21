@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { fmtMoney, fmtDate } from '../../../lib/format';
+import { fmtDateTime } from '../../../lib/producao';
 import AppShell from '../../../components/AppShell';
 import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
@@ -41,6 +42,8 @@ function Conteudo({ setFicha }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [erroCarregar, setErroCarregar] = useState('');
+  const [cancelando, setCancelando] = useState(false);
+  const [motivo, setMotivo] = useState('');
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -178,6 +181,23 @@ function Conteudo({ setFicha }) {
     carregar();
   }
 
+  async function cancelar() {
+    if (!motivo.trim()) { alert('Informe o motivo do cancelamento.'); return; }
+    setSalvando(true);
+    setErro('');
+    const { error } = await supabase.from('pedidos').update({
+      status: 'Cancelado',
+      cancelado_motivo: motivo.trim(),
+      cancelado_em: new Date().toISOString(),
+      cancelado_por_id: cabecalho.responsavel_id || null,
+    }).eq('id', id).eq('empresa_id', empresaAtual.id);
+    setSalvando(false);
+    if (error) { setErro(error.message); carregar(); return; }
+    setCancelando(false);
+    setMotivo('');
+    carregar();
+  }
+
   function imprimir() {
     imprimirFicha(setFicha, {
       titulo: 'Pedido de Venda',
@@ -271,6 +291,36 @@ function Conteudo({ setFicha }) {
           <button className="btn" style={{ marginTop: 12 }} onClick={salvar} disabled={salvando}>
             {salvando ? 'Salvando…' : 'Salvar alterações'}
           </button>
+        )}
+
+        {pedido.status === 'Cancelado' && (
+          <div className="banner bad" style={{ marginTop: 12 }}>
+            <b>Pedido cancelado</b> em {fmtDateTime(pedido.cancelado_em)} — {pedido.cancelado_motivo}
+          </div>
+        )}
+
+        {pedido.status !== 'Cancelado' && (
+          cancelando ? (
+            <div className="panel" style={{ marginTop: 12 }}>
+              <label>Motivo do cancelamento</label>
+              <input type="text" value={motivo} autoFocus
+                placeholder="Ex.: cliente desistiu da compra"
+                onChange={e => setMotivo(e.target.value)} />
+              <p className="muted" style={{ fontSize: 12 }}>
+                O pedido cancelado devolve o saldo dos produtos ao estoque e não volta para Pendente.
+              </p>
+              <div className="row-actions">
+                <button className="btn danger" onClick={cancelar} disabled={salvando}>
+                  {salvando ? 'Cancelando…' : 'Confirmar cancelamento'}
+                </button>
+                <button className="btn secondary" onClick={() => { setCancelando(false); setMotivo(''); }}>Voltar</button>
+              </div>
+            </div>
+          ) : (
+            <button className="btn danger" style={{ marginTop: 12 }} onClick={() => setCancelando(true)}>
+              Cancelar pedido
+            </button>
+          )
         )}
       </div>
     </>
