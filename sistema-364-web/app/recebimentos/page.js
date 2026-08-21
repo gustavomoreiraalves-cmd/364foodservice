@@ -32,7 +32,7 @@ const ITEM_VAZIO = () => ({
   materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
   deposito_id: '', local_armazenamento: '', observacoes: '',
   validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_qualidade: 'aprovado',
-  motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '',
+  motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '', volumes: '',
   fotoProdutoArquivo: null, documentoSanitarioArquivo: null,
 });
 
@@ -324,6 +324,7 @@ function Conteudo({ setFicha }) {
           observacoes: it.observacoes || null,
           validade: !ehSimples ? (it.validade || null) : null,
           numero_lote_fornecedor: it._mp.controle_recebimento === 'lote' ? (it.numero_lote_fornecedor || null) : null,
+          volumes: it.volumes ? Number(it.volumes) : null,
           empresa_id: empresaAtual.id,
         }]).select('id').single();
 
@@ -660,6 +661,14 @@ function Conteudo({ setFicha }) {
           {mpSelecionada && (
             <>
               <div><label>Peso conferido</label><input type="number" step="0.001" value={itemForm.quantidade} onChange={e => setItemForm({ ...itemForm, quantidade: e.target.value })} /></div>
+              <div>
+                <label>Volumes (caixas)</label>
+                <input
+                  type="number" min="1" step="1" value={itemForm.volumes}
+                  placeholder="quantas caixas chegaram"
+                  onChange={e => setItemForm({ ...itemForm, volumes: e.target.value })}
+                />
+              </div>
               <div><label>Peso na nota fiscal</label><input type="number" step="0.001" value={itemForm.peso_nota_kg} onChange={e => setItemForm({ ...itemForm, peso_nota_kg: e.target.value })} /></div>
               <div>
                 <label>Custo unitário (R$)</label>
@@ -786,7 +795,7 @@ function Conteudo({ setFicha }) {
                           <div className="table-wrap">
                             <table>
                               <thead>
-                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
+                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Volumes</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
                               </thead>
                               <tbody>
                                 {g.itens.map(it => {
@@ -807,6 +816,7 @@ function Conteudo({ setFicha }) {
                                         {fmtMoney(it.custo_unitario)}
                                         {acimaAlvo && <div><span className="tag warn">Acima do alvo</span></div>}
                                       </td>
+                                      <td className="num">{it.volumes ?? '—'}</td>
                                       <td className="muted">{it.depositos ? `${it.depositos.nome} — ${it.depositos.unidades?.nome}` : '—'}</td>
                                       <td>{fmtDate(it.validade)}</td>
                                       <td>
