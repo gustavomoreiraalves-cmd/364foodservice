@@ -1,13 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { fmtMoney, proximoCodigoProduto } from '../../lib/format';
+import { fmtMoney, proximoCodigoProduto, parseCustoUnitario } from '../../lib/format';
 import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 
 const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '' };
 const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false };
+
+const CUSTO_INVALIDO = 'Custo inválido. Informe um número igual ou maior que zero (ex.: 45,50), sem separador de milhar. Deixe em branco para usar o custo da ficha técnica.';
 
 export default function ProdutosPage() {
   return (
@@ -71,13 +73,17 @@ function Conteudo() {
 
   async function addProduto(e) {
     e.preventDefault();
+    // Mesma validação do "Editar custo": sem ela `Number('-5') || 0` gravaria
+    // -5 e um texto inválido viraria 0 em silêncio.
+    const custo = parseCustoUnitario(formProd.custo_unitario);
+    if (custo === null) { alert(CUSTO_INVALIDO); return; }
     const codigo = await proximoCodigoProduto(empresaAtual.id, empresaAtual.prefixo_codigo);
     const { error } = await supabase.from('produtos').insert([{
       codigo,
       nome: formProd.nome,
       categoria: formProd.categoria || null,
       unidade: formProd.unidade,
-      custo_unitario: Number(formProd.custo_unitario) || 0,
+      custo_unitario: custo,
       preco_venda: Number(formProd.preco_venda),
       validade_dias: Number(formProd.validade_dias) || 90,
       producao_interna: !!formProd.producao_interna,
@@ -96,15 +102,14 @@ function Conteudo() {
   }
 
   async function salvarCusto(produtoId, valor) {
+    // prompt() cancelado devolve null: não é "custo vazio", é "desisti".
     if (valor === null || valor === undefined) return;
-    const texto = String(valor).trim();
-    const numerico = Number(texto.replace(',', '.'));
-    if (texto === '' || !Number.isFinite(numerico) || numerico < 0) {
-      alert('Custo inválido. Informe um número igual ou maior que zero (ex.: 45,50).');
-      return;
-    }
+    // Campo apagado devolve '' e vira 0 — que é exatamente "usar a ficha
+    // técnica", como o texto de ajuda do formulário promete.
+    const custo = parseCustoUnitario(valor);
+    if (custo === null) { alert(CUSTO_INVALIDO); return; }
     const { error } = await supabase.from('produtos')
-      .update({ custo_unitario: numerico })
+      .update({ custo_unitario: custo })
       .eq('id', produtoId);
     if (error) { alert('Erro ao salvar o custo: ' + error.message); return; }
     carregar();
