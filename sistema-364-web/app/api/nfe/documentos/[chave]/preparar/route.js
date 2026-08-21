@@ -20,8 +20,11 @@ export async function GET(request, { params }) {
   }
 
   const chave = String(params.chave || '').replace(/\D/g, '');
-  const { data: documento } = await sb.from('nfe_documentos')
+  const { data: documento, error: errDoc } = await sb.from('nfe_documentos')
     .select('*').eq('empresa_id', empresaId).eq('chave', chave).maybeSingle();
+  // Sem isto, uma falha de banco vira "Nota não encontrada" segundos depois de um
+  // upload bem-sucedido, e ninguém entende o que aconteceu.
+  if (errDoc) return NextResponse.json({ error: 'Falha ao consultar a nota: ' + errDoc.message }, { status: 500 });
   if (!documento) return NextResponse.json({ error: 'Nota não encontrada.' }, { status: 404 });
   if (!documento.xml_path) {
     return NextResponse.json({ error: 'O XML desta nota ainda não foi baixado da SEFAZ.' }, { status: 409 });
@@ -44,7 +47,9 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
   }
 
-  const [{ data: fornecedor }, { data: mapa }, { data: recebimentoExistente }] = await Promise.all([
+  // `fornecedores.cnpj` é normalizado para só dígitos pela migração 22 — o CNPJ do
+  // emitente já vem só com dígitos do parser, então a comparação é direta.
+  const [resFornecedor, resMapa, resRecebimento] = await Promise.all([
     sb.from('fornecedores').select('id, nome, cnpj')
       .eq('empresa_id', empresaId).eq('cnpj', nota.emitente.cnpj).maybeSingle(),
     sb.from('fornecedor_produto_mapa')
@@ -52,6 +57,23 @@ export async function GET(request, { params }) {
       .eq('empresa_id', empresaId).eq('cnpj_emitente', nota.emitente.cnpj),
     sb.from('recebimentos').select('id').eq('empresa_id', empresaId).eq('nfe_chave', chave).maybeSingle(),
   ]);
+
+  // Cada uma dessas falhas, engolida, tem uma consequência silenciosa: fornecedor
+  // que some, de-para aprendido que reaparece vazio (e é reaprendido errado) e
+  // nota duplicada que passa pela única checagem prévia de duplicidade.
+  if (resFornecedor.error) {
+    return NextResponse.json({ error: 'Falha ao procurar o fornecedor pelo CNPJ da nota: ' + resFornecedor.error.message }, { status: 500 });
+  }
+  if (resMapa.error) {
+    return NextResponse.json({ error: 'Falha ao ler o de-para de produtos deste fornecedor: ' + resMapa.error.message }, { status: 500 });
+  }
+  if (resRecebimento.error) {
+    return NextResponse.json({ error: 'Falha ao conferir se esta nota já virou recebimento: ' + resRecebimento.error.message }, { status: 500 });
+  }
+
+  const fornecedor = resFornecedor.data;
+  const mapa = resMapa.data;
+  const recebimentoExistente = resRecebimento.data;
 
   return NextResponse.json({
     documento,
