@@ -34,11 +34,14 @@ a{color:var(--amber-bright);}
   border-right:1px solid var(--border);
   padding:18px 0;
   display:flex; flex-direction:column;
+  /* Com o menu por categorias a lista pode passar da altura da tela: a sidebar
+     fica presa na viewport e só o <nav> rola. */
+  height:100vh; position:sticky; top:0;
 }
 .brand{padding:0 18px 16px; border-bottom:1px solid var(--border); margin-bottom:10px;}
 .brand .num{color:var(--amber-bright); font-family:Georgia,serif; font-size:22px; font-weight:700; letter-spacing:1px;}
 .brand .sub{color:var(--paper-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:1.5px; margin-top:2px;}
-.sidebar nav{display:flex; flex-direction:column; gap:1px; padding:0 10px;}
+.sidebar nav{display:flex; flex-direction:column; gap:1px; padding:0 10px; flex:1; min-height:0; overflow-y:auto;}
 .sidebar nav a{
   text-decoration:none; cursor:pointer; padding:9px 10px; border-radius:var(--radius);
   color:var(--paper-dim); font-size:13px; display:flex; align-items:center; gap:9px;
@@ -46,6 +49,21 @@ a{color:var(--amber-bright);}
 .sidebar nav a .ic{width:16px; text-align:center; opacity:.8;}
 .sidebar nav a:hover{background:var(--char3); color:var(--paper);}
 .sidebar nav a.active{background:var(--smoke); color:var(--amber-bright); font-weight:600;}
+.nav-grupo{display:flex; flex-direction:column;}
+.nav-grupo-toggle{
+  background:none; border:0; font:inherit; text-align:left; cursor:pointer; width:100%;
+  padding:9px 10px; border-radius:var(--radius);
+  color:var(--paper-dim); font-size:13px; display:flex; align-items:center; gap:9px;
+}
+.nav-grupo-toggle .ic{width:16px; text-align:center; opacity:.8;}
+.nav-grupo-toggle .nav-grupo-label{flex:1;}
+.nav-grupo-toggle .chevron{font-size:10px; opacity:.6; transition:transform .15s;}
+.nav-grupo-toggle[aria-expanded="true"] .chevron{transform:rotate(90deg);}
+.nav-grupo-toggle:hover{background:var(--char3); color:var(--paper);}
+.nav-grupo-toggle.tem-ativo{color:var(--amber-bright);}
+.nav-sub{display:flex; flex-direction:column; gap:1px; margin:1px 0 4px;}
+.nav-sub[hidden]{display:none;}
+.sidebar nav .nav-sub a{padding-left:35px; font-size:12.5px;}
 .sidebar-foot{margin-top:auto; padding:14px 18px 0; border-top:1px solid var(--border); font-size:10.5px; color:var(--paper-dim);}
 .sidebar-foot .btn{margin-top:10px; width:100%;}
 
