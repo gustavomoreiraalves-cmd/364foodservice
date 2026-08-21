@@ -1,6 +1,9 @@
+process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'http://localhost:54321';
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { camposDoFormulario } from '../lib/cadastro.js';
+const { camposDoFormulario } = await import('../lib/cadastro.js');
 
 const FORM_VAZIO = { nome: '', categoria: 'Carnes', validade_dias: 90, producao_interna: false };
 

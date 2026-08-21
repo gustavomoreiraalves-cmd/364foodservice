@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { supabase } from './supabase.js';
 
 // Pega do registro só as chaves que o formulário conhece.
 //
@@ -48,8 +49,6 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
     if (salvando) return;
     setSalvando(true);
     try {
-      // Lazy load supabase only when needed (inside the hook function)
-      const { supabase } = await import('./supabase.js');
       const dados = paraGravar ? paraGravar(form) : form;
       const { error } = editando
         ? await supabase.from(tabela).update(dados).eq('id', editando)
@@ -66,7 +65,6 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
   }
 
   async function alternarAtivo(registro) {
-    const { supabase } = await import('./supabase.js');
     const { error } = await supabase.from(tabela)
       .update({ ativo: !(registro.ativo !== false) }).eq('id', registro.id);
     if (error) { alert('Não foi possível mudar a situação: ' + error.message); return; }
@@ -75,7 +73,6 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
 
   async function excluir(registro, pergunta) {
     if (!confirm(pergunta)) return;
-    const { supabase } = await import('./supabase.js');
     const { error } = await supabase.from(tabela).delete().eq('id', registro.id);
     if (error) {
       alert('Não foi possível excluir: ' + error.message
