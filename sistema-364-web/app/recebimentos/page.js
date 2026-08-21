@@ -6,11 +6,15 @@ import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebiment
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import ImportarNota from '../../components/ImportarNota';
+import EtiquetaPrint from '../../components/EtiquetaPrint';
+import ModalEtiquetas from '../../components/ModalEtiquetas';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
 import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
 import { calcularItem } from '../../lib/nfe/dePara';
+import { qrSvg } from '../../lib/qr';
+import { urlRastreio } from '../../lib/etiquetas';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -38,17 +42,19 @@ const ITEM_VAZIO = () => ({
 
 export default function RecebimentosPage() {
   const [ficha, setFicha] = useState(null);
+  const [etiqueta, setEtiqueta] = useState(null);
   return (
     <>
       <AppShell modulo="recebimentos" titulo="Recebimento" desc="Entrada de matéria-prima, controle de qualidade e geração de lotes">
-        <Conteudo setFicha={setFicha} />
+        <Conteudo setFicha={setFicha} setEtiqueta={setEtiqueta} />
       </AppShell>
       <FichaPrint ficha={ficha} />
+      <EtiquetaPrint etiqueta={etiqueta} />
     </>
   );
 }
 
-function Conteudo({ setFicha }) {
+function Conteudo({ setFicha, setEtiqueta }) {
   const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [mps, setMps] = useState([]);
@@ -61,6 +67,7 @@ function Conteudo({ setFicha }) {
   const [itemForm, setItemForm] = useState(ITEM_VAZIO());
   const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
+  const [etiquetaItem, setEtiquetaItem] = useState(null);
   const proximaKey = useRef(0);
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
@@ -521,6 +528,31 @@ function Conteudo({ setFicha }) {
     });
   }
 
+  // O QR é resolvido ANTES de abrir o modal: window.print() é síncrono e não
+  // espera promessa nenhuma, e etiqueta de recebimento sem QR não serve ao
+  // rastreio — por isso, se o QR falhar, o modal nem abre.
+  async function abrirEtiquetas(item, grupo, tipo = 'original') {
+    try {
+      const svg = await qrSvg(urlRastreio(item.lote, process.env.NEXT_PUBLIC_SITE_URL), 12);
+      setEtiquetaItem({
+        tipo,
+        item,
+        dados: {
+          modelo: 'recebimento',
+          lote: item.lote,
+          materiaPrima: item.materias_primas?.nome || '—',
+          recebidoEm: grupo.cabecalho.data,
+          fornecedor: grupo.cabecalho.fornecedores?.nome || '—',
+          notaFiscal: grupo.cabecalho.nota_fiscal || '—',
+          qrSvg: svg,
+          copias: Number(item.volumes) || 1,
+        },
+      });
+    } catch (e) {
+      alert('Não foi possível gerar o QR do lote: ' + e.message);
+    }
+  }
+
   if (loading) return <p className="muted">Carregando…</p>;
 
   if (!mps.length || !fornecedores.length) {
@@ -828,6 +860,22 @@ function Conteudo({ setFicha }) {
                                         <div className="row-actions">
                                           {it.inspecao?.foto_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.foto_url)}>Ver foto</button>}
                                           {it.inspecao?.documento_sanitario_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.documento_sanitario_url)}>Ver documento</button>}
+                                          <button
+                                            className="btn secondary small"
+                                            disabled={!it.volumes}
+                                            title={!it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined}
+                                            onClick={() => abrirEtiquetas(it, g, 'original')}
+                                          >
+                                            Imprimir etiquetas
+                                          </button>
+                                          <button
+                                            className="btn secondary small"
+                                            disabled={!it.volumes}
+                                            title={!it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined}
+                                            onClick={() => abrirEtiquetas(it, g, 'reimpressao')}
+                                          >
+                                            Reimprimir
+                                          </button>
                                           <button className="btn danger small" onClick={() => excluirItem(it)}>Excluir</button>
                                         </div>
                                       </td>
@@ -850,6 +898,20 @@ function Conteudo({ setFicha }) {
           </table>
         </div>
       </div>
+
+      {etiquetaItem && (
+        <ModalEtiquetas
+          producao={{ id: etiquetaItem.item.id, modelo: 'recebimento' }}
+          dados={etiquetaItem.dados}
+          modelo="recebimento"
+          titulo={etiquetaItem.tipo === 'reimpressao' ? 'Reimprimir etiquetas do volume' : 'Etiquetas do volume'}
+          tipo={etiquetaItem.tipo}
+          sourceType="recebimento_item"
+          empresaNome={empresaAtual?.nome}
+          setEtiqueta={setEtiqueta}
+          onFechar={() => setEtiquetaItem(null)}
+        />
+      )}
     </>
   );
 }
