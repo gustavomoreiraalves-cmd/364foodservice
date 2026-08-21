@@ -10,15 +10,27 @@ function arred(v, casas) {
   return Math.round(Number(v) * f) / f;
 }
 
+// A conta de um item da nota, num lugar só. A tela de recebimento refaz esta mesma
+// conta quando o operador ajusta o fator na conferência — duas cópias da mesma
+// fórmula acabam divergindo, e é ela que define o custo do lote em estoque.
+// Peso em 4 casas e custo em 2, o padrão de valor derivado e persistido do projeto.
+export function calcularItem({ quantidade, valorTotal, fator }) {
+  const f = Number(fator) > 0 ? Number(fator) : 1;
+  const pesoNotaKg = arred(Number(quantidade) * f, 4);
+  // Custo por unidade de estoque (kg), e não por unidade comercial da nota.
+  const custoUnitario = pesoNotaKg > 0 ? arred(Number(valorTotal) / pesoNotaKg, 2) : 0;
+  return { pesoNotaKg, custoUnitario };
+}
+
 export function aplicarDePara(nota, mapa) {
   const indice = new Map((mapa || []).map(m => [String(m.codigo_produto), m]));
 
   return (nota.itens || []).map(item => {
     const m = indice.get(String(item.codigo)) || null;
     const fator = m && Number(m.fator_conversao) > 0 ? Number(m.fator_conversao) : 1;
-    const pesoNotaKg = arred(item.quantidade * fator, 4);
-    // Custo por unidade de estoque (kg), e não por unidade comercial da nota.
-    const custoUnitario = pesoNotaKg > 0 ? arred(item.valorTotal / pesoNotaKg, 2) : 0;
+    const { pesoNotaKg, custoUnitario } = calcularItem({
+      quantidade: item.quantidade, valorTotal: item.valorTotal, fator,
+    });
 
     return {
       indice: item.indice,

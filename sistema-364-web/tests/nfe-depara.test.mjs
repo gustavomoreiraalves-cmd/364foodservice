@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseNFe } from '../lib/nfe/parseNFe.js';
-import { aplicarDePara, itensNaoMapeados } from '../lib/nfe/dePara.js';
+import { aplicarDePara, itensNaoMapeados, calcularItem } from '../lib/nfe/dePara.js';
 
 const nota = parseNFe(readFileSync(new URL('./fixtures/nfe-exemplo.xml', import.meta.url), 'utf8'));
 
@@ -10,6 +10,35 @@ const MAPA = [
   { codigo_produto: 'PC-001', materia_prima_id: 'mp-picanha', unidade_nf: 'CX', fator_conversao: 12 },
   { codigo_produto: 'FR-010', materia_prima_id: 'mp-fraldinha', unidade_nf: 'KG', fator_conversao: 1 },
 ];
+
+test('calcularItem: converte pela unidade de estoque e arredonda o que persiste', () => {
+  assert.deepEqual(calcularItem({ quantidade: 2, valorTotal: 1560, fator: 12 }),
+    { pesoNotaKg: 24, custoUnitario: 65 });
+  // Peso com 4 casas, custo com 2 — mesmo padrão de lib/financeiro.js.
+  assert.deepEqual(calcularItem({ quantidade: 3, valorTotal: 100, fator: 1.23456 }),
+    { pesoNotaKg: 3.7037, custoUnitario: 27 });
+});
+
+test('calcularItem: fator ausente ou não positivo vale 1', () => {
+  assert.deepEqual(calcularItem({ quantidade: 30, valorTotal: 1197 }),
+    { pesoNotaKg: 30, custoUnitario: 39.9 });
+  assert.equal(calcularItem({ quantidade: 30, valorTotal: 1197, fator: 0 }).pesoNotaKg, 30);
+  assert.equal(calcularItem({ quantidade: 30, valorTotal: 1197, fator: -2 }).pesoNotaKg, 30);
+});
+
+test('calcularItem: peso zero não vira divisão por zero', () => {
+  assert.deepEqual(calcularItem({ quantidade: 0, valorTotal: 0, fator: 12 }),
+    { pesoNotaKg: 0, custoUnitario: 0 });
+});
+
+test('calcularItem: é a mesma conta que aplicarDePara usa', () => {
+  const [picanha] = aplicarDePara(nota, MAPA);
+  const direto = calcularItem({
+    quantidade: picanha.quantidadeNota, valorTotal: picanha.valorTotalItem, fator: picanha.fatorConversao,
+  });
+  assert.equal(direto.pesoNotaKg, picanha.pesoNotaKg);
+  assert.equal(direto.custoUnitario, picanha.custoUnitario);
+});
 
 test('aplicarDePara: caixa vira quilo pelo fator', () => {
   const [picanha] = aplicarDePara(nota, MAPA);

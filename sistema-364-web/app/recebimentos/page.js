@@ -10,6 +10,7 @@ import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
 import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
+import { calcularItem } from '../../lib/nfe/dePara';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -149,8 +150,24 @@ function Conteudo({ setFicha }) {
     if (!item?.materiaPrimaId) { alert('Escolha a matéria-prima deste item.'); return; }
     const fator = Number(item.fatorConversao);
     if (!(fator > 0)) { alert('Informe um fator de conversão válido para este item.'); return; }
-    const pesoNotaKg = Math.round(item.quantidadeNota * fator * 10000) / 10000;
-    const custoUnitario = pesoNotaKg > 0 ? Math.round((item.valorTotalItem / pesoNotaKg) * 100) / 100 : 0;
+    // Mesma função que a rota /preparar usa — a conta que define o custo do lote
+    // não pode existir em duas versões.
+    const { pesoNotaKg, custoUnitario } = calcularItem({
+      quantidade: item.quantidadeNota, valorTotal: item.valorTotalItem, fator,
+    });
+    // O parser devolve 0 quando o campo do XML está ausente ou ilegível, e um
+    // custo zero passaria batido pela validação do item (a string '0' é truthy),
+    // gravando lote de estoque a custo zero.
+    if (!(pesoNotaKg > 0)) {
+      alert(`O item ${item.codigo} veio sem quantidade utilizável no XML (campo qCom da NF-e). `
+        + 'Lance este item à mão no formulário abaixo.');
+      return;
+    }
+    if (!(custoUnitario > 0)) {
+      alert(`O item ${item.codigo} veio sem valor utilizável no XML (campo vProd da NF-e). `
+        + 'Lance este item à mão no formulário abaixo.');
+      return;
+    }
     setItemForm({
       ...ITEM_VAZIO(),
       materia_prima_id: item.materiaPrimaId,
@@ -167,7 +184,10 @@ function Conteudo({ setFicha }) {
   function adicionarItem(e) {
     e.preventDefault();
     if (!mpSelecionada) { alert('Selecione a matéria-prima.'); return; }
-    if (!itemForm.quantidade || !itemForm.custo_unitario) { alert('Preencha peso conferido e custo unitário.'); return; }
+    // Comparação numérica, e não por veracidade: a string '0' é truthy e passaria,
+    // gravando item sem peso ou lote a custo zero.
+    if (!(Number(itemForm.quantidade) > 0)) { alert('Informe o peso conferido (maior que zero).'); return; }
+    if (!(Number(itemForm.custo_unitario) > 0)) { alert('Informe o custo unitário (maior que zero).'); return; }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
