@@ -111,7 +111,12 @@ create table pedidos (
   cliente_id uuid references clientes(id),
   status text not null default 'Pendente',  -- Pendente | Faturado | Enviado | Cancelado
   responsavel_id uuid references funcionarios(id),
-  created_at timestamptz not null default now()
+  observacoes text,
+  cancelado_motivo text,
+  cancelado_em timestamptz,
+  cancelado_por_id uuid references funcionarios(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table pedido_itens (
