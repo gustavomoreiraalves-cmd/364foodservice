@@ -32,6 +32,16 @@ export default function ModalEtiquetas({
   const [impressora, setImpressora] = useState('');
   const [motivoSel, setMotivoSel] = useState(MOTIVOS_REIMPRESSAO[0]);
   const [motivoOutro, setMotivoOutro] = useState('');
+  // A partir de qual volume esta reimpressão começa a numerar — quem perde a
+  // etiqueta da caixa 7 de 20 digita 7 aqui e imprime só "vol. 7/20", em vez
+  // de reimprimir as 20 ou receber uma etiqueta "vol. 1/1" errada. Só existe
+  // no modelo `recebimento`; nas telas de produção fica sempre em 1 e não
+  // aparece na tela.
+  const [volumeInicial, setVolumeInicial] = useState(1);
+  // Trava de duplo clique: sem ela, dois cliques em "Imprimir" chamam a RPC
+  // duas vezes e gravam duas linhas em etiqueta_impressoes — tabela
+  // append-only, então a duplicata não tem como ser apagada depois.
+  const [enviando, setEnviando] = useState(false);
 
   // Sem `dados`, o modelo efetivo é o da produção (caminho antigo, preservado
   // ao pé da letra); com `dados`, é a prop `modelo` que a tela chamadora passou.
@@ -43,7 +53,7 @@ export default function ModalEtiquetas({
   const modeloEfetivo = modeloValido(dados ? modelo : producao.modelo);
 
   const dadosEtiqueta = dados
-    ? { ...dados, modelo: modeloEfetivo, copias }
+    ? { ...dados, modelo: modeloEfetivo, copias, volumeInicial }
     : {
         modelo: modeloEfetivo,
         empresa: empresaNome,
@@ -58,24 +68,46 @@ export default function ModalEtiquetas({
         copias,
       };
 
+  // Teto de segurança: um "20" digitado como "2000" não deve virar 2000
+  // etiquetas nem 1000 páginas na impressora sem confirmação.
+  const COPIAS_MAX = 500;
+
   async function imprimir() {
+    if (enviando) return; // trava de duplo clique — ver estado `enviando` acima.
+    const qtd = Number(copias);
+    // copias === '' (campo apagado) chega aqui como NaN por Number(''), que
+    // falha em `qtd > 0` — mas '' também vira 0 na RPC se não barrado antes:
+    // sem esta checagem o operador via o erro cru do Postgres em inglês.
+    if (!(Number.isInteger(qtd) && qtd > 0)) {
+      alert('Informe a quantidade de etiquetas (um número inteiro maior que zero).');
+      return;
+    }
+    if (qtd > COPIAS_MAX) {
+      alert(`Quantidade de etiquetas não pode passar de ${COPIAS_MAX} por impressão.`);
+      return;
+    }
     let motivo = null;
     if (tipo === 'reimpressao') {
       motivo = motivoSel === 'Outro' ? motivoOutro.trim() : motivoSel;
       if (!motivo) { alert('Descreva o motivo da reimpressão.'); return; }
     }
-    const { error } = await supabase.rpc('registrar_impressao', {
-      p_source_type: sourceType,
-      p_source_id: producao.id,
-      p_tipo: tipo,
-      p_quantidade: Number(copias),
-      p_modelo: modeloEfetivo,
-      p_impressora: impressora || null,
-      p_motivo: motivo,
-    });
-    if (error) { alert('Não foi possível registrar a impressão: ' + error.message); return; }
-    imprimirEtiquetas(setEtiqueta, dadosEtiqueta);
-    onFechar();
+    setEnviando(true);
+    try {
+      const { error } = await supabase.rpc('registrar_impressao', {
+        p_source_type: sourceType,
+        p_source_id: producao.id,
+        p_tipo: tipo,
+        p_quantidade: qtd,
+        p_modelo: modeloEfetivo,
+        p_impressora: impressora || null,
+        p_motivo: motivo,
+      });
+      if (error) { alert('Não foi possível registrar a impressão: ' + error.message); return; }
+      imprimirEtiquetas(setEtiqueta, dadosEtiqueta);
+      onFechar();
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
@@ -99,8 +131,17 @@ export default function ModalEtiquetas({
         )}
         <div className="form-grid">
           <div><label>Quantidade de etiquetas</label>
-            <input type="number" min="1" step="1" value={copias} onChange={e => setCopias(e.target.value)} style={{ minHeight: 44 }} />
+            <input type="number" min="1" max={COPIAS_MAX} step="1" value={copias} onChange={e => setCopias(e.target.value)} style={{ minHeight: 44 }} />
           </div>
+          {modeloEfetivo === 'recebimento' && tipo === 'reimpressao' && (
+            <div><label>Reimprimir a partir do volume nº</label>
+              <input
+                type="number" min="1" max={dadosEtiqueta.volumesTotal || undefined} step="1"
+                value={volumeInicial} onChange={e => setVolumeInicial(e.target.value)}
+                style={{ minHeight: 44 }}
+              />
+            </div>
+          )}
           <div><label>Modelo</label>
             <select value={modeloEfetivo} disabled>
               <option value="validade-cozinha">Validade Cozinha (50×30 mm)</option>
@@ -133,7 +174,7 @@ export default function ModalEtiquetas({
                 <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', margin: '2px 0' }}>{dadosEtiqueta.materiaPrima}</div>
                 <div style={{ fontSize: 11 }}>Receb.: {fmtDate(dadosEtiqueta.recebidoEm)}</div>
                 <div style={{ fontSize: 11 }}>Forn.: {dadosEtiqueta.fornecedor}</div>
-                <div style={{ fontSize: 11 }}>NF {dadosEtiqueta.notaFiscal} · vol. 1/{copias}</div>
+                <div style={{ fontSize: 11 }}>NF {dadosEtiqueta.notaFiscal} · vol. {volumeInicial}/{dadosEtiqueta.volumesTotal || copias}</div>
               </>
             ) : (
               <>
@@ -149,11 +190,11 @@ export default function ModalEtiquetas({
           </div>
         )}
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={imprimir} style={{ padding: '12px 16px' }}>
-            Imprimir {copias} etiqueta{Number(copias) > 1 ? 's' : ''}
+          <button className="btn" onClick={imprimir} disabled={enviando} style={{ padding: '12px 16px' }}>
+            {enviando ? 'Enviando…' : `Imprimir ${copias} etiqueta${Number(copias) > 1 ? 's' : ''}`}
           </button>
-          <button className="btn secondary" onClick={() => setVerPreview(v => !v)}>{verPreview ? 'Ocultar' : 'Visualizar'}</button>
-          <button className="btn secondary" onClick={onFechar}>Agora não</button>
+          <button className="btn secondary" onClick={() => setVerPreview(v => !v)} disabled={enviando}>{verPreview ? 'Ocultar' : 'Visualizar'}</button>
+          <button className="btn secondary" onClick={onFechar} disabled={enviando}>Agora não</button>
         </div>
       </div>
     </div>

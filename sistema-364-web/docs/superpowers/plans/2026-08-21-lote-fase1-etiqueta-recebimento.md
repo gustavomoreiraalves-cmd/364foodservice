@@ -27,7 +27,7 @@
 
 **O QR aponta para a página pública de rastreio, que só existe na Fase 5.** É o que o design manda, e a etiqueta é impressa uma vez e vive na embalagem por meses — mudar o conteúdo depois exigiria reimprimir tudo. Até a Fase 5, ler o QR de um volume dá 404. A etiqueta de recebimento é interna (matéria-prima em câmara fria, não vai para cliente), então o 404 fica dentro de casa.
 
-**A URL base sai de `NEXT_PUBLIC_SITE_URL`**, com `https://sistema-364.vercel.app` como padrão. Sem isso o QR de um ambiente de teste apontaria para produção.
+**A URL base sai de `NEXT_PUBLIC_SITE_URL`**, com `https://364foodservice.vercel.app` como padrão. Sem isso o QR de um ambiente de teste apontaria para produção.
 
 **Só dois modelos de etiqueta entram agora:** `validade-cozinha` (o que já existe) e `recebimento`. Os modelos de produção e de despacho são das fases 3 e 4 — `lib/etiquetas.js` fica aberto para eles, sem antecipá-los.
 
@@ -133,7 +133,7 @@ test('urlRastreio: usa a base informada, sem barra dobrada', () => {
 });
 
 test('urlRastreio: base padrão é a produção', () => {
-  assert.equal(urlRastreio('LT-260820-001'), 'https://sistema-364.vercel.app/rastreio/LT-260820-001');
+  assert.equal(urlRastreio('LT-260820-001'), 'https://364foodservice.vercel.app/rastreio/LT-260820-001');
 });
 
 test('urlRastreio: lote com espaço ou barra é escapado', () => {
@@ -177,7 +177,7 @@ export const MODELOS = {
   },
 };
 
-export const URL_RASTREIO_PADRAO = 'https://sistema-364.vercel.app';
+export const URL_RASTREIO_PADRAO = 'https://364foodservice.vercel.app';
 
 export function modelo(id) {
   const m = MODELOS[id];
@@ -1132,7 +1132,11 @@ git commit -m "feat(recebimentos): imprime e reimprime as etiquetas do volume co
 
 ## Conferência manual (dono do sistema)
 
-Nenhum subagente roda o dev server: o `.env.local` aponta para produção. Depois de aplicar a migração 28 no Supabase, conferir na tela:
+Nenhum subagente roda o dev server: o `.env.local` aponta para produção.
+
+**Ordem obrigatória de deploy: migração 28 primeiro, depois o código.** `app/recebimentos/page.js` grava `volumes` em TODO insert de item, não só quando há etiqueta. Se o deploy do código subir antes da migração, o PostgREST devolve `PGRST204 Could not find the 'volumes' column` e todo lançamento de recebimento — não só a impressão — para de funcionar. Aplique a migração 28 no Supabase, confirme com a pré-checagem de duplicatas no cabeçalho do arquivo, e só então faça o deploy.
+
+Depois de aplicar a migração 28 no Supabase, conferir na tela:
 
 1. Lançar um recebimento com **volumes = 3** num item; a coluna Volumes aparece na lista.
 2. **Imprimir etiquetas**: a pré-visualização mostra 3 etiquetas, numeradas `vol. 1/3`, `vol. 2/3`, `vol. 3/3`, cada uma com lote, matéria-prima, data, fornecedor e NF.

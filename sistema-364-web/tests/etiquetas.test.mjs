@@ -58,14 +58,31 @@ test('paginarEtiquetas: zero ou negativo não imprime nada', () => {
 });
 
 test('urlRastreio: usa a base informada, sem barra dobrada', () => {
-  assert.equal(urlRastreio('LT-260820-001', 'https://exemplo.test/'), 'https://exemplo.test/rastreio/LT-260820-001');
-  assert.equal(urlRastreio('LT-260820-001', 'https://exemplo.test'), 'https://exemplo.test/rastreio/LT-260820-001');
+  assert.equal(urlRastreio('0364', 'LT-260820-001', 'https://exemplo.test/'), 'https://exemplo.test/rastreio/0364/LT-260820-001');
+  assert.equal(urlRastreio('0364', 'LT-260820-001', 'https://exemplo.test'), 'https://exemplo.test/rastreio/0364/LT-260820-001');
 });
 
-test('urlRastreio: base padrão é a produção', () => {
-  assert.equal(urlRastreio('LT-260820-001'), 'https://sistema-364.vercel.app/rastreio/LT-260820-001');
+test('urlRastreio: base padrão é a produção real (364foodservice.vercel.app)', () => {
+  assert.equal(urlRastreio('0364', 'LT-260820-001'), 'https://364foodservice.vercel.app/rastreio/0364/LT-260820-001');
+});
+
+test('urlRastreio: o prefixo distingue empresas com o mesmo número de lote', () => {
+  const a = urlRastreio('0364', 'LT-260820-001', 'https://e.test');
+  const b = urlRastreio('STK', 'LT-260820-001', 'https://e.test');
+  assert.notEqual(a, b);
+  assert.equal(a, 'https://e.test/rastreio/0364/LT-260820-001');
+  assert.equal(b, 'https://e.test/rastreio/STK/LT-260820-001');
 });
 
 test('urlRastreio: lote com espaço ou barra é escapado', () => {
-  assert.equal(urlRastreio('LT 260820/001', 'https://e.test'), 'https://e.test/rastreio/LT%20260820%2F001');
+  assert.equal(urlRastreio('0364', 'LT 260820/001', 'https://e.test'), 'https://e.test/rastreio/0364/LT%20260820%2F001');
+});
+
+test('urlRastreio: prefixo com espaço ou barra também é escapado', () => {
+  assert.equal(urlRastreio('0/364', 'LT-260820-001', 'https://e.test'), 'https://e.test/rastreio/0%2F364/LT-260820-001');
+});
+
+test('medidasImpressao: recebimento deriva o tamanho do QR do modelo', () => {
+  const m = medidasImpressao('recebimento');
+  assert.equal(m.qrTamanho_mm, 16);
 });

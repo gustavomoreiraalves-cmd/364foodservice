@@ -14,7 +14,7 @@ import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALID
 import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
 import { calcularItem } from '../../lib/nfe/dePara';
 import { qrSvg } from '../../lib/qr';
-import { urlRastreio } from '../../lib/etiquetas';
+import { urlRastreio, medidasImpressao } from '../../lib/etiquetas';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -26,6 +26,9 @@ const STATUS_TAG = {
   devolvido: 'bad',
 };
 const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
+// Teto de segurança: "20" digitado como "2000" não deve virar 2000 volumes
+// nem 1000 páginas de etiqueta sem confirmação nenhuma.
+const VOLUMES_MAX = 500;
 
 const HEADER_VAZIO = () => ({
   data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null,
@@ -77,7 +80,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('recebimento_itens')
         .select(`
           *,
@@ -96,15 +99,29 @@ function Conteudo({ setFicha, setEtiqueta }) {
       supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
-      // Histórico de impressão dos volumes: decide se o botão do item mostra
-      // "Imprimir etiquetas" ou "Reimprimir etiquetas" — mesmo padrão de
-      // app/producoes/completa/page.js. Sem isso, os dois botões fixos
-      // deixavam o operador escolher rotular impressões repetidas como
-      // "original", contornando a exigência de motivo na reimpressão.
-      supabase.from('etiqueta_impressoes').select('source_id').eq('empresa_id', empresaAtual.id).eq('source_type', 'recebimento_item'),
     ]);
     if (r1.error) console.error(r1.error);
-    setLista((r1.data || []).map(item => ({
+    const itensCarregados = r1.data || [];
+    // Histórico de impressão dos volumes: decide se o botão do item mostra
+    // "Imprimir etiquetas" ou "Reimprimir etiquetas" — mesmo padrão de
+    // app/producoes/completa/page.js. Sem isso, os dois botões fixos
+    // deixavam o operador escolher rotular impressões repetidas como
+    // "original", contornando a exigência de motivo na reimpressão.
+    //
+    // Filtrada por `.in('source_id', ids)` dos itens desta empresa, em vez de
+    // trazer a tabela inteira: sem o filtro, uma resposta que bate no
+    // max-rows do PostgREST cortaria linhas de itens antigos e `jaImprimiu`
+    // voltaria a mentir `false` para item já impresso — reabrindo em
+    // silêncio a brecha da exigência de motivo que a task 6 fechou.
+    const idsItens = itensCarregados.map(i => i.id);
+    const r6 = idsItens.length
+      ? await supabase.from('etiqueta_impressoes')
+          .select('source_id, quantidade')
+          .eq('empresa_id', empresaAtual.id)
+          .eq('source_type', 'recebimento_item')
+          .in('source_id', idsItens)
+      : { data: [] };
+    setLista(itensCarregados.map(item => ({
       ...item,
       recebimento_id: item.recebimento_id,
       cabecalho: item.recebimentos,
@@ -271,7 +288,18 @@ function Conteudo({ setFicha, setEtiqueta }) {
     // gravando item sem peso ou lote a custo zero.
     if (!(Number(itemForm.quantidade) > 0)) { alert('Informe o peso conferido (maior que zero).'); return; }
     if (!(Number(itemForm.custo_unitario) > 0)) { alert('Informe o custo unitário (maior que zero).'); return; }
-    if (itemForm.volumes && !(Number.isInteger(Number(itemForm.volumes)) && Number(itemForm.volumes) > 0)) { alert('Volumes deve ser um número inteiro maior que zero.'); return; }
+    // Volumes é obrigatório: sem update para recebimento_itens no app inteiro
+    // (só insert e delete), esquecer o campo deixava o botão de etiqueta
+    // desabilitado PARA SEMPRE — a única saída era excluir e relançar o
+    // item, o que queima um número de lote e mexe no saldo de estoque.
+    if (!(Number.isInteger(Number(itemForm.volumes)) && Number(itemForm.volumes) > 0)) {
+      alert('Informe quantos volumes (caixas) chegaram — o campo é obrigatório e define quantas etiquetas serão impressas.');
+      return;
+    }
+    if (Number(itemForm.volumes) > VOLUMES_MAX) {
+      alert(`Volumes não pode passar de ${VOLUMES_MAX}.`);
+      return;
+    }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
@@ -488,7 +516,17 @@ function Conteudo({ setFicha, setEtiqueta }) {
   }
 
   async function excluirItem(r) {
-    if (!confirm('Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
+    // Item com etiqueta já impressa pode ter caixas por aí com QR de um lote
+    // que está prestes a deixar de existir — o aviso de saldo sozinho não diz
+    // isso. `impressoes` já traz `quantidade` (mesma consulta usada por
+    // `jaImprimiu`), então a soma é o total de etiquetas emitidas para este item.
+    const totalImpresso = impressoes
+      .filter(i => i.source_id === r.id)
+      .reduce((s, i) => s + Number(i.quantidade || 0), 0);
+    const avisoEtiquetas = totalImpresso > 0
+      ? `Atenção: ${totalImpresso} etiqueta${totalImpresso > 1 ? 's' : ''} deste lote já ${totalImpresso > 1 ? 'foram impressas' : 'foi impressa'} e ${totalImpresso > 1 ? 'estão' : 'está'} em circulação, provavelmente coladas em caixas. Excluir o item não desfaz isso — as caixas ficam com um QR que aponta para um lote inexistente.\n\n`
+      : '';
+    if (!confirm(avisoEtiquetas + 'Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
     const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
     if (error) { alert('Erro ao excluir: ' + error.message); return; }
     await removerAnexosRecebimento([r.inspecao?.foto_url, r.inspecao?.documento_sanitario_url]);
@@ -549,8 +587,22 @@ function Conteudo({ setFicha, setEtiqueta }) {
   // espera promessa nenhuma, e etiqueta de recebimento sem QR não serve ao
   // rastreio — por isso, se o QR falhar, o modal nem abre.
   async function abrirEtiquetas(item, grupo, tipo = 'original') {
+    // O lote é numerado por empresa (LT-AAMMDD-###), sem garantia de
+    // unicidade global — a mesma sequência pode existir ao mesmo tempo em
+    // duas empresas do grupo. O QR carrega o prefixo da empresa no caminho
+    // para não ficar ambíguo; sem prefixo cadastrado, a etiqueta sairia com
+    // um QR que pode apontar para o lote errado — pior que não imprimir.
+    if (!empresaAtual?.prefixo_codigo) {
+      alert('Esta empresa não tem prefixo de código cadastrado. Cadastre o prefixo antes de imprimir '
+        + 'etiquetas de recebimento — sem ele o QR pode ficar ambíguo entre empresas.');
+      return;
+    }
     try {
-      const svg = await qrSvg(urlRastreio(item.lote, process.env.NEXT_PUBLIC_SITE_URL), 12);
+      const tamanhoQr = medidasImpressao('recebimento').qrTamanho_mm;
+      const svg = await qrSvg(
+        urlRastreio(empresaAtual.prefixo_codigo, item.lote, process.env.NEXT_PUBLIC_SITE_URL),
+        tamanhoQr,
+      );
       setEtiquetaItem({
         tipo,
         item,
@@ -563,6 +615,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
           notaFiscal: grupo.cabecalho.nota_fiscal || '—',
           qrSvg: svg,
           copias: Number(item.volumes) || 1,
+          // Fixo, independente de quantas cópias esta impressão vai sair —
+          // é o denominador de "vol. N/total" (ver EtiquetaPrint.js).
+          volumesTotal: Number(item.volumes) || 1,
         },
       });
     } catch (e) {
@@ -712,10 +767,10 @@ function Conteudo({ setFicha, setEtiqueta }) {
             <>
               <div><label>Peso conferido</label><input type="number" step="0.001" value={itemForm.quantidade} onChange={e => setItemForm({ ...itemForm, quantidade: e.target.value })} /></div>
               <div>
-                <label>Volumes (caixas)</label>
+                <label>Volumes (caixas) *</label>
                 <input
-                  type="number" min="1" step="1" value={itemForm.volumes}
-                  placeholder="quantas caixas chegaram"
+                  type="number" min="1" max={VOLUMES_MAX} step="1" value={itemForm.volumes}
+                  placeholder="quantas caixas chegaram — obrigatório"
                   onChange={e => setItemForm({ ...itemForm, volumes: e.target.value })}
                 />
               </div>

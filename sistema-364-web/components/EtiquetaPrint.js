@@ -20,6 +20,14 @@ export default function EtiquetaPrint({ etiqueta }) {
   const m = medidasImpressao(modeloId);
   const copias = Math.max(1, Number(etiqueta.copias) || 1);
   const linhas = paginarEtiquetas(copias, m.colunas);
+  // vol. N/total: o denominador é SEMPRE o total de volumes do item
+  // (`volumesTotal`), nunca `copias` — `copias` é só quantas etiquetas saem
+  // desta impressão, e pode ser 1 numa reimpressão avulsa (etiqueta perdida
+  // da caixa 7 de 20). Sem essa separação, reimprimir 1 cópia da caixa 7
+  // gravaria "vol. 1/1" numa caixa que é a 7 de 20. `volumeInicial` desloca
+  // a numeração para começar no volume perdido, em vez de sempre em 1.
+  const volumesTotal = Number(etiqueta.volumesTotal) || copias;
+  const volumeInicial = Math.max(1, Number(etiqueta.volumeInicial) || 1);
 
   return (
     <div className="print-area etiquetas-print">
@@ -56,7 +64,7 @@ export default function EtiquetaPrint({ etiqueta }) {
            overflow:hidden do pai (.et-receb-texto) corta o rodapé em vez do
            texto, que é o oposto do que queremos. */
         .etiquetas-print .et-receb-texto .et-linha { overflow: hidden; min-height: 0; }
-        .etiquetas-print .et-receb-qr { width: 14mm; display: flex; align-items: center; justify-content: center; }
+        .etiquetas-print .et-receb-qr { width: ${m.qrTamanho_mm || 16}mm; display: flex; align-items: center; justify-content: center; }
         .etiquetas-print .et-receb-qr svg { display: block; }
         .etiquetas-print .et-lote { font-family: 'Courier New', monospace; font-size: 8pt; font-weight: 700; overflow: hidden; min-height: 0; }
         .etiquetas-print .et-mp { font-size: 8pt; font-weight: 700; text-transform: uppercase; margin: .3mm 0; overflow: hidden; min-height: 0; }
@@ -68,7 +76,7 @@ export default function EtiquetaPrint({ etiqueta }) {
           {linha.map(n => (
             <div className="etiqueta" key={n}>
               {modeloId === 'recebimento'
-                ? <Recebimento etiqueta={etiqueta} indice={n} copias={copias} />
+                ? <Recebimento etiqueta={etiqueta} indice={n} volumesTotal={volumesTotal} volumeInicial={volumeInicial} />
                 : <ValidadeCozinha etiqueta={etiqueta} />}
             </div>
           ))}
@@ -100,7 +108,12 @@ function ValidadeCozinha({ etiqueta }) {
 // dentro de .et-receb-texto, tem overflow:hidden: quem cede espaço quando o
 // conteúdo não cabe nos 30mm de altura é o texto (lote/matéria-prima/receb./
 // forn.), nunca o rodapé.
-function Recebimento({ etiqueta, indice, copias }) {
+//
+// `volumesTotal` é sempre o total de volumes do ITEM, nunca a quantidade
+// impressa nesta chamada — e `volumeInicial` desloca a numeração para uma
+// reimpressão avulsa começar no volume certo (ex.: reimprimir só a caixa 7
+// de 20 imprime "vol. 7/20", não "vol. 1/1").
+function Recebimento({ etiqueta, indice, volumesTotal, volumeInicial }) {
   return (
     <div className="et-receb">
       <div className="et-receb-texto">
@@ -110,7 +123,7 @@ function Recebimento({ etiqueta, indice, copias }) {
         <div className="et-linha">Forn. {etiqueta.fornecedor || '—'}</div>
         <div className="et-rodape">
           <span>NF {etiqueta.notaFiscal || '—'}</span>
-          <span className="et-vol">vol. {indice + 1}/{copias}</span>
+          <span className="et-vol">vol. {volumeInicial + indice}/{volumesTotal}</span>
         </div>
       </div>
       <div className="et-receb-qr" dangerouslySetInnerHTML={{ __html: etiqueta.qrSvg || '' }} />
