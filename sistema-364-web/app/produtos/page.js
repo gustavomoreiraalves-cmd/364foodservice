@@ -5,7 +5,7 @@ import { fmtMoney, proximoCodigoProduto, parseCustoUnitario } from '../../lib/fo
 import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { camposDoFormulario } from '../../lib/cadastro';
+import { camposDoFormulario, mensagemAoAlternarAtivo } from '../../lib/cadastro';
 
 const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false };
 
@@ -31,6 +31,12 @@ function Conteudo() {
   const [regraForm, setRegraForm] = useState({});
   const [editandoProduto, setEditandoProduto] = useState(null);
   const [mostrarInativos, setMostrarInativos] = useState(false);
+  // Esta tela não usa o hook `useCadastro` (tem código gerado, ficha técnica e
+  // regras de validade), então a trava contra duplo clique é local. Sem ela,
+  // `proximoCodigoProduto` lê a contagem antes de qualquer insert e dois cliques
+  // rápidos criam dois produtos com o mesmo 0364-XXX — o código impresso na
+  // etiqueta, que não pode repetir.
+  const [salvando, setSalvando] = useState(false);
 
   const produtoEmEdicao = editandoProduto ? produtos.find(p => p.id === editandoProduto) : null;
   const produtosVisiveis = mostrarInativos ? produtos : produtos.filter(p => p.ativo !== false);
@@ -55,6 +61,7 @@ function Conteudo() {
 
   async function salvarProduto(e) {
     e.preventDefault();
+    if (salvando) return;
     // Mesma validação do "Editar custo": sem ela `Number('-5') || 0` gravaria
     // -5 e um texto inválido viraria 0 em silêncio.
     const custo = parseCustoUnitario(formProd.custo_unitario);
@@ -74,16 +81,21 @@ function Conteudo() {
       producao_interna: !!formProd.producao_interna,
     };
 
-    let error;
-    if (editandoProduto) {
-      ({ error } = await supabase.from('produtos').update(campos).eq('id', editandoProduto));
-    } else {
-      const codigo = await proximoCodigoProduto(empresaAtual.id, empresaAtual.prefixo_codigo);
-      ({ error } = await supabase.from('produtos').insert([{ ...campos, codigo, empresa_id: empresaAtual.id }]));
+    setSalvando(true);
+    try {
+      let error;
+      if (editandoProduto) {
+        ({ error } = await supabase.from('produtos').update(campos).eq('id', editandoProduto));
+      } else {
+        const codigo = await proximoCodigoProduto(empresaAtual.id, empresaAtual.prefixo_codigo);
+        ({ error } = await supabase.from('produtos').insert([{ ...campos, codigo, empresa_id: empresaAtual.id }]));
+      }
+      if (error) { alert('Erro ao salvar: ' + error.message); return; }
+      cancelarEdicaoProduto();
+      await carregar();
+    } finally {
+      setSalvando(false);
     }
-    if (error) { alert('Erro ao salvar: ' + error.message); return; }
-    cancelarEdicaoProduto();
-    carregar();
   }
 
   function iniciarEdicaoProduto(p) {
@@ -100,7 +112,7 @@ function Conteudo() {
   async function alternarAtivoProduto(p) {
     const { error } = await supabase.from('produtos')
       .update({ ativo: !(p.ativo !== false) }).eq('id', p.id);
-    if (error) { alert('Não foi possível mudar a situação: ' + error.message); return; }
+    if (error) { alert(mensagemAoAlternarAtivo(error)); return; }
     carregar();
   }
 
@@ -131,7 +143,17 @@ function Conteudo() {
   async function addItemFicha(e, produtoId) {
     e.preventDefault();
     const item = itemFicha[produtoId] || {};
-    if (!item.materia_prima_id || !item.quantidade) return;
+    // Antes este guard era um `return` mudo: com todas as matérias-primas
+    // desativadas o select ficava sem opção nenhuma, `materia_prima_id` ficava
+    // vazio e o botão simplesmente não fazia nada, sem dizer por quê.
+    if (!item.materia_prima_id) {
+      alert(mps.some(m => m.ativo !== false)
+        ? 'Selecione a matéria-prima antes de adicionar o item à ficha técnica.'
+        : 'Nenhuma matéria-prima ativa para escolher. Cadastre uma na aba Matérias-primas, '
+          + 'ou reative uma que tenha sido desativada, antes de montar a ficha técnica.');
+      return;
+    }
+    if (!item.quantidade) { alert('Informe a quantidade de matéria-prima por unidade produzida.'); return; }
     const { error } = await supabase.from('ficha_tecnica').insert([{
       produto_id: produtoId,
       materia_prima_id: item.materia_prima_id,
@@ -215,7 +237,9 @@ function Conteudo() {
             Produto de produção interna
           </label></div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <button className="btn" type="submit">{editandoProduto ? 'Salvar alterações' : 'Adicionar produto'}</button>
+            <button className="btn" type="submit" disabled={salvando}>
+              {salvando ? 'Salvando…' : (editandoProduto ? 'Salvar alterações' : 'Adicionar produto')}
+            </button>
             {editandoProduto && <button className="btn secondary" type="button" onClick={cancelarEdicaoProduto}>Cancelar</button>}
           </div>
         </form>
@@ -316,6 +340,7 @@ function Conteudo() {
                 <form className="form-grid" style={{ marginTop: 8 }} onSubmit={e => addItemFicha(e, p.id)}>
                   <div><label>Matéria-prima</label>
                     <select value={item.materia_prima_id} onChange={e => setItemFicha({ ...itemFicha, [p.id]: { ...item, materia_prima_id: e.target.value } })}>
+                      <option value="">Selecione…</option>
                       {mps
                         .filter(m => m.ativo !== false || m.id === item.materia_prima_id)
                         .map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
@@ -329,7 +354,7 @@ function Conteudo() {
               </div>
             </div>
           );
-        }) : <p className="muted">Nenhum produto cadastrado ainda.</p>}
+        }) : <p className="muted">Nenhum produto {mostrarInativos ? 'cadastrado' : 'ativo'}.</p>}
       </div>
     </>
   );
