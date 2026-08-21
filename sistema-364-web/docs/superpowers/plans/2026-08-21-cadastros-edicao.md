@@ -828,17 +828,26 @@ Em cada arquivo, ache o `<select>` que lista a entidade e filtre na hora de mont
         .map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>)}
 ```
 
-Onde aplicar:
+Onde aplicar — **tabela corrigida durante a execução**. A versão original foi escrita a
+partir de um `grep` e errava em quatro pontos, todos levantados pelo implementador antes
+de editar qualquer coisa:
 
-| arquivo | entidade | consulta que já existe (não mexer) |
+| arquivo | entidade | observação |
 | --- | --- | --- |
-| `app/pedidos/page.js` | clientes | linha com `from('clientes').select('id, nome')` |
-| `app/pedidos/page.js` | produtos | linha com `from('produtos').select('*')` |
-| `app/producoes/nova/page.js` | produtos | linha com `from('produtos').select('id, codigo, nome, unidade, modelo_etiqueta')` |
-| `app/producoes/completa/page.js` | produtos | linha com `from('produtos').select('*')` |
-| `app/producoes/completa/page.js` | matérias-primas | linha com `from('materias_primas').select('*')` |
-| `app/financeiro/contas-a-pagar/page.js` | fornecedores | linha com `from('fornecedores').select('id, nome')` |
-| `app/produtos/page.js` | matérias-primas na ficha técnica | linha com `from('materias_primas').select('*')` |
+| `components/PedidoForm.js` | clientes e produtos | os dois selects de pedido moram aqui, não em `app/pedidos/page.js`; o componente é usado pela listagem e pelo detalhe |
+| `app/producoes/nova/page.js` | produtos | manter o `.eq('producao_interna', true)`, que é filtro de domínio anterior a esta entrega |
+| `app/producoes/completa/page.js` | produtos | **só produto** — esta tela não tem select de matéria-prima; `mps` ali alimenta `.find()` e cálculo agregado |
+| `app/financeiro/contas-a-pagar/page.js` | fornecedores | **só o select de lançamento novo**; o de filtro do histórico lista todos, inclusive inativos |
+| `app/produtos/page.js` | matérias-primas na ficha técnica | o default do item (`mps[0]`) também precisa sair da lista filtrada, senão uma matéria-prima inativa vem pré-selecionada |
+| `app/recebimentos/page.js` | fornecedores | faltava na tabela original; só a consulta de **matéria-prima** desta tela é que está fora de escopo |
+
+**A consulta precisa trazer a coluna `ativo`, e a forma segura é `select('*')`.** Onde a
+projeção era estreita (`select('id, nome')`), listar `ativo` explicitamente **quebra a
+tela** enquanto a migração não roda: o PostgREST devolve erro `42703` para coluna
+inexistente, não `undefined`, e telas que não checam `error` ficam vazias em silêncio.
+`select('*')` traz a coluna quando ela existe e não reclama quando não existe, que é a
+tolerância que o resto do plano assume. Isso não contradiz a regra de não filtrar na
+consulta: o proibido é `.eq('ativo', true)`, que esconde o registro de todo lugar.
 
 - [ ] **Step 2: Conferir que nenhuma tela histórica perdeu nome**
 
