@@ -45,6 +45,7 @@ create table produtos (
   unidade text not null default 'un',
   preco_venda numeric(12,2) not null default 0,
   validade_dias int not null default 90,
+  conservacao_texto text,                -- dizer de conservação impresso na etiqueta de despacho (ex.: MANTER CONGELADO A -12 °C)
   created_at timestamptz not null default now()
 );
 
