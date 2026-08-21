@@ -84,7 +84,21 @@ function Conteudo({ setFicha }) {
         `)
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
-      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
+      // Nem matéria-prima nem fornecedor são filtrados por `ativo` aqui: a consulta
+      // traz tudo e o filtro fica onde as <option> são montadas, com a escotilha que
+      // preserva o valor já escolhido. Filtrar na consulta esconde o registro também
+      // de onde ele precisa aparecer — uma matéria-prima desativada sumia de `mps`,
+      // o de-para aprendido da NF-e importada era zerado sem aviso nenhum, e o
+      // upsert de `fornecedor_produto_mapa` gravava o remapeamento errado por cima
+      // do certo, de forma permanente.
+      //
+      // select('*') em vez de lista de colunas: se `ativo` ainda não existir
+      // (migração 26 pendente), uma projeção que citasse a coluna pelo nome
+      // devolveria erro 42703 do PostgREST e vazaria a tela inteira. Com '*' a
+      // coluna some do objeto quando não existe, `ativo` vira undefined e
+      // `ativo !== false` continua mostrando o registro — sem quebrar nada. O custo
+      // aceito é trazer colunas que a tela não usa.
+      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
@@ -577,7 +591,9 @@ function Conteudo({ setFicha }) {
                   onChange={e => setItensDaNota(lista => lista.map(i =>
                     i.indice === item.indice ? { ...i, materiaPrimaId: e.target.value } : i))}>
                   <option value="">Matéria-prima…</option>
-                  {mps.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                  {mps
+                    .filter(m => m.ativo !== false || m.id === item.materiaPrimaId)
+                    .map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
                 </select>
                 <label>
                   {item.unidadeNota} → kg
@@ -655,7 +671,9 @@ function Conteudo({ setFicha }) {
           <div><label>Matéria-prima</label>
             <select value={itemForm.materia_prima_id} onChange={e => trocarMateriaPrima(e.target.value)}>
               <option value="">Selecione…</option>
-              {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+              {mps
+                .filter(m => m.ativo !== false || m.id === itemForm.materia_prima_id)
+                .map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
             </select>
             {mpSelecionada && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 4 }}>Regra: {REGRA_LABEL[regra]}</span>}
           </div>
