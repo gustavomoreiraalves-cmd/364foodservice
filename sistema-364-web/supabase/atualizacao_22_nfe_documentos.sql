@@ -1,5 +1,5 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 21: NF-e NO RECEBIMENTO
+-- 364 — ATUALIZAÇÃO 22: NF-e NO RECEBIMENTO
 -- Caixa de entrada de notas fiscais eletrônicas: documentos vistos na SEFAZ
 -- (ou enviados por upload), o ponteiro de leitura por empresa e o de-para que
 -- liga o código do produto do fornecedor à matéria-prima cadastrada.
@@ -7,7 +7,7 @@
 -- O XML em si não fica no banco: vai para o bucket privado 'recebimentos',
 -- em {empresa_id}/nfe/{chave}.xml, e a coluna guarda só o path.
 --
--- Rode depois de atualizacao_20_rls_escopo_empresa.sql.
+-- Rode depois de atualizacao_21_dashboard_grupo.sql.
 -- =========================================================
 
 begin;

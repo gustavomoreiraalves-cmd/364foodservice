@@ -5,11 +5,16 @@ O que segue só pode ser feito por quem tem acesso ao Supabase de produção.
 
 Plano completo: `2026-08-20-nfe-recebimento.md`. Spec: `../specs/2026-08-20-nfe-recebimento-design.md`.
 
-Estado do código: 57 testes passando, `next build` limpo. Nada foi executado contra banco.
+Estado do código: 82 testes passando, `next build` limpo. Nada foi executado contra banco.
 
-## 1. Rodar a migração 21
+As migrações desta entrega são a **22** e a **23**: quando a fase 1 foi escrita elas eram 21
+e 22, mas `main` trouxe uma `atualizacao_21_dashboard_grupo.sql` no meio do caminho e as
+nossas foram renumeradas no merge para não colidir. Rode a 21 do consolidado antes, se
+ainda não rodou.
 
-`supabase/atualizacao_21_nfe_documentos.sql`, no SQL Editor. Cria `nfe_documentos`,
+## 1. Rodar a migração 22
+
+`supabase/atualizacao_22_nfe_documentos.sql`, no SQL Editor. Cria `nfe_documentos`,
 `nfe_sefaz_estado` e `fornecedor_produto_mapa`, e acrescenta `nfe_chave` e
 `nfe_documento_id` em `recebimentos`. É aditiva, idempotente e roda dentro de uma
 transação — não mexe em nenhum dado existente.
@@ -22,9 +27,9 @@ where table_schema = 'public'
   and table_name in ('nfe_documentos', 'nfe_sefaz_estado', 'fornecedor_produto_mapa');
 ```
 
-## 2. Antes da migração 22: fazer backup e olhar os duplicados
+## 2. Antes da migração 23: fazer backup e olhar os duplicados
 
-**A migração 22 apaga linhas.** Ela normaliza `fornecedores.cnpj` para só dígitos e,
+**A migração 23 apaga linhas.** Ela normaliza `fornecedores.cnpj` para só dígitos e,
 quando isso faz dois cadastros do mesmo fornecedor virarem o mesmo CNPJ, funde os dois:
 mantém o mais antigo, repõe os vínculos (recebimentos, contas a pagar) para ele e apaga
 o mais novo. O `nome`, `categoria`, `contato`, `telefone` e `email` do cadastro mais novo
@@ -49,9 +54,9 @@ antes de rodar.
 
 Se a lista vier vazia, não há fusão a fazer e a migração só normaliza a pontuação.
 
-## 3. Rodar a migração 22
+## 3. Rodar a migração 23
 
-`supabase/atualizacao_22_fornecedor_cnpj_normalizado.sql`. Roda dentro de uma transação:
+`supabase/atualizacao_23_fornecedor_cnpj_normalizado.sql`. Roda dentro de uma transação:
 se qualquer coisa falhar, nada é aplicado. Ela aborta de propósito, com mensagem em
 português, se encontrar uma chave estrangeira composta apontando para `fornecedores` —
 nesse caso a fusão precisa ser feita à mão antes.

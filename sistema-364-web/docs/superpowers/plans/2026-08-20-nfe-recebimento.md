@@ -17,7 +17,7 @@
 - Nenhum código de `lib/nfe/*` ou `lib/sefaz/*` que toque certificado pode ser importado por componente client. Componentes client só chamam as rotas.
 - O material do certificado (`.pfx`, senha, chave privada em PEM) nunca é logado, nunca entra em resposta HTTP e nunca é gravado em disco.
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
-- Migrações SQL entram em `supabase/` com o próximo número livre. Já existem dois arquivos `atualizacao_20_*`; este plano usa **21** e **22**. *(Revisão final da fase 1: a **22** acabou sendo `atualizacao_22_fornecedor_cnpj_normalizado.sql` — o CNPJ do fornecedor era texto livre e nunca casava com o do XML. A tabela do certificado digital fica para o próximo número livre.)*
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, fica na **24**.)*
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
 - Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
@@ -49,8 +49,8 @@
 | `app/recebimentos/notas/page.js` | Tela "Notas fiscais" (caixa de entrada). |
 | `components/RecebimentoTabs.js` | Navegação entre "Entradas" e "Notas fiscais". |
 | `components/ImportarNota.js` | Bloco de importação no formulário de recebimento. |
-| `supabase/atualizacao_21_nfe_documentos.sql` | Tabelas de documento, estado e de-para. |
-| `supabase/atualizacao_22_certificado_digital.sql` | Tabela do certificado. |
+| `supabase/atualizacao_22_nfe_documentos.sql` | Tabelas de documento, estado e de-para. |
+| `supabase/atualizacao_24_certificado_digital.sql` | Tabela do certificado. |
 | `tests/nfe-parse.test.mjs`, `tests/nfe-depara.test.mjs`, `tests/nfe-parcelas.test.mjs`, `tests/nfe-cripto.test.mjs`, `tests/sefaz-envelopes.test.mjs` | Testes. |
 | `tests/fixtures/nfe-exemplo.xml`, `tests/fixtures/dist-retorno.xml` | Fixtures. |
 | `vercel.json` | Cron da sincronização. |
@@ -580,7 +580,7 @@ git commit -m "feat(nfe): parcelas do contas a pagar a partir das duplicatas"
 ## Task 4: Migração das tabelas de NF-e
 
 **Files:**
-- Create: `supabase/atualizacao_21_nfe_documentos.sql`
+- Create: `supabase/atualizacao_22_nfe_documentos.sql`
 
 **Interfaces:**
 - Consumes: `public.empresas_permitidas()` (já existe, de `atualizacao_05`).
@@ -589,7 +589,7 @@ git commit -m "feat(nfe): parcelas do contas a pagar a partir das duplicatas"
 
 - [ ] **Step 1: Escrever a migração**
 
-Criar `supabase/atualizacao_21_nfe_documentos.sql`:
+Criar `supabase/atualizacao_22_nfe_documentos.sql`:
 
 ```sql
 -- =========================================================
@@ -718,7 +718,7 @@ Esperado: as duas linhas.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add supabase/atualizacao_21_nfe_documentos.sql
+git add supabase/atualizacao_22_nfe_documentos.sql
 git commit -m "feat(nfe): migração das tabelas de documento, estado e de-para"
 ```
 
@@ -1354,7 +1354,7 @@ git commit -m "feat(recebimento): importar NF-e por XML e aprender o de-para de 
 **Files:**
 - Create: `lib/nfe/cripto.js`
 - Create: `tests/nfe-cripto.test.mjs`
-- Create: `supabase/atualizacao_22_certificado_digital.sql`
+- Create: `supabase/atualizacao_24_certificado_digital.sql`
 
 **Interfaces:**
 - Consumes: `node:crypto`.
@@ -1464,7 +1464,7 @@ Esperado: PASS nos 6 testes de `nfe-cripto`.
 
 - [ ] **Step 5: Escrever a migração da tabela**
 
-Criar `supabase/atualizacao_22_certificado_digital.sql`:
+Criar `supabase/atualizacao_24_certificado_digital.sql`:
 
 ```sql
 -- =========================================================
@@ -1476,7 +1476,7 @@ Criar `supabase/atualizacao_22_certificado_digital.sql`:
 -- Só o service role (rotas em app/api/nfe/*) alcança o conteúdo, e a chave de
 -- decifragem fica em env var da Vercel (NFE_CERT_MASTER_KEY), fora do banco.
 --
--- Rode depois de atualizacao_21_nfe_documentos.sql.
+-- Rode depois de atualizacao_22_nfe_documentos.sql.
 -- =========================================================
 
 begin;
@@ -1539,7 +1539,7 @@ acesso ao certificado guardado — nesse caso, subir o `.pfx` de novo.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_22_certificado_digital.sql
+git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_24_certificado_digital.sql
 git commit -m "feat(nfe): cifra AES-256-GCM e tabela do certificado digital"
 ```
 
@@ -3096,7 +3096,7 @@ git commit -m "feat(nfe): sincronização agendada com a SEFAZ"
 ## Verificação final
 
 - [ ] `npm run verify` passa: os 29 testes novos (6 parse + 5 de-para + 4 parcelas + 6 cripto + 5 envelopes + 3 resumo), mais os que já existiam, e o build do Next sem erro.
-- [ ] As migrações 21 e 22 estão aplicadas no Supabase de produção.
+- [ ] As migrações 22 (NF-e), 23 (CNPJ de fornecedor) e 24 (certificado) estão aplicadas no Supabase de produção.
 - [ ] `NFE_CERT_MASTER_KEY` e `CRON_SECRET` estão configurados na Vercel.
 - [ ] Uma nota real foi importada por XML, uma por chave e uma pela caixa de entrada.
 - [ ] A segunda nota do mesmo fornecedor veio com os itens já casados.

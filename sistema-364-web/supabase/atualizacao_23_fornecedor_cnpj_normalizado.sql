@@ -1,5 +1,5 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 22: CNPJ DE FORNECEDOR SÓ COM DÍGITOS
+-- 364 — ATUALIZAÇÃO 23: CNPJ DE FORNECEDOR SÓ COM DÍGITOS
 -- O CNPJ do fornecedor era texto livre, então o mesmo fornecedor podia estar
 -- cadastrado como '12.345.678/0001-99' e a NF-e trazer '12345678000199'. A rota
 -- /preparar casa o emitente da nota com o fornecedor por igualdade de CNPJ, e
@@ -22,7 +22,7 @@
 --
 -- O formulário de Fornecedores também já grava só dígitos (app/fornecedores/page.js).
 --
--- Rode depois de atualizacao_21_nfe_documentos.sql.
+-- Rode depois de atualizacao_22_nfe_documentos.sql.
 -- =========================================================
 
 begin;
