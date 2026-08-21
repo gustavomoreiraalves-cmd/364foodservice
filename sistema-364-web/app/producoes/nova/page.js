@@ -55,6 +55,18 @@ function Conteudo({ setEtiqueta }) {
       if (!empresaAtual) return;
       const eid = empresaAtual.id;
       const [r1, r2, r3, r4] = await Promise.all([
+        // `producao_interna` é filtro de domínio e continua na consulta. `ativo`
+        // não: o filtro de situação fica onde as <option> são montadas, com a
+        // escotilha que preserva o valor já escolhido, para não esconder o produto
+        // de onde ele ainda precisa aparecer.
+        //
+        // select('*') em vez de lista de colunas: se `ativo` ainda não existir
+        // (migração 26 pendente), uma projeção que citasse a coluna pelo nome
+        // devolveria erro 42703 do PostgREST e vazaria a tela inteira. Com '*' a
+        // coluna some do objeto quando não existe, `ativo` vira undefined e
+        // `ativo !== false` continua mostrando o registro. Voltar para
+        // `select('id, nome, unidade, …')` parece higiene, mas desliga o recurso em
+        // silêncio ou quebra a tela — o custo aceito é trazer colunas não usadas.
         supabase.from('produtos').select('*').eq('empresa_id', eid).eq('producao_interna', true).order('nome'),
         supabase.from('unidades').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
         supabase.from('produto_regras_validade').select('*').eq('empresa_id', eid).eq('ativo', true),
@@ -72,6 +84,11 @@ function Conteudo({ setEtiqueta }) {
   }, [empresaAtual?.id]);
 
   const produto = produtos.find(p => p.id === form.produto_id);
+  // A tarja de ajuda e o <select> têm que ler a MESMA lista. Decidir a tarja por
+  // `produtos` (sem filtro) e montar as opções pela lista filtrada deixava a tela
+  // sem tarja nenhuma e com um campo obrigatório sem uma única opção quando todos
+  // os produtos de produção interna estavam desativados: beco sem saída.
+  const produtosSelecionaveis = produtos.filter(p => p.ativo !== false || p.id === form.produto_id);
   const regrasProduto = useMemo(
     () => Object.fromEntries(regras.filter(r => r.produto_id === form.produto_id).map(r => [r.conservacao, r])),
     [regras, form.produto_id]
@@ -154,9 +171,9 @@ function Conteudo({ setEtiqueta }) {
 
       <div className="panel">
         <h3>Nova Produção Interna</h3>
-        {!produtos.length ? (
+        {!produtosSelecionaveis.length ? (
           <div className="banner info">
-            Nenhum produto marcado como <b>produção interna</b> nesta empresa. Marque produtos na aba <Link href="/produtos">Produtos</Link> e defina as regras de conservação.
+            Nenhum produto <b>ativo</b> marcado como <b>produção interna</b> nesta empresa — ou não há nenhum cadastrado, ou todos foram desativados. Marque (ou reative) produtos na aba <Link href="/produtos">Produtos</Link> e defina as regras de conservação.
           </div>
         ) : (
           <form onSubmit={e => { e.preventDefault(); salvar(true); }}>
@@ -164,9 +181,7 @@ function Conteudo({ setEtiqueta }) {
               <div><label>Produto</label>
                 <select required value={form.produto_id} onChange={e => selecionarProduto(e.target.value)} style={{ minHeight: 44 }}>
                   <option value="">Selecione…</option>
-                  {produtos
-                    .filter(p => p.ativo !== false || p.id === form.produto_id)
-                    .map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  {produtosSelecionaveis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
                 </select>
               </div>
               {unidades.length > 0 && (
