@@ -29,7 +29,20 @@ export async function GET(request, { params }) {
 
   const { data: arquivo, error: errDl } = await sb.storage.from('recebimentos').download(documento.xml_path);
   if (errDl) return NextResponse.json({ error: 'Falha ao ler o XML guardado: ' + errDl.message }, { status: 500 });
-  const nota = parseNFe(await arquivo.text());
+
+  let xmlContent;
+  try {
+    xmlContent = await arquivo.text();
+  } catch (e) {
+    return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
+  }
+
+  let nota;
+  try {
+    nota = parseNFe(xmlContent);
+  } catch (e) {
+    return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
+  }
 
   const [{ data: fornecedor }, { data: mapa }, { data: recebimentoExistente }] = await Promise.all([
     sb.from('fornecedores').select('id, nome, cnpj')
