@@ -49,9 +49,17 @@ export async function GET(request, { params }) {
 
   // `fornecedores.cnpj` é normalizado para só dígitos pela migração 22 — o CNPJ do
   // emitente já vem só com dígitos do parser, então a comparação é direta.
+  //
+  // Sem `.maybeSingle()` de propósito: dois cadastros com o mesmo CNPJ (o que a
+  // busca quebrada de antes produzia, e que a migração 22 ainda não rodou para
+  // limpar) fariam o maybeSingle devolver erro de "mais de uma linha", que viraria
+  // um 500 e travaria a importação inteira. Fornecedor duplicado tem que degradar
+  // para "casei com um deles", nunca para importação bloqueada. `limit(1)` com
+  // ordem fixa mantém a escolha estável entre uma importação e outra.
   const [resFornecedor, resMapa, resRecebimento] = await Promise.all([
     sb.from('fornecedores').select('id, nome, cnpj')
-      .eq('empresa_id', empresaId).eq('cnpj', nota.emitente.cnpj).maybeSingle(),
+      .eq('empresa_id', empresaId).eq('cnpj', nota.emitente.cnpj)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(1),
     sb.from('fornecedor_produto_mapa')
       .select('codigo_produto, materia_prima_id, unidade_nf, fator_conversao')
       .eq('empresa_id', empresaId).eq('cnpj_emitente', nota.emitente.cnpj),
@@ -71,7 +79,9 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'Falha ao conferir se esta nota já virou recebimento: ' + resRecebimento.error.message }, { status: 500 });
   }
 
-  const fornecedor = resFornecedor.data;
+  // Vem lista por causa do limit(1): o primeiro (mais antigo) é o escolhido, e é o
+  // mesmo que a migração 22 mantém quando funde os duplicados.
+  const fornecedor = resFornecedor.data?.[0] || null;
   const mapa = resMapa.data;
   const recebimentoExistente = resRecebimento.data;
 
