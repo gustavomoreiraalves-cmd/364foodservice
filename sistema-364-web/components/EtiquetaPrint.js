@@ -120,7 +120,18 @@ function Recebimento({ etiqueta, indice, copias }) {
 
 // Renderiza as etiquetas e abre a impressão. A falha ou o cancelamento da
 // impressão física não desfaz nada — o registro e a impressão são independentes.
+//
+// O estado é zerado quando a caixa de diálogo de impressão fecha (impresso ou
+// cancelado): enquanto `etiqueta` continuar preenchido, o `@page` de
+// 108×32mm deste componente fica montado e vale para QUALQUER impressão
+// seguinte na mesma tela — inclusive a ficha A4 de FichaPrint, que não
+// declara `@page` próprio. O listener é registrado ANTES de `window.print()`
+// porque em alguns navegadores essa chamada é bloqueante: se o listener
+// entrasse depois, o evento já teria disparado.
 export function imprimirEtiquetas(setEtiqueta, dados) {
   setEtiqueta(dados);
-  setTimeout(() => window.print(), 150);
+  setTimeout(() => {
+    window.addEventListener('afterprint', () => setEtiqueta(null), { once: true });
+    window.print();
+  }, 150);
 }

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { fmtDateTime, MOTIVOS_REIMPRESSAO } from '../lib/producao';
 import { fmtDate } from '../lib/format';
+import { MODELOS } from '../lib/etiquetas';
 import { imprimirEtiquetas } from './EtiquetaPrint';
 
 // Modal pós-finalização/reimpressão: quantidade de etiquetas, visualizar/
@@ -34,7 +35,12 @@ export default function ModalEtiquetas({
 
   // Sem `dados`, o modelo efetivo é o da produção (caminho antigo, preservado
   // ao pé da letra); com `dados`, é a prop `modelo` que a tela chamadora passou.
-  const modeloEfetivo = dados ? modelo : (producao.modelo || 'validade-cozinha');
+  // `produtos.modelo_etiqueta` é texto livre, sem constraint de banco nem
+  // tela que valide o valor contra MODELOS (lib/etiquetas.js) — se algum
+  // registro tiver um valor que não exista lá, cai no padrão em vez de deixar
+  // `EtiquetaPrint` lançar e derrubar o render da tela de produção.
+  const modeloValido = m => (m && MODELOS[m] ? m : 'validade-cozinha');
+  const modeloEfetivo = modeloValido(dados ? modelo : producao.modelo);
 
   const dadosEtiqueta = dados
     ? { ...dados, modelo: modeloEfetivo, copias }

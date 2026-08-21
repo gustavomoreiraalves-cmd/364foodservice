@@ -68,6 +68,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
   const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
   const [etiquetaItem, setEtiquetaItem] = useState(null);
+  const [impressoes, setImpressoes] = useState([]);
   const proximaKey = useRef(0);
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
@@ -76,7 +77,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2, r3, r4, r5] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
       supabase.from('recebimento_itens')
         .select(`
           *,
@@ -95,6 +96,12 @@ function Conteudo({ setFicha, setEtiqueta }) {
       supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
+      // Histórico de impressão dos volumes: decide se o botão do item mostra
+      // "Imprimir etiquetas" ou "Reimprimir etiquetas" — mesmo padrão de
+      // app/producoes/completa/page.js. Sem isso, os dois botões fixos
+      // deixavam o operador escolher rotular impressões repetidas como
+      // "original", contornando a exigência de motivo na reimpressão.
+      supabase.from('etiqueta_impressoes').select('source_id').eq('empresa_id', empresaAtual.id).eq('source_type', 'recebimento_item'),
     ]);
     if (r1.error) console.error(r1.error);
     setLista((r1.data || []).map(item => ({
@@ -107,6 +114,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
     setFornecedores(r3.data || []);
     setFuncionarios(r4.data || []);
     setDepositos(r5.data || []);
+    setImpressoes(r6.data || []);
     setLoading(false);
   }
 
@@ -528,6 +536,15 @@ function Conteudo({ setFicha, setEtiqueta }) {
     });
   }
 
+  // Deriva o tipo de impressão do histórico em vez de um botão fixo por tipo:
+  // com dois botões fixos, "Imprimir etiquetas" gravava tipo='original' sem
+  // motivo mesmo em reimpressões repetidas, contornando a exigência de
+  // motivo que a RPC só cobra quando p_tipo = 'reimpressao'. Mesmo padrão de
+  // app/producoes/completa/page.js (`impressoes.some(...)`).
+  function jaImprimiu(item) {
+    return impressoes.some(i => i.source_id === item.id);
+  }
+
   // O QR é resolvido ANTES de abrir o modal: window.print() é síncrono e não
   // espera promessa nenhuma, e etiqueta de recebimento sem QR não serve ao
   // rastreio — por isso, se o QR falhar, o modal nem abre.
@@ -864,17 +881,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
                                             className="btn secondary small"
                                             disabled={!it.volumes}
                                             title={!it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined}
-                                            onClick={() => abrirEtiquetas(it, g, 'original')}
+                                            onClick={() => abrirEtiquetas(it, g, jaImprimiu(it) ? 'reimpressao' : 'original')}
                                           >
-                                            Imprimir etiquetas
-                                          </button>
-                                          <button
-                                            className="btn secondary small"
-                                            disabled={!it.volumes}
-                                            title={!it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined}
-                                            onClick={() => abrirEtiquetas(it, g, 'reimpressao')}
-                                          >
-                                            Reimprimir
+                                            {jaImprimiu(it) ? 'Reimprimir etiquetas' : 'Imprimir etiquetas'}
                                           </button>
                                           <button className="btn danger small" onClick={() => excluirItem(it)}>Excluir</button>
                                         </div>
@@ -909,7 +918,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           sourceType="recebimento_item"
           empresaNome={empresaAtual?.nome}
           setEtiqueta={setEtiqueta}
-          onFechar={() => setEtiquetaItem(null)}
+          onFechar={() => { setEtiquetaItem(null); carregar(); }}
         />
       )}
     </>
