@@ -17,7 +17,7 @@
 - Nenhum código de `lib/nfe/*` ou `lib/sefaz/*` que toque certificado pode ser importado por componente client. Componentes client só chamam as rotas.
 - O material do certificado (`.pfx`, senha, chave privada em PEM) nunca é logado, nunca entra em resposta HTTP e nunca é gravado em disco.
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
-- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, fica na **24**.)*
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, toma o **proximo numero livre no dia em que a fase 2 for implementada** — nao reserve numero para trabalho nao feito, que foi o que obrigou a renumeracao acima. Os nomes `atualizacao_24_certificado_digital.sql` que aparecem nas Tasks 8 em diante sao ilustrativos.)*
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
 - Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
@@ -3096,7 +3096,7 @@ git commit -m "feat(nfe): sincronização agendada com a SEFAZ"
 ## Verificação final
 
 - [ ] `npm run verify` passa: os 29 testes novos (6 parse + 5 de-para + 4 parcelas + 6 cripto + 5 envelopes + 3 resumo), mais os que já existiam, e o build do Next sem erro.
-- [ ] As migrações 22 (NF-e), 23 (CNPJ de fornecedor) e 24 (certificado) estão aplicadas no Supabase de produção.
+- [ ] As migrações 22 (NF-e) e 23 (CNPJ de fornecedor) estão aplicadas no Supabase de produção, mais a do certificado quando a fase 2 sair.
 - [ ] `NFE_CERT_MASTER_KEY` e `CRON_SECRET` estão configurados na Vercel.
 - [ ] Uma nota real foi importada por XML, uma por chave e uma pela caixa de entrada.
 - [ ] A segunda nota do mesmo fornecedor veio com os itens já casados.

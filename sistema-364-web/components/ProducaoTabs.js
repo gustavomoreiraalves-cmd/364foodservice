@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 const ABAS = [
   { href: '/producoes', label: 'Visão Geral', exato: true },
   { href: '/producoes/nova', label: 'Nova Produção' },
-  { href: '/producoes/completa', label: 'Produção Completa' },
+  { href: '/producoes/completa', label: 'Defumação' },
   { href: '/producoes/internas', label: 'Produções Internas' },
   { href: '/producoes/validades', label: 'Validades' },
   { href: '/producoes/historico', label: 'Histórico' },

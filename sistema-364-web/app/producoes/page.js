@@ -108,7 +108,7 @@ function Conteudo() {
                   <td>{p.produtos?.nome || '—'}</td>
                   <td className="num">{Number(p.quantidade)} {p.produtos?.unidade || ''}</td>
                 </tr>
-              )) : <tr className="empty-row"><td colSpan={4}>Nenhuma produção completa. <Link href="/producoes/completa">Ir para Produção Completa</Link>.</td></tr>}
+              )) : <tr className="empty-row"><td colSpan={4}>Nenhuma defumação lançada. <Link href="/producoes/completa">Ir para Defumação</Link>.</td></tr>}
             </tbody>
           </table>
         </div>

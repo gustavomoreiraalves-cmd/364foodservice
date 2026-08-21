@@ -1,17 +1,18 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import { useAuth, sair, MODULOS } from '../lib/auth';
+import { useRouter } from 'next/navigation';
+import { useAuth, sair } from '../lib/auth';
 import { EmpresaContext } from '../lib/empresa';
+import SidebarNav from './SidebarNav';
+import VersaoBadge from './VersaoBadge';
 
 const EMPRESA_LS_KEY = 'empresaAtualId';
 
-// Estrutura padrão de todas as telas: sidebar com as abas que o usuário
-// pode acessar (conforme permissões) + seletor de empresa + usuário logado.
+// Estrutura padrão de todas as telas: sidebar com o menu por categorias que o
+// usuário pode acessar (ver lib/menu.js) + seletor de empresa + usuário logado.
 // `modulo` é a permissão exigida pela tela (null = qualquer usuário logado).
 export default function AppShell({ modulo, titulo, desc, children }) {
   const router = useRouter();
-  const pathname = usePathname();
   const { loading, session, permissoes, isAdmin, empresas } = useAuth(modulo);
   const [empresaAtual, setEmpresaAtualState] = useState(null);
 
@@ -33,7 +34,6 @@ export default function AppShell({ modulo, titulo, desc, children }) {
     return <div className="app"><main className="main"><p className="erro">Seu usuário não tem acesso a nenhuma empresa. Fale com um administrador.</p></main></div>;
   }
 
-  const abas = MODULOS.filter(m => isAdmin || permissoes.includes(m.id));
   const nome = session.user.user_metadata?.nome || session.user.email;
 
   return (
@@ -50,18 +50,11 @@ export default function AppShell({ modulo, titulo, desc, children }) {
             {empresas.map(emp => <option key={emp.id} value={emp.id}>{emp.nome}</option>)}
           </select>
         </div>
-        <nav>
-          <a href="/" className={pathname === '/' ? 'active' : ''}><span className="ic">◆</span>Dashboard</a>
-          {abas.map(m => (
-            <a key={m.id} href={m.href} className={pathname === m.href ? 'active' : ''}>
-              <span className="ic">{m.ic}</span>{m.label}
-            </a>
-          ))}
-          {/* Gestão de usuários migrou para Ponto → Colaboradores (painel "Acesso") */}
-        </nav>
+        <SidebarNav permissoes={permissoes} isAdmin={isAdmin} />
         <div className="sidebar-foot">
           <div className="userbadge">Logado como <b>{nome}</b></div>
           <button className="btn secondary small" style={{ marginTop: 10, width: '100%' }} onClick={() => sair(router)}>Sair</button>
+          <VersaoBadge />
         </div>
       </aside>
       <main className="main">

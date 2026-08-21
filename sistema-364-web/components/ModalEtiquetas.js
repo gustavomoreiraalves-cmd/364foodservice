@@ -64,7 +64,7 @@ export default function ModalEtiquetas({ producao, empresaNome, responsavelNome,
           </div>
           <div><label>Modelo</label>
             <select value={producao.modelo || 'validade-cozinha'} disabled>
-              <option value="validade-cozinha">Validade Cozinha (60×40 mm)</option>
+              <option value="validade-cozinha">Validade Cozinha (50×30 mm)</option>
             </select>
           </div>
           <div><label>Impressora</label>
