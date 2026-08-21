@@ -66,7 +66,11 @@ function Conteudo() {
       unidade: formProd.unidade,
       custo_unitario: custo,
       preco_venda: Number(formProd.preco_venda),
-      validade_dias: Number(formProd.validade_dias) || 90,
+      // Teste tem que ser "campo em branco", não falsy: `|| 90` apagaria um
+      // validade_dias = 0 salvo de propósito ao reabrir o produto para editar.
+      validade_dias: formProd.validade_dias === '' || formProd.validade_dias === null || formProd.validade_dias === undefined
+        ? 90
+        : Number(formProd.validade_dias),
       producao_interna: !!formProd.producao_interna,
     };
 
@@ -103,7 +107,10 @@ function Conteudo() {
   async function delProduto(id) {
     if (!confirm('Excluir este produto (e sua ficha técnica)?')) return;
     const { error } = await supabase.from('produtos').delete().eq('id', id);
-    if (error) alert('Não foi possível excluir (pode haver produções ou pedidos vinculados): ' + error.message);
+    if (error) { alert('Não foi possível excluir (pode haver produções ou pedidos vinculados): ' + error.message); return; }
+    // Sem isto, excluir o produto que está aberto para edição deixava o
+    // formulário preso em "Editando: …" apontando para um id que já era.
+    if (editandoProduto === id) cancelarEdicaoProduto();
     carregar();
   }
 
