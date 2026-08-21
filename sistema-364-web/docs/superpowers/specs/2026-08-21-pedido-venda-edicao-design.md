@@ -58,9 +58,10 @@ O que falta é o motivo, o autor e a data, e é isso que a migração acrescenta
 | `pedidos` | `+ cancelado_motivo text`, `+ cancelado_em timestamptz`, `+ cancelado_por_id uuid references funcionarios(id)` |
 | `pedidos` | `+ updated_at timestamptz not null default now()` |
 
-Migração `atualizacao_21_pedidos_edicao.sql`. O número 21 é o próximo livre: existem dois
-arquivos `atualizacao_20_` no repositório (`apuracao_ajustes_fechamento` e
-`rls_escopo_empresa`), colisão anterior que este projeto não corrige.
+Migração `atualizacao_24_pedidos_edicao.sql`. O número 24 é o próximo livre: `main` já
+tem 21 (`dashboard_grupo`), 22 (`nfe_documentos`) e 23 (`fornecedor_cnpj_normalizado`).
+Existem também dois arquivos `atualizacao_20_` no repositório (`apuracao_ajustes_fechamento`
+e `rls_escopo_empresa`), colisão anterior que este projeto não corrige.
 
 Nenhuma tabela nova.
 

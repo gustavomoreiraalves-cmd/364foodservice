@@ -1,4 +1,4 @@
--- Esqueleto mínimo para exercitar a atualização 21 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 24 num Postgres local.
 -- Só as tabelas que a migração toca, com as colunas que ela usa.
 create table empresas (id uuid primary key, nome text);
 create table clientes (id uuid primary key, empresa_id uuid references empresas(id), nome text);

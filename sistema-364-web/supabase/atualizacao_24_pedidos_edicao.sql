@@ -16,7 +16,7 @@
 --   select count(*) from pedido_itens where quantidade <= 0 or preco_unitario < 0;
 --   select count(*) from pedidos where status = 'Cancelado';
 -- A primeira precisa dar 0. Se a segunda for maior que 0, os cancelados antigos
--- não têm motivo: preencha com 'Cancelado antes da atualização 21' antes de
+-- não têm motivo: preencha com 'Cancelado antes da atualização 24' antes de
 -- criar a constraint.
 
 begin;
