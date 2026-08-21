@@ -26,6 +26,7 @@ function Conteudo() {
   const [funcionarios, setFuncionarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [erroCarregar, setErroCarregar] = useState('');
 
   const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
@@ -33,6 +34,7 @@ function Conteudo() {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
+    setErroCarregar('');
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
       // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
@@ -45,6 +47,17 @@ function Conteudo() {
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
     ]);
+
+    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS, embed
+    // ambíguo). Sem essa checagem o `|| []` transformava a falha em lista
+    // vazia: a tela dizia "Nenhum pedido lançado" com o banco cheio.
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    if (falha) {
+      setErroCarregar(falha.error.message);
+      setLoading(false);
+      return;
+    }
+
     setPedidos(r1.data || []);
     setClientes(r2.data || []);
     setProdutos(r3.data || []);
@@ -92,6 +105,15 @@ function Conteudo() {
   const totalDoPedido = p => totalPedido(p.pedido_itens);
 
   if (loading) return <p className="muted">Carregando…</p>;
+
+  if (erroCarregar) {
+    return (
+      <div className="banner bad">
+        Não foi possível carregar os pedidos: {erroCarregar}{' '}
+        <button className="btn secondary small" onClick={carregar}>Tentar novamente</button>
+      </div>
+    );
+  }
 
   if (!clientes.length || !produtos.length) {
     return (
