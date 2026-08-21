@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth, sair } from '../lib/auth';
 import { EmpresaContext } from '../lib/empresa';
 import SidebarNav from './SidebarNav';
+import VersaoBadge from './VersaoBadge';
 
 const EMPRESA_LS_KEY = 'empresaAtualId';
 
@@ -53,6 +54,7 @@ export default function AppShell({ modulo, titulo, desc, children }) {
         <div className="sidebar-foot">
           <div className="userbadge">Logado como <b>{nome}</b></div>
           <button className="btn secondary small" style={{ marginTop: 10, width: '100%' }} onClick={() => sair(router)}>Sair</button>
+          <VersaoBadge />
         </div>
       </aside>
       <main className="main">

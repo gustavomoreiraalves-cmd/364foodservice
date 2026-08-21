@@ -66,6 +66,13 @@ a{color:var(--amber-bright);}
 .sidebar nav .nav-sub a{padding-left:35px; font-size:12.5px;}
 .sidebar-foot{margin-top:auto; padding:14px 18px 0; border-top:1px solid var(--border); font-size:10.5px; color:var(--paper-dim);}
 .sidebar-foot .btn{margin-top:10px; width:100%;}
+/* Selo de build (ver components/VersaoBadge.js). Fora de produção o rótulo do
+   ambiente sai em âmbar: 'local' e 'teste' precisam saltar à vista, produção
+   fica neutra. Cada linha corta com reticências porque nome de branch é longo
+   e a sidebar tem 210px fixos — o texto inteiro está no title. */
+.versao-badge{margin-top:12px; line-height:1.55; opacity:.7; cursor:default;}
+.versao-badge .versao-linha{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.versao-badge .versao-ambiente-alerta{color:var(--amber-bright);}
 
 .main{flex:1; min-width:0; padding:26px 34px; overflow-x:auto;}
 .topbar{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:22px; flex-wrap:wrap; gap:10px;}
