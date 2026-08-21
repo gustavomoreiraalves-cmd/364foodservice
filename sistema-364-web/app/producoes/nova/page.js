@@ -144,7 +144,7 @@ function Conteudo({ setEtiqueta }) {
         <h3>Tipo de produção</h3>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <Link href="/producoes/completa" className="btn secondary" style={btnGrande}>
-            Produção Completa — matéria-prima, lotes e rastreabilidade
+            Defumação — matéria-prima, lotes e rastreabilidade
           </Link>
           <span className="btn" style={{ ...btnGrande, cursor: 'default' }}>
             Produção Interna — preparos de cozinha e etiquetas
