@@ -1,28 +1,23 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
-import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { totalPedido } from '../../lib/pedidos';
-
-const STATUS = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];
+import { totalPedido, STATUS_PEDIDO } from '../../lib/pedidos';
 
 export default function PedidosPage() {
-  const [ficha, setFicha] = useState(null);
   return (
-    <>
-      <AppShell modulo="pedidos" titulo="Pedidos de Venda" desc="Pedidos, faturamento e baixa de estoque">
-        <Conteudo setFicha={setFicha} />
-      </AppShell>
-      <FichaPrint ficha={ficha} />
-    </>
+    <AppShell modulo="pedidos" titulo="Pedidos de Venda" desc="Pedidos, faturamento e baixa de estoque">
+      <Conteudo />
+    </AppShell>
   );
 }
 
-function Conteudo({ setFicha }) {
+function Conteudo() {
+  const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
   const [pedidos, setPedidos] = useState([]);
   const [clientes, setClientes] = useState([]);
@@ -90,41 +85,7 @@ function Conteudo({ setFicha }) {
     carregar();
   }
 
-  async function excluir(id) {
-    if (!confirm('Excluir este pedido?')) return;
-    const { error } = await supabase.from('pedidos').delete().eq('id', id);
-    if (error) alert('Erro ao excluir: ' + error.message);
-    carregar();
-  }
-
   const totalDoPedido = p => totalPedido(p.pedido_itens);
-
-  function imprimir(p) {
-    imprimirFicha(setFicha, {
-      titulo: 'Pedido de Venda',
-      numero: `Pedido ${String(p.id).slice(0, 8).toUpperCase()} · ${fmtDate(p.data)}`,
-      campos: [
-        { rot: 'Data', valor: fmtDate(p.data) },
-        { rot: 'Status', valor: p.status },
-        { rot: 'Cliente', valor: p.clientes?.nome },
-        { rot: 'CNPJ/CPF', valor: p.clientes?.cnpj },
-        { rot: 'Telefone', valor: p.clientes?.telefone },
-        { rot: 'Responsável', valor: p.funcionarios?.nome },
-      ],
-      itens: {
-        headers: ['Código', 'Produto', 'Qtd', 'Preço unit.', 'Subtotal'],
-        rows: (p.pedido_itens || []).map(i => [
-          i.produtos?.codigo || '—',
-          i.produtos?.nome || '—',
-          `${Number(i.quantidade)} ${i.produtos?.unidade || ''}`,
-          fmtMoney(i.preco_unitario),
-          fmtMoney(Number(i.quantidade) * Number(i.preco_unitario)),
-        ]),
-      },
-      totais: `Total do pedido: ${fmtMoney(totalDoPedido(p))}`,
-      assinaturas: ['Vendedor', 'Cliente'],
-    });
-  }
 
   if (loading) return <p className="muted">Carregando…</p>;
 
@@ -172,15 +133,14 @@ function Conteudo({ setFicha }) {
                     <div className="row-actions">
                       {statusTag(p.status)}
                       <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}>
-                        {STATUS.map(s => <option key={s}>{s}</option>)}
+                        {STATUS_PEDIDO.map(s => <option key={s}>{s}</option>)}
                       </select>
                     </div>
                   </td>
                   <td className="muted">{p.funcionarios?.nome || '—'}</td>
                   <td>
                     <div className="row-actions">
-                      <button className="btn secondary small" onClick={() => imprimir(p)}>Imprimir pedido</button>
-                      <button className="btn danger" onClick={() => excluir(p.id)}>Excluir</button>
+                      <button className="btn secondary small" onClick={() => router.push(`/pedidos/${p.id}`)}>Abrir</button>
                     </div>
                   </td>
                 </tr>
