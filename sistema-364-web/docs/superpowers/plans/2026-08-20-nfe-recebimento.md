@@ -19,7 +19,7 @@
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
 - Migrações SQL entram em `supabase/` com o próximo número livre. Já existem dois arquivos `atualizacao_20_*`; este plano usa **21** e **22**.
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
-- Valores monetários arredondam para 2 casas; pesos e quantidades para 4 casas — mesmo padrão de `lib/financeiro.js`.
+- Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
 
 ---
