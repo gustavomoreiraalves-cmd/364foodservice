@@ -21,31 +21,57 @@ export default function GrupoPage() {
 
 // Variação contra o mês anterior. Base zero vira "—": afirmar crescimento
 // percentual sobre nada seria inventar número.
-function Delta({ pct }) {
+//
+// `inverso` é para as métricas em que subir é ruim (CMV, despesas): a seta
+// continua apontando para onde o número foi, só a cor troca de lado. Sem isso
+// um CMV em alta aparecia na cor de coisa boa.
+//
+// `unidade` distingue variação percentual (%) de diferença em pontos
+// percentuais (p.p.), usada quando o próprio indicador já é um percentual.
+function Delta({ pct, inverso = false, unidade = '%' }) {
   if (pct === null || !isFinite(pct)) return <span className="muted" style={{ fontSize: 11 }}>—</span>;
-  const cor = pct >= 0 ? 'var(--amber-bright)' : '#e5806c';
+  const subiu = pct >= 0;
+  const bom = inverso ? !subiu : subiu;
+  const cor = bom ? 'var(--amber-bright)' : '#e5806c';
   return (
     <span style={{ fontSize: 11, color: cor }}>
-      {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}% vs mês anterior
+      {subiu ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}{unidade} vs mês anterior
     </span>
   );
 }
 
-function Kpi({ label, valor, delta }) {
+function Kpi({ label, valor, delta, inverso, unidade }) {
   return (
     <div className="kpi">
       <div className="label">{label}</div>
       <div className="value">{valor}</div>
-      {delta !== undefined && <Delta pct={delta} />}
+      {delta !== undefined && <Delta pct={delta} inverso={inverso} unidade={unidade} />}
     </div>
   );
 }
 
 // Tag de confiança do CMV daquela empresa no mês.
-function TagCusto({ semCusto, porFicha }) {
+//
+// Empresa sem pedido no mês não tem CMV para qualificar: os dois contadores
+// vêm zerados e o verde de "custo cadastrado" afirmaria uma qualidade de dado
+// que ninguém verificou. Nesse caso a tag é neutra.
+function TagCusto({ semCusto, porFicha, pedidos }) {
+  if (!pedidos) return <span className="tag muted">sem vendas</span>;
   if (semCusto > 0) return <span className="tag bad">{semCusto} sem custo</span>;
   if (porFicha > 0) return <span className="tag warn">{porFicha} pela ficha</span>;
   return <span className="tag ok">custo cadastrado</span>;
+}
+
+// Só manda rodar a migração quando o erro é mesmo "a view não existe". Erro de
+// permissão ou de RLS também cita o nome da view, e mandar rodar de novo uma
+// migração já aplicada faz o usuário perseguir o problema errado.
+// PostgREST devolve 42P01 como "does not exist"; quando a view existe mas não
+// entrou no cache do schema, a mensagem fala em "schema cache".
+function viewAusente(error) {
+  const texto = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`;
+  if (error?.code === '42P01' || error?.code === 'PGRST205') return true;
+  return /vw_consolidado_mensal/.test(texto)
+    && /(does not exist|não existe|schema cache)/i.test(texto);
 }
 
 function Conteudo() {
@@ -73,7 +99,7 @@ function Conteudo() {
         .lte('mes', mes);
       if (cancelado) return;
       if (error) {
-        setErro(/vw_consolidado_mensal/.test(error.message)
+        setErro(viewAusente(error)
           ? 'A view do consolidado não existe neste banco. Rode supabase/atualizacao_21_dashboard_grupo.sql no SQL Editor do Supabase.'
           : error.message);
         return;
@@ -95,7 +121,11 @@ function Conteudo() {
   const ranking = porEmpresa(doMes, empresas);
   const serie = serie12(linhas, mes);
   const rotulo = new Date(`${mes}-02T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  const semMovimento = t.receitaCompetencia === 0 && t.despesaCompetencia === 0 && t.compras === 0;
+  // Inclui as colunas de caixa: um mês cujo único movimento foi uma parcela
+  // paga não é "sem movimento", e dizer que é ao lado de um saldo diferente de
+  // zero seria mentira na tela.
+  const semMovimento = t.receitaCompetencia === 0 && t.despesaCompetencia === 0
+    && t.compras === 0 && t.receitaCaixa === 0 && t.despesaCaixa === 0;
 
   return (
     <>
@@ -115,9 +145,13 @@ function Conteudo() {
         <>
           <div className="kpi-grid">
             <Kpi label="Receita do grupo" valor={fmtMoney(t.receitaCompetencia)} delta={variacao(t.receitaCompetencia, ta.receitaCompetencia)} />
-            <Kpi label="CMV" valor={fmtMoney(t.cmv)} delta={variacao(t.cmv, ta.cmv)} />
-            <Kpi label="Margem bruta" valor={`${t.margemBrutaPct.toFixed(1)}%`} delta={variacao(t.margemBrutaPct, ta.margemBrutaPct)} />
-            <Kpi label="Despesas" valor={fmtMoney(t.despesaCompetencia)} delta={variacao(t.despesaCompetencia, ta.despesaCompetencia)} />
+            <Kpi label="CMV" valor={fmtMoney(t.cmv)} delta={variacao(t.cmv, ta.cmv)} inverso />
+            {/* Margem já é percentual: o movimento dela se reporta em pontos
+                percentuais. 60,0% -> 62,5% é +2,5 p.p., não +4,2%. */}
+            <Kpi label="Margem bruta" valor={`${t.margemBrutaPct.toFixed(1)}%`}
+                 delta={ta.receitaCompetencia ? t.margemBrutaPct - ta.margemBrutaPct : null}
+                 unidade=" p.p." />
+            <Kpi label="Despesas" valor={fmtMoney(t.despesaCompetencia)} delta={variacao(t.despesaCompetencia, ta.despesaCompetencia)} inverso />
             <Kpi label="Lucro líquido" valor={fmtMoney(t.lucroLiquido)} delta={variacao(t.lucroLiquido, ta.lucroLiquido)} />
             <Kpi label="Pedidos" valor={t.pedidos} delta={variacao(t.pedidos, ta.pedidos)} />
             <Kpi label="Ticket médio" valor={fmtMoney(t.ticketMedio)} delta={variacao(t.ticketMedio, ta.ticketMedio)} />
@@ -142,11 +176,19 @@ function Conteudo() {
               <table>
                 <tbody>
                   <tr><td>Entradas (pedidos faturados/enviados)</td><td className="num">{fmtMoney(t.receitaCaixa)}</td></tr>
-                  <tr><td>Saídas (compras de matéria-prima)</td><td className="num">{fmtMoney(t.compras)}</td></tr>
-                  <tr><td>Saídas (parcelas pagas)</td><td className="num">{fmtMoney(t.despesaCaixa)}</td></tr>
+                  <tr><td>(–) Saídas (parcelas pagas)</td><td className="num">{fmtMoney(t.despesaCaixa)}</td></tr>
                   <tr><td><b>= Saldo</b></td><td className="num"><b>{fmtMoney(t.saldoCaixa)}</b></td></tr>
+                  {/* Informativo, fora da conta: a compra sai do caixa quando a
+                      parcela é paga, e já está na linha acima. Somá-la aqui
+                      descontaria a mesma compra duas vezes. */}
+                  <tr className="muted"><td>Compras recebidas no mês (competência)</td><td className="num">{fmtMoney(t.compras)}</td></tr>
                 </tbody>
               </table>
+              <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+                O saldo compara entradas e parcelas pagas. As compras aparecem por
+                competência, na data do recebimento, e não entram na conta: elas
+                saem do caixa quando a parcela da nota é quitada.
+              </p>
             </div>
           </div>
 
@@ -178,7 +220,7 @@ function Conteudo() {
                       <td className="num">{fmtMoney(e.lucroLiquido)}</td>
                       <td className="num">{e.pedidos}</td>
                       <td className="num">{fmtMoney(e.ticketMedio)}</td>
-                      <td><TagCusto semCusto={e.produtosSemCusto} porFicha={e.produtosCustoFicha} /></td>
+                      <td><TagCusto semCusto={e.produtosSemCusto} porFicha={e.produtosCustoFicha} pedidos={e.pedidos} /></td>
                     </tr>
                   ))}
                 </tbody>
