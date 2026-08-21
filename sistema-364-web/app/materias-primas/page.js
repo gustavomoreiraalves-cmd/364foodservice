@@ -43,7 +43,10 @@ function Conteudo() {
         categoria: f.categoria || null,
         unidade: f.unidade,
         custo_unitario: Number(f.custo_unitario),
-        preco_alvo_kg: f.preco_alvo_kg ? Number(f.preco_alvo_kg) : null,
+        // Distinguir "campo vazio" (null) de "zero digitado" (0): input type=number em branco vira '', não falsy check
+        preco_alvo_kg: f.preco_alvo_kg === '' || f.preco_alvo_kg === null || f.preco_alvo_kg === undefined
+          ? null
+          : Number(f.preco_alvo_kg),
       }),
     });
 
