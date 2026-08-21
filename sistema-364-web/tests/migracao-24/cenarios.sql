@@ -86,7 +86,9 @@ begin
     raise exception 'FALHA 4b: cancelou com motivo em branco';
   exception when check_violation then null; end;
 
-  update pedidos set status = 'Cancelado', cancelado_motivo = 'Cliente desistiu', cancelado_em = now(),
+  -- `cancelado_em` não vai na mão do cliente: o trigger carimba do relógio do
+  -- banco (ver cenário 10).
+  update pedidos set status = 'Cancelado', cancelado_motivo = 'Cliente desistiu',
     cancelado_por_id = '33333333-3333-3333-3333-333333333333' where id = v_pedido;
 
   begin
@@ -97,7 +99,7 @@ begin
   raise notice 'OK 4: cancelamento exige motivo e é terminal';
 end $$;
 
--- Cenário 5: pedido sem item nenhum não sai de Pendente.
+-- Cenário 5: pedido sem item nenhum não é faturado.
 do $$
 declare v_pedido uuid;
 begin
@@ -107,7 +109,7 @@ begin
     update pedidos set status = 'Faturado' where id = v_pedido;
     raise exception 'FALHA 5: pedido sem itens foi faturado';
   exception when check_violation then null; end;
-  raise notice 'OK 5: pedido vazio não sai de Pendente';
+  raise notice 'OK 5: pedido vazio não é faturado';
 end $$;
 
 -- Cenário 6: quantidade e preço inválidos são recusados.
@@ -157,4 +159,42 @@ begin
     raise exception 'FALHA 8: updated_at não avançou';
   end if;
   raise notice 'OK 8: updated_at avança';
+end $$;
+
+-- Cenário 9: pedido vazio pode ser cancelado. É a única saída dele: o cabeçalho
+-- e os itens são gravados em duas chamadas, e quando a segunda falha sobra um
+-- pedido Pendente sem item; a exclusão não existe mais na tela.
+do $$
+declare v_pedido uuid; v_status text;
+begin
+  insert into pedidos (cliente_id, empresa_id) values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111')
+    returning id into v_pedido;
+  update pedidos set status = 'Cancelado', cancelado_motivo = 'Falha ao gravar os itens'
+    where id = v_pedido;
+  select status into v_status from pedidos where id = v_pedido;
+  if v_status is distinct from 'Cancelado' then
+    raise exception 'FALHA 9: pedido vazio não foi cancelado (ficou %)', v_status;
+  end if;
+  raise notice 'OK 9: pedido vazio pode ser cancelado';
+end $$;
+
+-- Cenário 10: cancelado_em é carimbado pelo banco, não pelo cliente. O valor
+-- que o cliente mandar é descartado.
+do $$
+declare v_pedido uuid; v_em timestamptz;
+begin
+  insert into pedidos (cliente_id, empresa_id) values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111')
+    returning id into v_pedido;
+  insert into pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, empresa_id)
+    values (v_pedido, '44444444-4444-4444-4444-444444444444', 1, 10, '11111111-1111-1111-1111-111111111111');
+  update pedidos set status = 'Cancelado', cancelado_motivo = 'Cliente desistiu',
+    cancelado_em = timestamptz '1999-01-01 00:00:00+00' where id = v_pedido;
+  select cancelado_em into v_em from pedidos where id = v_pedido;
+  if v_em is null then
+    raise exception 'FALHA 10a: cancelado_em ficou nulo';
+  end if;
+  if v_em < clock_timestamp() - interval '1 minute' then
+    raise exception 'FALHA 10b: cancelado_em veio do cliente (%)', v_em;
+  end if;
+  raise notice 'OK 10: cancelado_em vem do relógio do banco';
 end $$;

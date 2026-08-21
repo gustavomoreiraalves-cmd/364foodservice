@@ -25,6 +25,15 @@ psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
+# Os cenários rodam como dono do banco, onde RLS não se aplica, então eles não
+# conseguem provar que as travas resistem a um usuário `authenticated`. O que dá
+# para conferir aqui é que as duas funções continuam `security definer`: como
+# `invoker`, a policy de `pedidos` podia esconder o pedido pai de quem escreve e
+# fazer o trigger liberar a escrita.
+definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_pedido_bloquear_edicao','fn_pedido_bloquear_cabecalho') and prosecdef;")
+[ "$definer" = "2" ] || { echo "as duas funções de trigger precisam ser security definer (achou $definer)"; exit 1; }
+echo "OK: triggers em security definer"
+
 # O bloco de rollback vive comentado no fim da migração; extrai e aplica para
 # provar que ele é SQL válido e desfaz o que a migração criou.
 sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"

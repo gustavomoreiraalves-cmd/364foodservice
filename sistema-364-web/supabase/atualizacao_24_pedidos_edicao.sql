@@ -15,9 +15,12 @@
 -- Antes de aplicar em produção, confira que nenhuma linha viola os novos checks:
 --   select count(*) from pedido_itens where quantidade <= 0 or preco_unitario < 0;
 --   select count(*) from pedidos where status = 'Cancelado';
+--   select count(*) from pedidos p where not exists (select 1 from pedido_itens where pedido_id = p.id);
 -- A primeira precisa dar 0. Se a segunda for maior que 0, os cancelados antigos
 -- não têm motivo: preencha com 'Cancelado antes da atualização 24' antes de
--- criar a constraint.
+-- criar a constraint. A terceira conta os pedidos vazios que já existem: eles
+-- continuam podendo ser cancelados, mas não vão mais poder ser faturados sem
+-- ganhar um item antes.
 
 begin;
 
@@ -49,8 +52,15 @@ alter table public.pedido_itens add constraint pedido_itens_preco_nao_negativo
 
 -- ---------- ITENS: só mudam com o pedido Pendente ----------
 
+-- `security definer` não é conforto: como `invoker`, o `select status from
+-- pedidos` abaixo roda sujeito à policy `empresa_scoped_access`. Um usuário de
+-- outra empresa não enxerga o pedido pai, o `not found` dá verdadeiro, o
+-- trigger acha que é cascata de delete e libera a escrita — e a policy de
+-- `pedido_itens` só confere o `empresa_id` da própria linha. Como definer, a
+-- leitura enxerga o pedido de verdade e a trava vale para todo mundo. A
+-- detecção de cascata continua correta: naquele caso a linha sumiu mesmo.
 create or replace function public.fn_pedido_bloquear_edicao() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   v_pedido uuid;
   v_status text;
@@ -75,14 +85,24 @@ create trigger trg_pedido_itens_bloquear_edicao
 
 -- ---------- CABEÇALHO: cliente e data travados, status livre ----------
 
+-- `security definer` pelo mesmo motivo de fn_pedido_bloquear_edicao: a
+-- checagem de "pedido sem itens" lê `pedido_itens`, e como invoker a policy da
+-- tabela podia esconder as linhas de quem escreve e deixar a trava passar.
 create or replace function public.fn_pedido_bloquear_cabecalho() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 begin
   -- `now()` fica parado no horário de início da transação; como todo o
   -- cenário de teste (e uma edição real) roda numa única transação, usar
   -- `now()` aqui nunca avançaria o timestamp. `clock_timestamp()` lê o
   -- relógio de verdade a cada chamada.
   new.updated_at := clock_timestamp();
+
+  -- A data do cancelamento vem do relógio do banco, não do navegador: o
+  -- cliente mandava `new Date().toISOString()`, que é o relógio da máquina do
+  -- operador e pode estar em qualquer hora.
+  if new.status = 'Cancelado' and old.status is distinct from 'Cancelado' then
+    new.cancelado_em := clock_timestamp();
+  end if;
 
   if old.status = 'Cancelado' and new.status is distinct from 'Cancelado' then
     raise exception 'Pedido cancelado não volta para %.', new.status
@@ -95,7 +115,12 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  if old.status = 'Pendente' and new.status is distinct from 'Pendente'
+  -- Cancelar fica de fora: é a única saída de um pedido vazio. A tela cria o
+  -- cabeçalho e os itens em duas chamadas separadas, e quando a segunda falha
+  -- sobra um pedido `Pendente` sem item nenhum. Sem esta exceção esse pedido
+  -- não sairia de lugar nenhum — a exclusão saiu da interface junto com a
+  -- atualização 24.
+  if old.status = 'Pendente' and new.status not in ('Pendente', 'Cancelado')
      and not exists (select 1 from public.pedido_itens where pedido_id = new.id) then
     raise exception 'Pedido sem itens não pode sair de Pendente.'
       using errcode = 'check_violation';

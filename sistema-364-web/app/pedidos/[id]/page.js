@@ -196,10 +196,12 @@ function Conteudo({ setFicha }) {
     if (!motivo.trim()) { alert('Informe o motivo do cancelamento.'); return; }
     setSalvando(true);
     setErro('');
+    // `cancelado_em` não vai daqui: quem carimba é o trigger
+    // fn_pedido_bloquear_cabecalho, com o relógio do banco. O relógio do
+    // navegador pode estar em qualquer hora.
     const { error } = await supabase.from('pedidos').update({
       status: 'Cancelado',
       cancelado_motivo: motivo.trim(),
-      cancelado_em: new Date().toISOString(),
       cancelado_por_id: meuFuncionario?.id || null,
     }).eq('id', id).eq('empresa_id', empresaAtual.id);
     setSalvando(false);
