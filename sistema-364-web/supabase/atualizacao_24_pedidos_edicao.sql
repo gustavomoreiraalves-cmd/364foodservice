@@ -6,6 +6,10 @@
 -- em `Pendente` e a cancelar com motivo no lugar de excluir; estas regras valem
 -- no banco para que continuem valendo quando alguém escrever por fora da tela.
 --
+-- Voltar de `Faturado` ou `Enviado` para `Pendente` também exige motivo: reabrir
+-- devolve a edição de itens e preços, então um clique sem motivo e sem autor
+-- esvaziava as travas de imutabilidade inteiras.
+--
 -- `vw_estoque_produto` já ignora pedido `Cancelado` no saldo, então cancelar
 -- devolve estoque sem nenhuma mudança de view.
 --
@@ -90,7 +94,7 @@ create trigger trg_pedido_itens_bloquear_edicao
   before insert or update or delete on public.pedido_itens
   for each row execute function public.fn_pedido_bloquear_edicao();
 
--- ---------- CABEÇALHO: cliente e data travados, status livre ----------
+-- ---------- CABEÇALHO: cliente e data travados, reabertura com motivo ----------
 
 -- `security definer` pelo mesmo motivo de fn_pedido_bloquear_edicao: a
 -- checagem de "pedido sem itens" lê `pedido_itens`, e como invoker a policy da
@@ -177,7 +181,8 @@ commit;
 -- alter table public.pedidos drop constraint if exists pedidos_cancelamento_motivo;
 --
 -- -- As colunas são novas; derrubá-las devolve o schema anterior e descarta
--- -- apenas motivo, autor e data de cancelamento gravados depois da migração.
+-- -- apenas motivo, autor e data de cancelamento e de reabertura gravados
+-- -- depois da migração.
 -- alter table public.pedidos
 --   drop column if exists observacoes,
 --   drop column if exists cancelado_motivo,
