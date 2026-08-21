@@ -6,7 +6,7 @@ import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { totalPedido, STATUS_PEDIDO } from '../../lib/pedidos';
+import { totalPedido, saldoDisponivel, STATUS_PEDIDO } from '../../lib/pedidos';
 
 export default function PedidosPage() {
   return (
@@ -68,8 +68,10 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
+  // Pedido novo: nenhum item foi gravado ainda, então não há nada que a view já
+  // tenha descontado deste pedido para somar de volta.
   function saldoProduto(id) {
-    return Number(estoqueProd.find(e => e.produto_id === id)?.saldo || 0);
+    return saldoDisponivel(estoqueProd, [], id);
   }
 
   async function finalizar() {

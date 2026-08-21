@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATUS_PEDIDO, podeEditar, totalPedido, precoDoItem, diffItens } from '../lib/pedidos.js';
+import { STATUS_PEDIDO, podeEditar, totalPedido, precoDoItem, diffItens, saldoDisponivel } from '../lib/pedidos.js';
 
 test('STATUS_PEDIDO: os quatro status na ordem do fluxo', () => {
   assert.deepEqual(STATUS_PEDIDO, ['Pendente', 'Faturado', 'Enviado', 'Cancelado']);
@@ -122,4 +122,33 @@ test('diffItens: pedido novo (original vazio) só insere', () => {
   const r = diffItens([], [{ produto_id: 'p1', quantidade: 1, preco_unitario: 5 }]);
   assert.equal(r.inserir.length, 1);
   assert.deepEqual(r.remover, []);
+});
+
+const estoque = [
+  { produto_id: 'p1', saldo: 0 },
+  { produto_id: 'p2', saldo: 7.5 },
+];
+
+test('saldoDisponivel: no cadastro, sem itens gravados, é o saldo da view', () => {
+  assert.equal(saldoDisponivel(estoque, [], 'p2'), 7.5);
+});
+
+test('saldoDisponivel: na edição, soma de volta o que este pedido reservou', () => {
+  // A view já descontou os 10 deste mesmo pedido: saldo 0 com 10 produzidos.
+  const jaGravados = [{ id: 'a', produto_id: 'p1', quantidade: 10 }];
+  assert.equal(saldoDisponivel(estoque, jaGravados, 'p1'), 10);
+});
+
+test('saldoDisponivel: soma todas as linhas do mesmo produto', () => {
+  const jaGravados = [
+    { id: 'a', produto_id: 'p2', quantidade: 2 },
+    { id: 'b', produto_id: 'p2', quantidade: '3.5000' },
+    { id: 'c', produto_id: 'p1', quantidade: 100 },
+  ];
+  assert.equal(saldoDisponivel(estoque, jaGravados, 'p2'), 13);
+});
+
+test('saldoDisponivel: produto fora da view devolve o que o pedido reservou', () => {
+  assert.equal(saldoDisponivel(estoque, [], 'p9'), 0);
+  assert.equal(saldoDisponivel(estoque, [{ produto_id: 'p9', quantidade: 4 }], 'p9'), 4);
 });

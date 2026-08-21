@@ -29,6 +29,22 @@ export function precoDoItem(precoDigitado, produto) {
   return Number(produto?.preco_venda || 0);
 }
 
+// Saldo do produto que este pedido tem de fato para mexer.
+//
+// `vw_estoque_produto` calcula `saldo = produzido - vendido`, e `vendido` soma
+// os itens de todo pedido não cancelado — inclusive o que está aberto na tela.
+// No cadastro isso está certo: os itens ainda não existem no banco, e
+// `itensJaGravados` chega vazio. Na edição, não: um pedido de 10 kg de um
+// produto com 10 kg produzidos deixava saldo 0 e acendia a tarja "acima do
+// saldo" em cada item já salvo. Aviso que aparece sempre deixa de ser aviso.
+export function saldoDisponivel(estoque, itensJaGravados, produtoId) {
+  const base = Number((estoque || []).find(e => e.produto_id === produtoId)?.saldo || 0);
+  const reservado = (itensJaGravados || [])
+    .filter(i => i.produto_id === produtoId)
+    .reduce((s, i) => s + Number(i.quantidade || 0), 0);
+  return base + reservado;
+}
+
 function mesmoItem(a, b) {
   return a.produto_id === b.produto_id
     && Number(a.quantidade) === Number(b.quantidade)

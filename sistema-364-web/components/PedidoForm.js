@@ -25,7 +25,9 @@ export default function PedidoForm({
     setItens(itens.filter((_, i) => i !== idx));
   }
 
-  const excedeSaldo = it => Number(it.quantidade) > saldoProduto(it.produto_id);
+  // Em pedido Faturado ou Cancelado a tela é leitura: não há decisão a tomar
+  // sobre o saldo, e a tarja só faria barulho.
+  const excedeSaldo = it => !somenteLeitura && Number(it.quantidade) > saldoProduto(it.produto_id);
 
   return (
     <>

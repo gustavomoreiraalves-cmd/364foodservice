@@ -9,7 +9,7 @@ import AppShell from '../../../components/AppShell';
 import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../lib/empresa';
-import { podeEditar, totalPedido, diffItens, STATUS_PEDIDO } from '../../../lib/pedidos';
+import { podeEditar, totalPedido, diffItens, saldoDisponivel, STATUS_PEDIDO } from '../../../lib/pedidos';
 
 export default function PedidoPage() {
   const [ficha, setFicha] = useState(null);
@@ -108,8 +108,10 @@ function Conteudo({ setFicha }) {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id, id]);
 
+  // `itensOriginais` (o que já está gravado), e não `itens` (o que está na
+  // tela): o que a view descontou foi o que está no banco.
   function saldoProduto(pid) {
-    return Number(estoqueProd.find(e => e.produto_id === pid)?.saldo || 0);
+    return saldoDisponivel(estoqueProd, itensOriginais, pid);
   }
 
   // Quem cancela é o usuário logado, não o responsável (vendedor) do pedido —
