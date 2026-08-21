@@ -17,7 +17,7 @@
 - Nenhum código de `lib/nfe/*` ou `lib/sefaz/*` que toque certificado pode ser importado por componente client. Componentes client só chamam as rotas.
 - O material do certificado (`.pfx`, senha, chave privada em PEM) nunca é logado, nunca entra em resposta HTTP e nunca é gravado em disco.
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
-- Migrações SQL entram em `supabase/` com o próximo número livre. Já existem dois arquivos `atualizacao_20_*`; este plano usa **21** e **22**.
+- Migrações SQL entram em `supabase/` com o próximo número livre. Já existem dois arquivos `atualizacao_20_*`; este plano usa **21** e **22**. *(Revisão final da fase 1: a **22** acabou sendo `atualizacao_22_fornecedor_cnpj_normalizado.sql` — o CNPJ do fornecedor era texto livre e nunca casava com o do XML. A tabela do certificado digital fica para o próximo número livre.)*
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
 - Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
@@ -80,6 +80,16 @@
   itens: [{ indice, codigo, descricao, ncm, unidade, quantidade, valorUnitario, valorTotal }],
   duplicatas: [{ numero, vencimento, valor }] }`.
   Lança `Error` quando o XML não é NF-e ou a chave não tem 44 dígitos.
+
+> **Ampliação aprovada na revisão final da fase 1.** A `Nota` ganhou mais dois campos,
+> e o código em `lib/nfe/parseNFe.js` é a referência:
+>
+> - `somaItens` — Σ `vProd`, o que os itens custam sem frete, IPI nem ST. É este valor,
+>   e não o `valorTotal` (vNF), que a Task 3 compara com o total conferido.
+> - `destinatario: { cnpj, nome }` — sem ele nada conferia se a nota era mesmo desta
+>   empresa, e qualquer XML em mãos do operador virava estoque e conta a pagar. A rota
+>   de upload recusa nota emitida para outro CNPJ e nota cujo `tpNF` não seja de saída
+>   do emitente (o `tipoOperacao` era lido e nunca usado).
 
 - [ ] **Step 1: Instalar o parser de XML**
 
@@ -435,6 +445,23 @@ aceitos (`totalAceito` em `app/recebimentos/page.js`). Quando um item é rejeita
 valor lançado deixa de bater com o total da nota e as duplicatas do fornecedor não
 valem mais. Nesse caso o sistema volta para o parcelamento manual e sinaliza a
 divergência, em vez de gravar vencimentos que não correspondem ao valor.
+
+> **Regra substituída na revisão final da fase 1 — a interface e a "Decisão
+> importante" acima estão superadas.** A decisão raciocinou só sobre item rejeitado e
+> foi implementada como `|valorLancado − valorTotalNota| ≤ 0,01`, que quase nunca vale
+> numa nota real: o `vNF` inclui frete, IPI e ST, que não entram na soma dos itens, e
+> carne vendida por quilo sempre pesa diferente do que a nota diz — a divergência que o
+> desenho quer justamente deixar visível. Na prática toda nota caía no parcelamento
+> manual acusando "item rejeitado?" sem item rejeitado nenhum.
+>
+> **Regra implementada:** `parcelasDoRecebimento({ duplicatas, dataBase, valorLancado,
+> somaItensNota, temItemNaoAceito, numeroParcelas, intervaloDias })`. O caso do item
+> fora do aceite é decidido direto pela tela, que conhece o status de cada item, e não
+> por comparação de valores; a comparação de valor é contra `somaItens` (Σ vProd) com
+> tolerância relativa de 0,5%; e duplicata sem `dVenc` utilizável também derruba as
+> duplicatas, porque `contas_a_pagar_parcelas.vencimento` é NOT NULL e gravar vazio
+> desfazia a conta a pagar inteira. Os motivos vivem em `ORIGEM_PARCELAS` e cada um tem
+> seu texto em `AVISO_PARCELAS`. `lib/nfe/parcelas.js` é a referência.
 
 - [ ] **Step 1: Escrever o teste que falha**
 
