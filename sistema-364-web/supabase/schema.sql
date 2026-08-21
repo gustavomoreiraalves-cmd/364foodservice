@@ -115,6 +115,9 @@ create table pedidos (
   cancelado_motivo text,
   cancelado_em timestamptz,
   cancelado_por_id uuid references funcionarios(id),
+  reaberto_motivo text,
+  reaberto_em timestamptz,
+  reaberto_por_id uuid references funcionarios(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

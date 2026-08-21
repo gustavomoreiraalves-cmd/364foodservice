@@ -56,6 +56,7 @@ O que falta é o motivo, o autor e a data, e é isso que a migração acrescenta
 | --- | --- |
 | `pedidos` | `+ observacoes text` |
 | `pedidos` | `+ cancelado_motivo text`, `+ cancelado_em timestamptz`, `+ cancelado_por_id uuid references funcionarios(id)` |
+| `pedidos` | `+ reaberto_motivo text`, `+ reaberto_em timestamptz`, `+ reaberto_por_id uuid references funcionarios(id)` |
 | `pedidos` | `+ updated_at timestamptz not null default now()` |
 
 Migração `atualizacao_24_pedidos_edicao.sql`. O número 24 é o próximo livre: `main` já
@@ -73,11 +74,26 @@ As regras valem por trigger, não só pela tela — o mesmo raciocínio de
 1. `insert`, `update` e `delete` em `pedido_itens` são rejeitados quando o pedido não está
    em `Pendente`.
 2. `update` de `cliente_id` ou `data` em `pedidos` é rejeitado fora de `Pendente`.
-3. A transição de status continua livre — é ela que tira o pedido de `Pendente`.
-4. `status = 'Cancelado'` exige `cancelado_motivo` preenchido, por check constraint.
-5. `Cancelado` é terminal: não volta para `Pendente`.
-6. Pedido sem nenhum item não sai de `Pendente`.
-7. `quantidade` e `preco_unitario` não aceitam valor negativo; `quantidade` não aceita zero.
+3. Avançar o status continua livre — é isso que tira o pedido de `Pendente`.
+4. **Voltar de `Faturado` ou `Enviado` para `Pendente` exige `reaberto_motivo`**, gravado com
+   autor (`reaberto_por_id`) e data (`reaberto_em`), no mesmo padrão do cancelamento.
+   Decisão tomada na revisão final, revendo o "status continua livre" do desenho original:
+   reabrir devolve a edição de itens e preços, então um clique sem motivo e sem autor
+   esvaziava as regras 1 e 2 inteiras — bastava reabrir, editar e faturar de novo. A
+   reabertura vive só na página do pedido, onde há diálogo para o motivo; a lista deixa de
+   oferecer `Pendente` para pedido que já saiu dele. O motivo precisa ser diferente do que já
+   está gravado, senão um `update` pelado pela API herdaria o motivo da reabertura anterior.
+5. `status = 'Cancelado'` exige `cancelado_motivo` preenchido, por check constraint.
+6. `Cancelado` é terminal: não volta para `Pendente`.
+7. Pedido sem nenhum item não pode ser faturado nem enviado. **Cancelar é exceção**: é a
+   única saída de um pedido vazio, e a exclusão saiu da interface.
+8. `quantidade` e `preco_unitario` não aceitam valor negativo; `quantidade` não aceita zero.
+9. `cancelado_em` e `reaberto_em` são carimbados pelo trigger, com o relógio do banco, e não
+   aceitam valor vindo do cliente.
+
+As duas funções de trigger são `security definer` com `search_path` fixo: como `invoker`, a
+leitura do pedido pai ficava sujeita à policy de empresa, e quem não enxergasse o pedido caía
+no ramo da cascata de `delete` e escapava da trava.
 
 ## Telas
 
@@ -96,9 +112,13 @@ remove os que saíram, atualiza os que mudaram, insere os novos. Item intocado n
 `update`.
 
 Em `Faturado`, `Enviado` e `Cancelado`, a página é leitura, com o motivo do cancelamento
-visível quando existir. Corrigir exige cancelar e refazer.
+visível quando existir. Corrigir exige reabrir com motivo, ou cancelar e refazer.
 
 **Cancelar pedido** abre confirmação com campo de motivo obrigatório e grava autor e data.
+
+**Reabrir** — escolher `Pendente` no seletor de status de um pedido `Faturado` ou `Enviado` —
+abre o mesmo tipo de diálogo, com motivo obrigatório, e grava autor e data. Motivo, autor e
+data da última reabertura aparecem na página, como a tarja de cancelamento.
 
 O saldo do produto aparece na escolha do item, como já aparece hoje, e quantidade acima do
 saldo gera **aviso amarelo, não bloqueio**: pedido lançado para produzir depois é uso real, e

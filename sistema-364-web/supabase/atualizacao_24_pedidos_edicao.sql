@@ -1,4 +1,5 @@
--- Edição de pedido de venda: colunas de cancelamento e travas de imutabilidade.
+-- Edição de pedido de venda: colunas de cancelamento e reabertura, e travas de
+-- imutabilidade.
 --
 -- Até aqui o pedido lançado só podia ser excluído, e o `delete` levava os itens
 -- junto por cascata, sem deixar motivo nem autor. A tela passa a editar pedido
@@ -31,10 +32,16 @@ alter table public.pedidos
   add column if not exists cancelado_motivo text,
   add column if not exists cancelado_em timestamptz,
   add column if not exists cancelado_por_id uuid references public.funcionarios(id),
+  add column if not exists reaberto_motivo text,
+  add column if not exists reaberto_em timestamptz,
+  add column if not exists reaberto_por_id uuid references public.funcionarios(id),
   add column if not exists updated_at timestamptz not null default now();
 
 comment on column public.pedidos.cancelado_motivo is
   'Motivo do cancelamento. Obrigatório quando status = Cancelado.';
+
+comment on column public.pedidos.reaberto_motivo is
+  'Motivo da última reabertura. Obrigatório para voltar de Faturado ou Enviado para Pendente.';
 
 -- ---------- CHECKS ----------
 
@@ -109,6 +116,27 @@ begin
       using errcode = 'check_violation';
   end if;
 
+  -- Reabrir devolve a edição de itens e preços: um clique levando Faturado de
+  -- volta para Pendente esvaziava toda a imutabilidade acima, sem motivo e sem
+  -- autor. Passa a exigir motivo, no mesmo padrão do cancelamento.
+  --
+  -- O motivo precisa ser *diferente* do que já está gravado, não só não vazio:
+  -- depois da primeira reabertura a coluna fica preenchida, e um
+  -- `update pedidos set status = 'Pendente'` pelado — vindo da API, sem passar
+  -- pela tela — herdaria o motivo antigo e passaria. Reabrir duas vezes pela
+  -- mesma razão exige reescrever a razão; é o preço de não ter tabela de
+  -- histórico.
+  if old.status in ('Faturado', 'Enviado') and new.status = 'Pendente' then
+    if new.reaberto_motivo is null
+       or btrim(new.reaberto_motivo) = ''
+       or new.reaberto_motivo is not distinct from old.reaberto_motivo then
+      raise exception 'Reabrir o pedido % exige informar um motivo novo da reabertura.', old.id
+        using errcode = 'check_violation';
+    end if;
+    -- Como em cancelado_em, a data vem do relógio do banco.
+    new.reaberto_em := clock_timestamp();
+  end if;
+
   if old.status is distinct from 'Pendente'
      and (new.cliente_id is distinct from old.cliente_id or new.data is distinct from old.data) then
     raise exception 'Pedido % está % — cliente e data não podem ser alterados.', old.id, old.status
@@ -155,6 +183,9 @@ commit;
 --   drop column if exists cancelado_motivo,
 --   drop column if exists cancelado_em,
 --   drop column if exists cancelado_por_id,
+--   drop column if exists reaberto_motivo,
+--   drop column if exists reaberto_em,
+--   drop column if exists reaberto_por_id,
 --   drop column if exists updated_at;
 --
 -- commit;

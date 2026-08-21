@@ -11,6 +11,15 @@ export function podeEditar(status) {
   return status === 'Pendente';
 }
 
+// Voltar de Faturado ou Enviado para Pendente devolve a edição de itens e
+// preços — sem motivo, um clique esvazia toda a imutabilidade. Exige motivo,
+// autor e data, como o cancelamento, e a regra vale de verdade no trigger
+// fn_pedido_bloquear_cabecalho. As demais transições continuam livres.
+export function exigeMotivoReabertura(statusAtual, statusNovo) {
+  return statusNovo === 'Pendente'
+    && (statusAtual === 'Faturado' || statusAtual === 'Enviado');
+}
+
 export function totalPedido(itens) {
   return (itens || []).reduce(
     (s, i) => s + Number(i.quantidade || 0) * Number(i.preco_unitario || 0),

@@ -48,7 +48,7 @@ begin
 end $$;
 
 -- Cenário 3: fora de Pendente, cliente e data do cabeçalho estão travados,
--- mas a transição de status continua livre.
+-- mas avançar o status continua livre (voltar para Pendente, não — cenário 11).
 do $$
 declare v_pedido uuid;
 begin
@@ -64,7 +64,7 @@ begin
   exception when check_violation then null; end;
 
   update pedidos set status = 'Enviado' where id = v_pedido;
-  raise notice 'OK 3: cabeçalho travado, status livre';
+  raise notice 'OK 3: cabeçalho travado, avanço de status livre';
 end $$;
 
 -- Cenário 4: cancelar exige motivo, e Cancelado é terminal.
@@ -197,4 +197,74 @@ begin
     raise exception 'FALHA 10b: cancelado_em veio do cliente (%)', v_em;
   end if;
   raise notice 'OK 10: cancelado_em vem do relógio do banco';
+end $$;
+
+-- Cenário 11: voltar de Faturado ou Enviado para Pendente exige motivo.
+do $$
+declare v_pedido uuid;
+begin
+  insert into pedidos (cliente_id, empresa_id) values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111')
+    returning id into v_pedido;
+  insert into pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, empresa_id)
+    values (v_pedido, '44444444-4444-4444-4444-444444444444', 1, 10, '11111111-1111-1111-1111-111111111111');
+  update pedidos set status = 'Faturado' where id = v_pedido;
+
+  begin
+    update pedidos set status = 'Pendente' where id = v_pedido;
+    raise exception 'FALHA 11a: reabriu Faturado sem motivo';
+  exception when check_violation then null; end;
+
+  begin
+    update pedidos set status = 'Pendente', reaberto_motivo = '  ' where id = v_pedido;
+    raise exception 'FALHA 11b: reabriu com motivo em branco';
+  exception when check_violation then null; end;
+
+  update pedidos set status = 'Enviado' where id = v_pedido;
+  begin
+    update pedidos set status = 'Pendente' where id = v_pedido;
+    raise exception 'FALHA 11c: reabriu Enviado sem motivo';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 11: reabrir sem motivo é recusado';
+end $$;
+
+-- Cenário 12: reabrir com motivo passa e grava motivo, autor e data. O segundo
+-- `update` pelado é recusado mesmo com a coluna já preenchida — é o caminho da
+-- API sem passar pela tela.
+do $$
+declare v_pedido uuid; v_row pedidos%rowtype;
+begin
+  insert into pedidos (cliente_id, empresa_id) values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111')
+    returning id into v_pedido;
+  insert into pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, empresa_id)
+    values (v_pedido, '44444444-4444-4444-4444-444444444444', 1, 10, '11111111-1111-1111-1111-111111111111');
+  update pedidos set status = 'Faturado' where id = v_pedido;
+
+  update pedidos set status = 'Pendente', reaberto_motivo = 'Preço errado na nota',
+    reaberto_por_id = '33333333-3333-3333-3333-333333333333' where id = v_pedido;
+
+  select * into v_row from pedidos where id = v_pedido;
+  if v_row.status is distinct from 'Pendente' then
+    raise exception 'FALHA 12a: pedido não voltou para Pendente (ficou %)', v_row.status;
+  end if;
+  if v_row.reaberto_motivo is distinct from 'Preço errado na nota' then
+    raise exception 'FALHA 12b: motivo da reabertura não foi gravado';
+  end if;
+  if v_row.reaberto_por_id is null then
+    raise exception 'FALHA 12c: autor da reabertura não foi gravado';
+  end if;
+  if v_row.reaberto_em is null then
+    raise exception 'FALHA 12d: data da reabertura não foi gravada';
+  end if;
+
+  -- Com o pedido de novo Pendente, os itens voltam a aceitar escrita.
+  update pedido_itens set preco_unitario = 12 where pedido_id = v_pedido;
+
+  update pedidos set status = 'Faturado' where id = v_pedido;
+  begin
+    update pedidos set status = 'Pendente' where id = v_pedido;
+    raise exception 'FALHA 12e: segunda reabertura herdou o motivo da primeira';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 12: reabrir com motivo grava motivo, autor e data';
 end $$;

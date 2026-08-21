@@ -9,7 +9,7 @@ import AppShell from '../../../components/AppShell';
 import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../lib/empresa';
-import { podeEditar, totalPedido, diffItens, saldoDisponivel, STATUS_PEDIDO } from '../../../lib/pedidos';
+import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../../lib/pedidos';
 
 export default function PedidoPage() {
   const [ficha, setFicha] = useState(null);
@@ -46,6 +46,9 @@ function Conteudo({ setFicha }) {
   const [erroCarregar, setErroCarregar] = useState('');
   const [cancelando, setCancelando] = useState(false);
   const [motivo, setMotivo] = useState('');
+  const [reabrindo, setReabrindo] = useState(false);
+  const [motivoReabertura, setMotivoReabertura] = useState('');
+  const [erroReabrir, setErroReabrir] = useState('');
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -62,7 +65,7 @@ function Conteudo({ setFicha }) {
       // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
       // padrão de app/recebimentos/page.js depois da atualização 09.
       supabase.from('pedidos')
-        .select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), cancelado_por:funcionarios!pedidos_cancelado_por_id_fkey(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
+        .select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), cancelado_por:funcionarios!pedidos_cancelado_por_id_fkey(nome), reaberto_por:funcionarios!pedidos_reaberto_por_id_fkey(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
@@ -189,8 +192,27 @@ function Conteudo({ setFicha }) {
     // Segunda trava além do select desabilitado: se por algum motivo chegar
     // aqui com edição pendente, não troca o status por baixo do operador.
     if (temAlteracoesNaoSalvas()) return;
+    // Reabrir não passa direto: abre o diálogo de motivo, como o cancelamento.
+    if (exigeMotivoReabertura(pedido.status, status)) { setReabrindo(true); return; }
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) setErro(error.message);
+    carregar();
+  }
+
+  async function reabrir() {
+    if (!motivoReabertura.trim()) { alert('Informe o motivo da reabertura.'); return; }
+    setSalvando(true);
+    setErroReabrir('');
+    // `reaberto_em` fica com o trigger, pelo mesmo motivo de `cancelado_em`.
+    const { error } = await supabase.from('pedidos').update({
+      status: 'Pendente',
+      reaberto_motivo: motivoReabertura.trim(),
+      reaberto_por_id: meuFuncionario?.id || null,
+    }).eq('id', id).eq('empresa_id', empresaAtual.id);
+    setSalvando(false);
+    if (error) { setErroReabrir(error.message); carregar(); return; }
+    setReabrindo(false);
+    setMotivoReabertura('');
     carregar();
   }
 
@@ -292,6 +314,33 @@ function Conteudo({ setFicha }) {
         {!editavel && (
           <div className="banner info">
             Pedido {pedido.status.toLowerCase()} — somente leitura. Para corrigir, cancele com motivo e lance outro pedido.
+          </div>
+        )}
+
+        {reabrindo && (
+          <div className="panel" style={{ marginTop: 12 }}>
+            {erroReabrir && <div className="banner bad">Não foi possível reabrir o pedido: {erroReabrir}</div>}
+            <label>Motivo da reabertura</label>
+            <input type="text" value={motivoReabertura} autoFocus
+              placeholder="Ex.: preço errado na nota"
+              onChange={e => setMotivoReabertura(e.target.value)} />
+            <p className="muted" style={{ fontSize: 12 }}>
+              Reabrir devolve o pedido para Pendente e libera de novo a edição de itens e preços.
+              O motivo fica gravado com o seu nome e a data.
+            </p>
+            <div className="row-actions">
+              <button className="btn" onClick={reabrir} disabled={salvando}>
+                {salvando ? 'Reabrindo…' : 'Confirmar reabertura'}
+              </button>
+              <button className="btn secondary" onClick={() => { setReabrindo(false); setMotivoReabertura(''); setErroReabrir(''); }}>Voltar</button>
+            </div>
+          </div>
+        )}
+
+        {pedido.reaberto_em && (
+          <div className="banner info" style={{ marginTop: 12 }}>
+            <b>Pedido reaberto</b> em {fmtDateTime(pedido.reaberto_em)}
+            {pedido.reaberto_por?.nome ? ` por ${pedido.reaberto_por.nome}` : ''} — {pedido.reaberto_motivo}
           </div>
         )}
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATUS_PEDIDO, podeEditar, totalPedido, precoDoItem, diffItens, saldoDisponivel } from '../lib/pedidos.js';
+import { STATUS_PEDIDO, podeEditar, totalPedido, precoDoItem, diffItens, saldoDisponivel, exigeMotivoReabertura } from '../lib/pedidos.js';
 
 test('STATUS_PEDIDO: os quatro status na ordem do fluxo', () => {
   assert.deepEqual(STATUS_PEDIDO, ['Pendente', 'Faturado', 'Enviado', 'Cancelado']);
@@ -122,6 +122,26 @@ test('diffItens: pedido novo (original vazio) só insere', () => {
   const r = diffItens([], [{ produto_id: 'p1', quantidade: 1, preco_unitario: 5 }]);
   assert.equal(r.inserir.length, 1);
   assert.deepEqual(r.remover, []);
+});
+
+test('exigeMotivoReabertura: voltar de Faturado ou Enviado para Pendente exige', () => {
+  assert.equal(exigeMotivoReabertura('Faturado', 'Pendente'), true);
+  assert.equal(exigeMotivoReabertura('Enviado', 'Pendente'), true);
+});
+
+test('exigeMotivoReabertura: avançar o status continua livre', () => {
+  assert.equal(exigeMotivoReabertura('Pendente', 'Faturado'), false);
+  assert.equal(exigeMotivoReabertura('Faturado', 'Enviado'), false);
+  assert.equal(exigeMotivoReabertura('Enviado', 'Faturado'), false);
+});
+
+test('exigeMotivoReabertura: Pendente para Pendente não é reabertura', () => {
+  assert.equal(exigeMotivoReabertura('Pendente', 'Pendente'), false);
+});
+
+test('exigeMotivoReabertura: Cancelado é terminal, não é caso de reabertura', () => {
+  // Quem recusa é a trava de terminalidade, não a de motivo.
+  assert.equal(exigeMotivoReabertura('Cancelado', 'Pendente'), false);
 });
 
 const estoque = [

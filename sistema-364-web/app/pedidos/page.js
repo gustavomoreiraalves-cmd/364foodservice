@@ -6,7 +6,7 @@ import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { totalPedido, saldoDisponivel, STATUS_PEDIDO } from '../../lib/pedidos';
+import { totalPedido, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../lib/pedidos';
 
 export default function PedidosPage() {
   return (
@@ -162,8 +162,15 @@ function Conteudo() {
                       {statusTag(p.status)}
                       <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}
                         disabled={p.status === 'Cancelado'}>
-                        {/* Cancelar exige motivo (check pedidos_cancelamento_motivo) — só na página do pedido. */}
-                        {STATUS_PEDIDO.filter(s => s !== 'Cancelado').map(s => <option key={s}>{s}</option>)}
+                        {/*
+                          Cancelar exige motivo (check pedidos_cancelamento_motivo) e reabrir
+                          exige motivo (trigger fn_pedido_bloquear_cabecalho): as duas coisas
+                          só acontecem na página do pedido, onde há diálogo para o motivo.
+                          Aqui a lista só avança o status.
+                        */}
+                        {STATUS_PEDIDO
+                          .filter(s => s !== 'Cancelado' && !exigeMotivoReabertura(p.status, s))
+                          .map(s => <option key={s}>{s}</option>)}
                         {p.status === 'Cancelado' && <option>Cancelado</option>}
                       </select>
                     </div>
