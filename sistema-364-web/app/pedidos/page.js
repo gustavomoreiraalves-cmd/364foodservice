@@ -4,7 +4,9 @@ import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
+import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
+import { totalPedido } from '../../lib/pedidos';
 
 const STATUS = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];
 
@@ -30,9 +32,8 @@ function Conteudo({ setFicha }) {
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
-  const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '' });
+  const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
-  const [novoItem, setNovoItem] = useState({ produto_id: '', quantidade: '', preco_unitario: '' });
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -59,15 +60,6 @@ function Conteudo({ setFicha }) {
     return Number(estoqueProd.find(e => e.produto_id === id)?.saldo || 0);
   }
 
-  function addItem(e) {
-    e.preventDefault();
-    const prod = produtos.find(p => p.id === novoItem.produto_id);
-    if (!prod) return;
-    const preco = Number(novoItem.preco_unitario) || Number(prod.preco_venda);
-    setItens([...itens, { produto_id: prod.id, quantidade: Number(novoItem.quantidade), preco_unitario: preco }]);
-    setNovoItem({ produto_id: '', quantidade: '', preco_unitario: '' });
-  }
-
   async function finalizar() {
     if (!itens.length) { alert('Adicione ao menos um item ao pedido.'); return; }
     if (!cabecalho.cliente_id) { alert('Selecione o cliente.'); return; }
@@ -77,6 +69,7 @@ function Conteudo({ setFicha }) {
       cliente_id: cabecalho.cliente_id,
       status: 'Pendente',
       responsavel_id: cabecalho.responsavel_id || null,
+      observacoes: cabecalho.observacoes || null,
       empresa_id: empresaAtual.id,
     }]).select().single();
     if (error) { setSalvando(false); alert('Erro ao salvar: ' + error.message); return; }
@@ -87,7 +80,7 @@ function Conteudo({ setFicha }) {
     setSalvando(false);
     if (e2) { alert('Pedido criado, mas houve erro nos itens: ' + e2.message); }
     setItens([]);
-    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '' });
+    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
     carregar();
   }
 
@@ -104,7 +97,7 @@ function Conteudo({ setFicha }) {
     carregar();
   }
 
-  const totalPedido = p => (p.pedido_itens || []).reduce((s, i) => s + Number(i.quantidade) * Number(i.preco_unitario), 0);
+  const totalDoPedido = p => totalPedido(p.pedido_itens);
 
   function imprimir(p) {
     imprimirFicha(setFicha, {
@@ -128,7 +121,7 @@ function Conteudo({ setFicha }) {
           fmtMoney(Number(i.quantidade) * Number(i.preco_unitario)),
         ]),
       },
-      totais: `Total do pedido: ${fmtMoney(totalPedido(p))}`,
+      totais: `Total do pedido: ${fmtMoney(totalDoPedido(p))}`,
       assinaturas: ['Vendedor', 'Cliente'],
     });
   }
@@ -152,54 +145,15 @@ function Conteudo({ setFicha }) {
     <>
       <div className="panel">
         <h3>Novo pedido de venda</h3>
-        <div className="form-grid">
-          <div><label>Data</label><input type="date" value={cabecalho.data} onChange={e => setCabecalho({ ...cabecalho, data: e.target.value })} /></div>
-          <div><label>Cliente</label>
-            <select value={cabecalho.cliente_id} onChange={e => setCabecalho({ ...cabecalho, cliente_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-          </div>
-          <div><label>Responsável</label>
-            <select value={cabecalho.responsavel_id} onChange={e => setCabecalho({ ...cabecalho, responsavel_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <label>Itens do pedido</label>
-          <form className="form-grid" onSubmit={addItem}>
-            <div><label>Produto</label>
-              <select required value={novoItem.produto_id} onChange={e => setNovoItem({ ...novoItem, produto_id: e.target.value })}>
-                <option value="">Selecione…</option>
-                {produtos.map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome} (saldo: {saldoProduto(p.id).toFixed(1)})</option>)}
-              </select>
-            </div>
-            <div><label>Quantidade</label><input type="number" step="0.001" required value={novoItem.quantidade} onChange={e => setNovoItem({ ...novoItem, quantidade: e.target.value })} /></div>
-            <div><label>Preço unit. (R$ — vazio usa o preço de venda)</label><input type="number" step="0.01" value={novoItem.preco_unitario} onChange={e => setNovoItem({ ...novoItem, preco_unitario: e.target.value })} /></div>
-            <div><button className="btn secondary" type="submit">Adicionar item</button></div>
-          </form>
-          <div className="items-list">
-            {itens.length ? itens.map((it, idx) => {
-              const prod = produtos.find(p => p.id === it.produto_id);
-              return (
-                <div className="item-line" key={idx}>
-                  <span>{prod?.nome || '—'}</span>
-                  <span className="num">{it.quantidade} × {fmtMoney(it.preco_unitario)}</span>
-                  <button className="btn danger small" onClick={() => setItens(itens.filter((_, i) => i !== idx))}>×</button>
-                </div>
-              );
-            }) : <p className="muted" style={{ fontSize: 12 }}>Nenhum item adicionado ainda.</p>}
-            {itens.length > 0 && (
-              <div className="subtotal">Total: {fmtMoney(itens.reduce((s, i) => s + i.quantidade * i.preco_unitario, 0))}</div>
-            )}
-          </div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={finalizar} disabled={salvando}>
-            {salvando ? 'Salvando…' : 'Finalizar pedido'}
-          </button>
-        </div>
+        <PedidoForm
+          cabecalho={cabecalho} setCabecalho={setCabecalho}
+          itens={itens} setItens={setItens}
+          clientes={clientes} produtos={produtos} funcionarios={funcionarios}
+          saldoProduto={saldoProduto}
+        />
+        <button className="btn" style={{ marginTop: 12 }} onClick={finalizar} disabled={salvando}>
+          {salvando ? 'Salvando…' : 'Finalizar pedido'}
+        </button>
       </div>
 
       <div className="panel">
@@ -213,7 +167,7 @@ function Conteudo({ setFicha }) {
                   <td>{fmtDate(p.data)}</td>
                   <td>{p.clientes?.nome || '—'}</td>
                   <td>{(p.pedido_itens || []).length} item(ns)</td>
-                  <td className="num">{fmtMoney(totalPedido(p))}</td>
+                  <td className="num">{fmtMoney(totalDoPedido(p))}</td>
                   <td>
                     <div className="row-actions">
                       {statusTag(p.status)}
