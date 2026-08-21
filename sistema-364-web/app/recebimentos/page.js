@@ -62,7 +62,8 @@ function Conteudo({ setFicha }) {
   const [expandido, setExpandido] = useState({});
   const proximaKey = useRef(0);
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
-  const [itensPendentes, setItensPendentes] = useState([]); // itens da nota sem de-para
+  const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
+  const [itemDaNotaEmConferencia, setItemDaNotaEmConferencia] = useState(null); // item carregado no formulário
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -111,9 +112,15 @@ function Conteudo({ setFicha }) {
   const validadeAbaixoDoMinimo = diasValidade != null && diasValidade < mpSelecionada.dias_minimos_validade;
   const exigeMotivo = ['rejeitado', 'quarentena'].includes(itemForm.status_qualidade);
 
-  // Recebe o corpo de /preparar: preenche o cabeçalho, joga os itens já mapeados
-  // direto no staging e deixa os não mapeados numa fila de casamento.
+  // Recebe o corpo de /preparar: preenche o cabeçalho e joga todos os itens da
+  // nota numa fila de conferência. Cada item passa pelo formulário normal de item
+  // (adicionarItem) antes de virar staging, então nenhuma regra de qualidade da
+  // matéria-prima é pulada.
   function aplicarNotaImportada(dados) {
+    if (notaImportada) {
+      alert('Já existe uma nota importada em andamento. Registre ou limpe o recebimento atual antes de importar outra.');
+      return;
+    }
     setNotaImportada(dados);
     setHeader(h => ({
       ...h,
@@ -122,10 +129,11 @@ function Conteudo({ setFicha }) {
       fornecedor_id: dados.fornecedor?.id || '',
     }));
 
-    const mapeados = dados.itens.filter(i => i.mapeado);
-    const pendentes = dados.itens.filter(i => !i.mapeado);
-    setItensPendentes(pendentes.map(i => ({ ...i, materiaPrimaId: '', fatorConversao: 1 })));
-    mapeados.forEach(empilharItemDaNota);
+    setItensDaNota(dados.itens.map(i => ({
+      ...i,
+      materiaPrimaId: mps.some(m => m.id === i.materiaPrimaId) ? i.materiaPrimaId : '',
+      fatorConversao: i.fatorConversao || 1,
+    })));
 
     if (!dados.fornecedor && dados.fornecedorSugerido) {
       alert(`Fornecedor ${dados.fornecedorSugerido.nome} (CNPJ ${dados.fornecedorSugerido.cnpj}) `
@@ -133,37 +141,27 @@ function Conteudo({ setFicha }) {
     }
   }
 
-  // Um item da nota vira uma linha do staging. O peso conferido fica VAZIO de
-  // propósito: quem preenche é a balança, e a divergência com a nota tem que aparecer.
-  function empilharItemDaNota(item) {
-    const mp = mps.find(m => m.id === item.materiaPrimaId);
-    if (!mp) return;
-    proximaKey.current += 1;
-    setItens(anteriores => [...anteriores, {
+  // Carrega um item da nota no formulário de item existente, com o custo e o peso
+  // da nota já calculados. O peso conferido fica VAZIO de propósito: quem preenche
+  // é a balança, e a divergência com a nota tem que aparecer antes de gravar.
+  function carregarItemDaNota(indice) {
+    const item = itensDaNota.find(i => i.indice === indice);
+    if (!item?.materiaPrimaId) { alert('Escolha a matéria-prima deste item.'); return; }
+    const fator = Number(item.fatorConversao);
+    if (!(fator > 0)) { alert('Informe um fator de conversão válido para este item.'); return; }
+    const pesoNotaKg = Math.round(item.quantidadeNota * fator * 10000) / 10000;
+    const custoUnitario = pesoNotaKg > 0 ? Math.round((item.valorTotalItem / pesoNotaKg) * 100) / 100 : 0;
+    setItemForm({
       ...ITEM_VAZIO(),
       materia_prima_id: item.materiaPrimaId,
       quantidade: '',
-      peso_nota_kg: String(item.pesoNotaKg),
-      custo_unitario: String(item.custoUnitario),
-      _key: proximaKey.current,
-      _mp: mp,
-      _nfe: { codigo: item.codigo, descricao: item.descricao, unidadeNota: item.unidadeNota, fatorConversao: item.fatorConversao },
-    }]);
-  }
-
-  // Casa um item pendente com a matéria-prima escolhida e o manda para o staging.
-  function confirmarItemPendente(indice) {
-    const item = itensPendentes.find(i => i.indice === indice);
-    if (!item?.materiaPrimaId) { alert('Escolha a matéria-prima deste item.'); return; }
-    const fator = Number(item.fatorConversao) > 0 ? Number(item.fatorConversao) : 1;
-    const pesoNotaKg = Math.round(item.quantidadeNota * fator * 10000) / 10000;
-    empilharItemDaNota({
-      ...item,
-      fatorConversao: fator,
-      pesoNotaKg,
-      custoUnitario: pesoNotaKg > 0 ? Math.round((item.valorTotalItem / pesoNotaKg) * 100) / 100 : 0,
+      peso_nota_kg: String(pesoNotaKg),
+      custo_unitario: String(custoUnitario),
     });
-    setItensPendentes(lista => lista.filter(i => i.indice !== indice));
+    setItemDaNotaEmConferencia({
+      indice, codigo: item.codigo, descricao: item.descricao, unidadeNota: item.unidadeNota,
+      fatorConversao: fator, cnpjEmitente: notaImportada.nota.emitente.cnpj,
+    });
   }
 
   function adicionarItem(e) {
@@ -175,8 +173,15 @@ function Conteudo({ setFicha }) {
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
     if (regra !== 'simples' && exigeMotivo && !itemForm.motivo_rejeicao) { alert('Informe o motivo da rejeição/quarentena.'); return; }
     proximaKey.current += 1;
-    setItens([...itens, { ...itemForm, _key: proximaKey.current, _mp: mpSelecionada }]);
+    setItens([...itens, {
+      ...itemForm, _key: proximaKey.current, _mp: mpSelecionada,
+      ...(itemDaNotaEmConferencia ? { _nfe: itemDaNotaEmConferencia } : {}),
+    }]);
     setItemForm(ITEM_VAZIO());
+    if (itemDaNotaEmConferencia) {
+      setItensDaNota(lista => lista.filter(i => i.indice !== itemDaNotaEmConferencia.indice));
+      setItemDaNotaEmConferencia(null);
+    }
   }
 
   function removerItemStaged(key) {
@@ -185,6 +190,10 @@ function Conteudo({ setFicha }) {
 
   async function registrar(e) {
     e.preventDefault();
+    if (itensDaNota.length > 0) {
+      const singular = itensDaNota.length === 1;
+      if (!confirm(`${itensDaNota.length} ${singular ? 'item' : 'itens'} da nota ainda ${singular ? 'não foi conferido' : 'não foram conferidos'}. Registrar mesmo assim?`)) return;
+    }
     if (!itens.length) { alert('Adicione ao menos um item antes de registrar o recebimento.'); return; }
     if (header.condicao_pagamento === 'Parcelado' && (Number(header.numero_parcelas) < 2 || Number(header.intervalo_dias) < 1)) {
       alert('Informe um número de parcelas válido (mínimo 2) e um intervalo de dias válido (mínimo 1) para condição parcelada.');
@@ -332,30 +341,35 @@ function Conteudo({ setFicha }) {
       }
 
       if (notaImportada) {
-        const aprender = itens
-          .filter(it => it._nfe)
-          .map(it => ({
+        const porChave = new Map();
+        for (const it of itens) {
+          if (!it._nfe) continue;
+          porChave.set(`${it._nfe.cnpjEmitente}|${it._nfe.codigo}`, {
             empresa_id: empresaAtual.id,
-            cnpj_emitente: notaImportada.nota.emitente.cnpj,
+            cnpj_emitente: it._nfe.cnpjEmitente,
             codigo_produto: it._nfe.codigo,
             materia_prima_id: it.materia_prima_id,
             unidade_nf: it._nfe.unidadeNota,
             fator_conversao: it._nfe.fatorConversao,
-          }));
+          });
+        }
+        const aprender = Array.from(porChave.values());
         if (aprender.length) {
           const { error: errMapa } = await supabase.from('fornecedor_produto_mapa')
             .upsert(aprender, { onConflict: 'empresa_id,cnpj_emitente,codigo_produto' });
           if (errMapa) alert('Recebimento salvo, mas o de-para não foi gravado: ' + errMapa.message);
         }
-        await supabase.from('nfe_documentos')
+        const { error: errVinculo } = await supabase.from('nfe_documentos')
           .update({ status: 'vinculada', recebimento_id: cabecalho.id })
           .eq('id', notaImportada.documento.id);
+        if (errVinculo) alert('Recebimento salvo, mas a nota não foi marcada como vinculada: ' + errVinculo.message);
       }
 
       setHeader(HEADER_VAZIO());
       setItens([]);
       setNotaImportada(null);
-      setItensPendentes([]);
+      setItensDaNota([]);
+      setItemDaNotaEmConferencia(null);
       carregar();
     } finally {
       setSalvando(false);
@@ -449,19 +463,19 @@ function Conteudo({ setFicha }) {
           </p>
         )}
 
-        {itensPendentes.length > 0 && (
+        {itensDaNota.length > 0 && (
           <div className="card" style={{ marginBottom: 16 }}>
-            <strong>Itens da nota sem matéria-prima ({itensPendentes.length})</strong>
+            <strong>Itens da nota ({itensDaNota.length})</strong>
             <p className="muted">
-              Case cada item uma vez; nas próximas notas deste fornecedor ele já vem preenchido.
+              Confira cada item uma vez; nas próximas notas deste fornecedor o de-para já vem preenchido.
             </p>
-            {itensPendentes.map(item => (
+            {itensDaNota.map(item => (
               <div key={item.indice} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
                 <span style={{ minWidth: 260 }}>
                   {item.codigo} — {item.descricao} ({item.quantidadeNota} {item.unidadeNota})
                 </span>
                 <select value={item.materiaPrimaId}
-                  onChange={e => setItensPendentes(lista => lista.map(i =>
+                  onChange={e => setItensDaNota(lista => lista.map(i =>
                     i.indice === item.indice ? { ...i, materiaPrimaId: e.target.value } : i))}>
                   <option value="">Matéria-prima…</option>
                   {mps.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
@@ -470,10 +484,10 @@ function Conteudo({ setFicha }) {
                   {item.unidadeNota} → kg
                   <input type="number" step="0.0001" min="0.0001" style={{ width: 90, marginLeft: 6 }}
                     value={item.fatorConversao}
-                    onChange={e => setItensPendentes(lista => lista.map(i =>
+                    onChange={e => setItensDaNota(lista => lista.map(i =>
                       i.indice === item.indice ? { ...i, fatorConversao: e.target.value } : i))} />
                 </label>
-                <button type="button" onClick={() => confirmarItemPendente(item.indice)}>Casar item</button>
+                <button type="button" onClick={() => carregarItemDaNota(item.indice)}>Conferir item</button>
               </div>
             ))}
           </div>

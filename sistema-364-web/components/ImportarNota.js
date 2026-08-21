@@ -10,6 +10,7 @@ export default function ImportarNota({ empresaId, onImportado }) {
 
   async function comToken(url, opcoes = {}) {
     const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Sua sessão expirou. Saia e entre novamente para importar a nota.');
     return fetch(url, {
       ...opcoes,
       headers: {
@@ -31,12 +32,12 @@ export default function ImportarNota({ empresaId, onImportado }) {
         body: JSON.stringify({ empresaId, xml }),
       });
       const j1 = await r1.json();
-      if (!r1.ok) { setErro(j1.error); return; }
+      if (!r1.ok) { setErro(j1.error || 'Não foi possível enviar o XML. Tente novamente.'); return; }
       if (j1.aviso) { setErro(j1.aviso); return; }
 
       const r2 = await comToken(`/api/nfe/documentos/${j1.documento.chave}/preparar?empresaId=${empresaId}`);
       const j2 = await r2.json();
-      if (!r2.ok) { setErro(j2.error); return; }
+      if (!r2.ok) { setErro(j2.error || 'Não foi possível preparar os dados da nota. Tente novamente.'); return; }
       if (j2.jaVinculada) { setErro('Esta nota já foi lançada em outro recebimento.'); return; }
       onImportado(j2);
     } catch (e) {
