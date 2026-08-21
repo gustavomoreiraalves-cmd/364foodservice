@@ -1000,6 +1000,30 @@ git commit -m "feat(nfe): rota que monta o rascunho de recebimento a partir da n
 Esta é a tarefa que entrega valor sem certificado nenhum: com o XML que o fornecedor
 manda por e-mail, o recebimento já para de ser digitado.
 
+> **Redesenho aprovado durante a execução — os Steps 3 a 5 abaixo estão superados.**
+>
+> O desenho original mandava empilhar os itens importados direto na lista de itens já
+> montados. A revisão mostrou que essa lista é somente leitura: como o peso conferido
+> nasce vazio de propósito, o item importado ficava com peso zero e sem campo para
+> digitar. Registrar assim gravava lote de 0 kg e, com `totalAceito` zerado, nenhuma
+> conta a pagar era criada — o código de parcelas nunca rodava pelo caminho da
+> importação. Junto vinham três outros defeitos: item com matéria-prima inativa sumia
+> da tela, importar dois XML seguidos duplicava linhas e carimbava o CNPJ da última
+> nota no de-para de todas, e itens importados escapavam das validações de validade,
+> temperatura e inspeção.
+>
+> **Desenho que foi implementado:** os itens da nota entram numa fila de conferência.
+> Clicar em "Conferir item" carrega o item no formulário de item que a tela já tem
+> (matéria-prima, peso da nota e custo pré-preenchidos, peso conferido vazio ao lado
+> do peso da nota); o operador pesa, preenche o que a regra do produto exigir e clica
+> "Adicionar item" como sempre fez. Assim todas as validações de `adicionarItem` são
+> reaproveitadas, em vez de duplicadas. Cada item leva o CNPJ do emitente no próprio
+> `_nfe`, e as linhas do de-para são deduplicadas por `cnpjEmitente + codigo_produto`
+> antes do upsert.
+>
+> O código em `app/recebimentos/page.js` e `components/ImportarNota.js` é a referência
+> desta parte, não os blocos abaixo. Os Steps 1, 2, 6 e 7 continuam valendo como estão.
+
 - [ ] **Step 1: Criar o componente de importação**
 
 Criar `components/ImportarNota.js`:
