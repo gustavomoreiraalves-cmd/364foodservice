@@ -75,9 +75,10 @@ export default function ModalEtiquetas({
   async function imprimir() {
     if (enviando) return; // trava de duplo clique — ver estado `enviando` acima.
     const qtd = Number(copias);
-    // copias === '' (campo apagado) chega aqui como NaN por Number(''), que
-    // falha em `qtd > 0` — mas '' também vira 0 na RPC se não barrado antes:
-    // sem esta checagem o operador via o erro cru do Postgres em inglês.
+    // copias === '' (campo apagado) chega aqui como 0 — Number('') é 0, não
+    // NaN — e falha em `qtd > 0` do mesmo jeito. Sem esta checagem, esse 0
+    // seguiria até a RPC e o operador veria o erro cru do Postgres em inglês
+    // (violação do check quantidade > 0) em vez de um aviso em português.
     if (!(Number.isInteger(qtd) && qtd > 0)) {
       alert('Informe a quantidade de etiquetas (um número inteiro maior que zero).');
       return;
@@ -85,6 +86,26 @@ export default function ModalEtiquetas({
     if (qtd > COPIAS_MAX) {
       alert(`Quantidade de etiquetas não pode passar de ${COPIAS_MAX} por impressão.`);
       return;
+    }
+    // "Reimprimir a partir do volume nº" só existe para recebimento +
+    // reimpressão (ver o campo mais abaixo). O `max` do input só limita o
+    // spinner das setinhas — digitar um valor direto (ou reduzir o `max`
+    // depois de já ter digitado a quantidade) não é barrado por HTML sozinho,
+    // e o campo não está dentro de um <form> com submit para validar
+    // nativamente. Sem esta checagem, início 18 + 5 cópias imprime
+    // "vol. 23/20" numa caixa física.
+    if (modeloEfetivo === 'recebimento' && tipo === 'reimpressao') {
+      const inicio = Number(volumeInicial);
+      if (!(Number.isInteger(inicio) && inicio > 0)) {
+        alert('Informe um volume inicial válido (um número inteiro maior que zero).');
+        return;
+      }
+      const total = Number(dadosEtiqueta.volumesTotal) || 0;
+      if (total > 0 && inicio + qtd - 1 > total) {
+        alert(`O volume inicial (${inicio}) mais a quantidade (${qtd}) passa do total de volumes do item `
+          + `(${total}). Ajuste o volume inicial ou a quantidade.`);
+        return;
+      }
     }
     let motivo = null;
     if (tipo === 'reimpressao') {

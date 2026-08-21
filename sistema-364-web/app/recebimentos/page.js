@@ -43,6 +43,33 @@ const ITEM_VAZIO = () => ({
   fotoProdutoArquivo: null, documentoSanitarioArquivo: null,
 });
 
+// Cada uuid custa ~39 caracteres no query string do `.in(...)`; com uma lista
+// grande de itens (algumas centenas), um único GET estoura o limite de
+// tamanho de URL do gateway antes de chegar no PostgREST. Busca em blocos
+// para não depender do tamanho da lista de recebimentos da empresa.
+const BLOCO_IDS_IMPRESSOES = 100;
+
+// Busca etiqueta_impressoes só dos itens passados, em blocos. Devolve
+// { data, error } em vez de engolir o erro: o chamador decide o que fazer
+// quando a consulta falha — aqui, NÃO seguir como se nada tivesse sido
+// impresso (jaImprimiu mentindo `false` reabriria a brecha que a task 6
+// fechou: reimpressão gravada como "original", sem motivo).
+async function carregarImpressoesDosItens(empresaId, ids) {
+  if (!ids.length) return { data: [], error: null };
+  const blocos = [];
+  for (let i = 0; i < ids.length; i += BLOCO_IDS_IMPRESSOES) blocos.push(ids.slice(i, i + BLOCO_IDS_IMPRESSOES));
+  const respostas = await Promise.all(blocos.map(bloco =>
+    supabase.from('etiqueta_impressoes')
+      .select('source_id, quantidade')
+      .eq('empresa_id', empresaId)
+      .eq('source_type', 'recebimento_item')
+      .in('source_id', bloco)
+  ));
+  const comErro = respostas.find(r => r.error);
+  if (comErro) return { data: [], error: comErro.error };
+  return { data: respostas.flatMap(r => r.data || []), error: null };
+}
+
 export default function RecebimentosPage() {
   const [ficha, setFicha] = useState(null);
   const [etiqueta, setEtiqueta] = useState(null);
@@ -72,6 +99,10 @@ function Conteudo({ setFicha, setEtiqueta }) {
   const [expandido, setExpandido] = useState({});
   const [etiquetaItem, setEtiquetaItem] = useState(null);
   const [impressoes, setImpressoes] = useState([]);
+  // true quando a consulta de etiqueta_impressoes falhou (ou foi cortada) e
+  // não dá para confiar em `impressoes` — nesse estado a impressão fica
+  // desabilitada em vez de assumir "nada impresso ainda" (ver `carregar`).
+  const [erroImpressoes, setErroImpressoes] = useState(false);
   const proximaKey = useRef(0);
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
@@ -113,14 +144,16 @@ function Conteudo({ setFicha, setEtiqueta }) {
     // max-rows do PostgREST cortaria linhas de itens antigos e `jaImprimiu`
     // voltaria a mentir `false` para item já impresso — reabrindo em
     // silêncio a brecha da exigência de motivo que a task 6 fechou.
-    const idsItens = itensCarregados.map(i => i.id);
-    const r6 = idsItens.length
-      ? await supabase.from('etiqueta_impressoes')
-          .select('source_id, quantidade')
-          .eq('empresa_id', empresaAtual.id)
-          .eq('source_type', 'recebimento_item')
-          .in('source_id', idsItens)
-      : { data: [] };
+    const { data: impressoesCarregadas, error: erroCarregarImpressoes } =
+      await carregarImpressoesDosItens(empresaAtual.id, itensCarregados.map(i => i.id));
+    if (erroCarregarImpressoes) {
+      console.error(erroCarregarImpressoes);
+      setErroImpressoes(true);
+      setImpressoes([]);
+    } else {
+      setErroImpressoes(false);
+      setImpressoes(impressoesCarregadas);
+    }
     setLista(itensCarregados.map(item => ({
       ...item,
       recebimento_id: item.recebimento_id,
@@ -131,7 +164,6 @@ function Conteudo({ setFicha, setEtiqueta }) {
     setFornecedores(r3.data || []);
     setFuncionarios(r4.data || []);
     setDepositos(r5.data || []);
-    setImpressoes(r6.data || []);
     setLoading(false);
   }
 
@@ -869,6 +901,13 @@ function Conteudo({ setFicha, setEtiqueta }) {
 
       <div className="panel">
         <h3>Recebimentos ({grupos.length})</h3>
+        {erroImpressoes && (
+          <div className="banner">
+            Não foi possível carregar o histórico de impressão de etiquetas desta empresa.
+            A impressão de etiquetas de recebimento foi desabilitada nesta tela até a próxima
+            atualização, para não gravar uma reimpressão como se fosse a primeira. Recarregue a página.
+          </div>
+        )}
         <div className="table-wrap">
           <table>
             <thead>
@@ -934,8 +973,12 @@ function Conteudo({ setFicha, setEtiqueta }) {
                                           {it.inspecao?.documento_sanitario_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.documento_sanitario_url)}>Ver documento</button>}
                                           <button
                                             className="btn secondary small"
-                                            disabled={!it.volumes}
-                                            title={!it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined}
+                                            disabled={!it.volumes || erroImpressoes}
+                                            title={
+                                              erroImpressoes
+                                                ? 'Não foi possível conferir o histórico de impressão desta empresa — impressão desabilitada para não gravar uma reimpressão como se fosse a primeira. Recarregue a página.'
+                                                : !it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined
+                                            }
                                             onClick={() => abrirEtiquetas(it, g, jaImprimiu(it) ? 'reimpressao' : 'original')}
                                           >
                                             {jaImprimiu(it) ? 'Reimprimir etiquetas' : 'Imprimir etiquetas'}

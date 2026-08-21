@@ -64,7 +64,7 @@ export default function EtiquetaPrint({ etiqueta }) {
            overflow:hidden do pai (.et-receb-texto) corta o rodapé em vez do
            texto, que é o oposto do que queremos. */
         .etiquetas-print .et-receb-texto .et-linha { overflow: hidden; min-height: 0; }
-        .etiquetas-print .et-receb-qr { width: ${m.qrTamanho_mm || 16}mm; display: flex; align-items: center; justify-content: center; }
+        .etiquetas-print .et-receb-qr { width: ${m.qrTamanho_mm || 0}mm; display: flex; align-items: center; justify-content: center; }
         .etiquetas-print .et-receb-qr svg { display: block; }
         .etiquetas-print .et-lote { font-family: 'Courier New', monospace; font-size: 8pt; font-weight: 700; overflow: hidden; min-height: 0; }
         .etiquetas-print .et-mp { font-size: 8pt; font-weight: 700; text-transform: uppercase; margin: .3mm 0; overflow: hidden; min-height: 0; }
