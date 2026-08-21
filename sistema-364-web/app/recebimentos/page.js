@@ -186,6 +186,11 @@ function Conteudo({ setFicha }) {
     setItemDaNotaEmConferencia(null);
     setItens(lista => lista.filter(i => !i._nfe));
     if (itemDaNotaEmConferencia) setItemForm(ITEM_VAZIO());
+    // O cabeçalho volta ao estado de recebimento digitado à mão. Sem isto, a data,
+    // o número e principalmente o fornecedor da nota descartada ficavam de pé, e
+    // uma nota seguinte de fornecedor não reconhecido (que preserva o fornecedor já
+    // escolhido) lançaria a conta a pagar no fornecedor da nota anterior.
+    setHeader(h => ({ ...h, data: hoje(), nota_fiscal: '', fornecedor_id: '' }));
   }
 
   // Trocar a matéria-prima limpa o resto do formulário. Com uma linha da nota em
