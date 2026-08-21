@@ -256,6 +256,7 @@ function Conteudo({ setFicha }) {
     // gravando item sem peso ou lote a custo zero.
     if (!(Number(itemForm.quantidade) > 0)) { alert('Informe o peso conferido (maior que zero).'); return; }
     if (!(Number(itemForm.custo_unitario) > 0)) { alert('Informe o custo unitário (maior que zero).'); return; }
+    if (itemForm.volumes && !(Number.isInteger(Number(itemForm.volumes)) && Number(itemForm.volumes) > 0)) { alert('Volumes deve ser um número inteiro maior que zero.'); return; }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
