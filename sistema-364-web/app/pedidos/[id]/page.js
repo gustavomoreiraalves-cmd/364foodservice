@@ -67,6 +67,13 @@ function Conteudo({ setFicha }) {
       supabase.from('pedidos')
         .select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), cancelado_por:funcionarios!pedidos_cancelado_por_id_fkey(nome), reaberto_por:funcionarios!pedidos_reaberto_por_id_fkey(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
+      // select('*') em vez de lista de colunas: se `ativo` ainda não existir
+      // (migração 26 pendente), uma projeção que citasse a coluna pelo nome
+      // devolveria erro 42703 do PostgREST e vazaria a tela inteira. Com '*' a
+      // coluna some do objeto quando não existe, `ativo` vira undefined e
+      // `ativo !== false` continua mostrando o registro — sem quebrar nada.
+      // Voltar para `select('id, nome')` é pior ainda: desliga o filtro de
+      // inativos em silêncio, sem erro nenhum e sem teste que pegue.
       supabase.from('clientes').select('*').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
