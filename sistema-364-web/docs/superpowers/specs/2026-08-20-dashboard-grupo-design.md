@@ -71,10 +71,18 @@ tests/consolidado.test.mjs
 
 ```sql
 alter table produtos add column if not exists custo_unitario numeric(12,2) not null default 0;
+
+alter table produtos drop constraint if exists produtos_custo_unitario_check;
+alter table produtos add constraint produtos_custo_unitario_check
+  check (custo_unitario >= 0);
 ```
 
 O valor é digitado no cadastro do produto. Zero significa "não informado", e o
 cálculo cai no custo teórico da ficha técnica.
+
+O `check` é o backstop das validações da tela. Custo negativo seria pior que um
+erro visível: todo leitor testa `> 0`, então o produto cairia na ficha técnica e
+reportaria um custo que não tem.
 
 ### `vw_produto_custo`
 
@@ -122,7 +130,7 @@ Fontes de cada coluna:
 | `itens_qtd` | `sum(pedido_itens.quantidade)` | `status <> 'Cancelado'` |
 | `despesa_competencia` | `contas_a_pagar.valor_total` por `created_at` | `recebimento_id is null` |
 | `despesa_caixa` | `contas_a_pagar_parcelas.valor` por `data_pagamento` | `status = 'Pago'` |
-| `compras` | `recebimento_itens.quantidade × custo_unitario` por `recebimentos.data` | `status_recebimento in ('Aceito','Aceito com ressalva')` |
+| `compras` | `recebimento_itens.quantidade × custo_unitario` por `recebimentos.data` | `join inspecoes_qualidade` com `status in ('aprovado','aprovado_com_ressalva')` |
 
 Três detalhes que mudam o número se forem ignorados:
 
@@ -139,10 +147,31 @@ Três detalhes que mudam o número se forem ignorados:
    (`postgres`) e devolve linhas de empresas às quais o usuário não tem acesso,
    furando a RLS. É o padrão já adotado em `atualizacao_07_views_empresa.sql`.
 
-A qualidade do recebimento é lida de `recebimento_itens.status_recebimento`, e
-não de `inspecoes_qualidade` — esta última existe em produção mas não tem
-migração versionada no repositório, e a view não pode depender de um objeto que
-o repo não cria.
+A qualidade do recebimento é lida de `inspecoes_qualidade.status`, com um
+`join` (não `left join`) de `recebimento_itens` para a inspeção.
+
+Uma versão anterior deste documento mandava usar
+`recebimento_itens.status_recebimento`, para não depender de uma tabela sem
+migração versionada no repositório. Estava errado: essa coluna **não existe
+mais em produção** — a condição sanitária migrou para `inspecoes_qualidade`
+(`recebimento_item_id`, `status`), e o resto do sistema já lê de lá
+(`lib/qualidade.js`, `app/estoque/page.js`, `app/relatorios/page.js`,
+`app/recebimentos/page.js`). O repositório é que ficou para trás. Rodar a view
+com a coluna antiga abortava com `column ri.status_recebimento does not exist`.
+
+Dois detalhes que vêm junto:
+
+- Os status aprovados são minúsculos: `'aprovado'` e `'aprovado_com_ressalva'`
+  (`STATUS_QUALIDADE_APROVADO` em `lib/qualidade.js`), não os antigos
+  `'Aceito'` / `'Aceito com ressalva'`.
+- O join é interno de propósito. Item sem inspeção não gerou movimento de
+  estoque — é o mesmo critério de `inspecaoAprovada` —, logo não é compra.
+
+Como o repositório não versiona o DDL de `inspecoes_qualidade` e não tem como
+escrevê-lo com segurança a partir de prosa, a migração 21 abre com uma guarda
+dentro da transação: se `to_regclass('public.inspecoes_qualidade')` for nulo,
+ela levanta exceção com uma mensagem acionável em vez de criar uma view que
+contaria compras erradas.
 
 ### Permissão
 
@@ -204,10 +233,16 @@ Blocos, de cima para baixo:
 2. **KPIs do grupo** (`.kpi-grid`), cada um com a variação contra o mês
    anterior: Receita, CMV, Margem bruta %, Despesas, Lucro líquido, Nº de
    pedidos, Ticket médio, Caixa do mês.
+   - Em CMV e Despesas a cor da variação é invertida (`inverso`): subir é ruim.
+     A seta continua apontando para onde o número foi; só a cor troca de lado.
+   - A margem bruta já é um percentual, então seu movimento é reportado em
+     **pontos percentuais** (`p.p.`), por subtração direta — 60,0% → 62,5% é
+     +2,5 p.p., e não os +4,2% que uma variação percentual diria.
 3. **Competência × Caixa** (`.grid2`) — dois painéis. À esquerda o DRE do mês
-   (receita − CMV = lucro bruto − despesas = lucro líquido). À direita o caixa
-   (entradas de pedidos faturados/enviados, saídas de compras e de parcelas
-   pagas, saldo).
+   (receita − CMV = lucro bruto − despesas = lucro líquido). À direita o caixa:
+   entradas de pedidos faturados/enviados, menos as parcelas pagas, igual ao
+   saldo. As compras do mês aparecem abaixo do saldo, em `.muted`, como
+   informação de competência — fora da conta.
 4. **Série de 12 meses** — painel com o `SerieMensal`.
 5. **Por empresa** — tabela: empresa, receita, participação %, CMV, margem %,
    despesa, lucro, pedidos, ticket médio e uma `tag` com a origem do custo
@@ -216,17 +251,41 @@ Blocos, de cima para baixo:
 ## Bordas e erros
 
 - Usuário com acesso a uma única empresa: a tela funciona, o ranking tem uma linha.
-- Empresa sem movimento no mês: linha zerada no ranking.
+- Empresa sem movimento no mês: linha zerada no ranking, com a tag de custo
+  neutra ("sem vendas"). Sem pedidos não há CMV para qualificar, e o verde de
+  "custo cadastrado" afirmaria uma qualidade de dado que ninguém verificou.
 - Mês sem nenhum movimento no grupo: painéis mostram "Sem movimento em `<mês>`".
+  O teste de "sem movimento" inclui as colunas de caixa — um mês cujo único
+  movimento foi uma parcela paga não é um mês parado.
 - Margem e ticket médio com denominador zero: exibem `0`, não `NaN`.
 - Erro de consulta: `<p className="erro">` com a mensagem, nunca tela em branco.
 - View inexistente (migração não rodada): mensagem explícita pedindo para rodar
-  `supabase/atualizacao_21_dashboard_grupo.sql`.
+  `supabase/atualizacao_21_dashboard_grupo.sql`. O reconhecimento exige a forma
+  de "não existe" (código `42P01`/`PGRST205`, ou `does not exist` / `schema
+  cache` na mensagem) além do nome da view: um erro de permissão ou de RLS
+  também cita a view, e mandar rodar de novo uma migração já aplicada faz o
+  usuário perseguir o problema errado.
 
 ## Cadastro de produto
 
 `app/produtos/page.js` ganha o campo "Custo unitário (R$)" no formulário de
-produto, ao lado de "Preço de venda". Abaixo do campo, o custo teórico calculado
+produto, ao lado de "Preço de venda".
+
+Os dois caminhos que gravam a coluna — o formulário de criação e o botão
+"Editar custo" — passam pela mesma função pura, `parseCustoUnitario` em
+`lib/format.js`, para não terem políticas diferentes sobre o mesmo campo:
+
+- vazio, `null` ou `undefined` → `0`, que é exatamente o "não informado" que o
+  texto de ajuda promete (o CMV cai na ficha técnica);
+- vírgula decimal aceita, com troca global (`'45,50'` = `'45.50'` = `45.5`);
+- separador de milhar **não** é aceito: `'1.234,56'` vira `'1.234.56'`, não é
+  número, e a função devolve `null` para a tela avisar. Removê-lo estragaria
+  `'1.5'`, que o `<input type="number">` produz querendo dizer um e meio;
+- texto que não vira número finito, ou número negativo → `null`, e a tela
+  recusa com `alert(...)` em vez de gravar `0` em silêncio.
+
+`prompt()` cancelado devolve `null` e continua sendo um no-op — "desisti" não é
+"custo vazio" —, então esse caso é filtrado antes da chamada. Abaixo do campo, o custo teórico calculado
 pela ficha técnica aparece como referência, com um botão que o copia para o
 campo. A listagem marca com `tag` os produtos que ainda estão sem custo próprio,
 para deixar visível o que sustenta o CMV.
@@ -251,6 +310,18 @@ sem reescrita.
 
 ## Limitações conhecidas
 
+- **A saída de caixa é medida por parcela paga, e só por ela.** `saldoCaixa` é
+  `receitaCaixa − despesaCaixa`. `compras` **não** entra na conta: é um número
+  de competência, datado no recebimento, enquanto o desembolso acontece quando
+  a parcela da nota é quitada. E ele acontece: `app/recebimentos/page.js` gera,
+  para todo recebimento com total aprovado acima de zero, uma `contas_a_pagar`
+  com `recebimento_id` preenchido mais as parcelas. Subtrair `compras` e
+  `despesaCaixa` do mesmo saldo descontava cada compra duas vezes —
+  sistematicamente, não em caso de borda. `compras` continua sendo devolvido
+  por `consolidar` e exibido na tela como referência de competência.
+- Como consequência, o painel de Caixa mistura duas leituras propositalmente
+  separadas: o saldo é caixa puro; a linha de compras é competência e está
+  marcada como informativa.
 - Receita de caixa usa `pedidos.data`, não a data de faturamento — a tabela
   `pedidos` não guarda quando o pedido foi faturado. Em mês de virada o valor
   pode ficar no mês do pedido, e não no do recebimento.

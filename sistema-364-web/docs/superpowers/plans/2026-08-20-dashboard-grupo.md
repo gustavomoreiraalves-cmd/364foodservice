@@ -8,6 +8,34 @@
 
 **Tech Stack:** Next.js 14 (App Router, componentes `'use client'`), React 18, Supabase JS v2 (PostgREST), Postgres 15+, `node:test`. Nenhuma dependência nova.
 
+## Correções aplicadas depois da revisão do código
+
+Dois pontos deste plano estavam errados e foram corrigidos na implementação.
+O texto abaixo já reflete a correção; ficam registrados aqui para que ninguém
+reintroduza a versão antiga a partir de um trecho esquecido.
+
+1. **A fonte da qualidade do recebimento.** O plano mandava filtrar por
+   `recebimento_itens.status_recebimento in ('Aceito','Aceito com ressalva')`,
+   para não depender de `inspecoes_qualidade`. Essa coluna **não existe mais em
+   produção**: a condição sanitária migrou para `inspecoes_qualidade`, e o resto
+   do app já lê de lá (`lib/qualidade.js`, `app/estoque/page.js`,
+   `app/relatorios/page.js`, `app/recebimentos/page.js`). A migração abortava com
+   `column ri.status_recebimento does not exist`. O `compras_mp` passa a fazer
+   `join inspecoes_qualidade iq on iq.recebimento_item_id = ri.id` filtrando
+   `iq.status in ('aprovado','aprovado_com_ressalva')` — minúsculo, join interno
+   (item sem inspeção não gerou movimento de estoque, logo não é compra). Como o
+   repositório não versiona o DDL dessa tabela, a migração abre com uma guarda
+   `to_regclass` que falha com mensagem acionável se ela não existir.
+
+2. **A base do saldo de caixa.** `saldoCaixa` era
+   `receitaCaixa − despesaCaixa − compras`. Todo recebimento aprovado gera uma
+   `contas_a_pagar` com `recebimento_id` e suas parcelas
+   (`app/recebimentos/page.js`), então a mesma compra saía do saldo duas vezes:
+   como `compras` (competência, na data do recebimento) e como `despesa_caixa`
+   (na data do pagamento). A fórmula passa a ser `receitaCaixa − despesaCaixa`.
+   `compras` continua devolvido e exibido, como número de competência, fora da
+   conta.
+
 ## Global Constraints
 
 - Nenhuma dependência nova no `package.json`. Gráficos são SVG escrito à mão.
@@ -63,7 +91,7 @@
 - `despesas` não existe mais: a migração 16 (`supabase/atualizacao_16_financeiro_contas_a_pagar.sql:118`) fez `drop table despesas` depois de migrar tudo para `contas_a_pagar`.
 - Uma `contas_a_pagar` com `recebimento_id` preenchido é a nota da compra de matéria-prima, e essa compra já é contada em `compras`. Contá-la também como despesa é contar duas vezes. `app/relatorios/page.js:28` aplica o mesmo filtro `.is('recebimento_id', null)`.
 - `pedidos.data`, `recebimentos.data` e `contas_a_pagar_parcelas.data_pagamento` são do tipo `date` — extrair o mês direto está correto. Já `contas_a_pagar.created_at` é `timestamptz` gravado em UTC: uma conta lançada às 21h do dia 31 cairia no mês seguinte. Só essa coluna converte com `at time zone 'America/Sao_Paulo'`.
-- A qualidade do recebimento sai de `recebimento_itens.status_recebimento` (`'Aceito'` | `'Aceito com ressalva'` | `'Rejeitado'`, definido em `supabase/atualizacao_10_recebimento_itens.sql:17`). Não usar `inspecoes_qualidade`: essa tabela existe em produção mas não tem migração versionada no repositório, e uma view do repositório não pode depender de objeto que o repositório não cria.
+- A qualidade do recebimento sai de `inspecoes_qualidade.status` (`'aprovado'` | `'aprovado_com_ressalva'` | `'rejeitado'` | ..., em `lib/qualidade.js`), por `join` interno de `recebimento_itens` para a inspeção. `recebimento_itens.status_recebimento` **não existe mais em produção** — apesar do que diz `supabase/atualizacao_10_recebimento_itens.sql:17`, que ficou para trás. Item sem inspeção não gerou movimento de estoque e não conta como compra, por isso o join é interno. Como o repositório não versiona o DDL de `inspecoes_qualidade`, a migração 21 abre com uma guarda `to_regclass('public.inspecoes_qualidade')` que levanta exceção com mensagem acionável se a tabela faltar.
 - A tabela de permissões é `public.permissoes (user_id uuid, modulo text)` — a coluna é `user_id`, não `usuario_id` (`supabase/usuarios_permissoes.sql:10`).
 - O padrão de teste de migração já existe: veja `tests/migracao-17/verificar.sh`. Ele cria um banco descartável local, aplica um fixture, aplica a migração e roda um arquivo de cenários que levanta exceção quando algo está errado.
 
@@ -157,7 +185,15 @@ create table recebimento_itens (
   lote text not null,
   quantidade numeric(12,4) not null,
   custo_unitario numeric(12,2) not null,
-  status_recebimento text not null default 'Aceito'
+  deposito_id uuid,
+  observacoes text
+);
+
+create table inspecoes_qualidade (
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid not null references empresas(id),
+  recebimento_item_id uuid not null references recebimento_itens(id),
+  status text not null default 'pendente'
 );
 
 create table contas_a_pagar (
@@ -184,16 +220,25 @@ create or replace function public.empresas_permitidas() returns setof uuid
   language sql stable security definer set search_path = public as $$
   select empresa_id from usuario_empresas where user_id = auth.uid() $$;
 
--- RLS nas tabelas que a view lê, para provar que security_invoker respeita o escopo.
+-- RLS em TODAS as tabelas que as duas views leem, para provar que
+-- security_invoker respeita o escopo. Faltando RLS em qualquer uma delas, as
+-- linhas daquela tabela vazam entre empresas mesmo com a view "correta" —
+-- inclusive materias_primas e ficha_tecnica, lidas pelo lateral de
+-- vw_produto_custo.
 alter table pedidos enable row level security;
 alter table pedido_itens enable row level security;
 alter table produtos enable row level security;
+alter table recebimentos enable row level security;
+alter table recebimento_itens enable row level security;
+alter table contas_a_pagar enable row level security;
+alter table contas_a_pagar_parcelas enable row level security;
+alter table inspecoes_qualidade enable row level security;
+alter table materias_primas enable row level security;
+alter table ficha_tecnica enable row level security;
+-- ... uma policy `empresa_scoped` por tabela:
 create policy empresa_scoped on pedidos for all
   using (empresa_id in (select public.empresas_permitidas()));
-create policy empresa_scoped on pedido_itens for all
-  using (empresa_id in (select public.empresas_permitidas()));
-create policy empresa_scoped on produtos for all
-  using (empresa_id in (select public.empresas_permitidas()));
+-- (idem para as demais)
 
 grant usage on schema public to authenticated;
 grant select on all tables in schema public to authenticated;
@@ -251,12 +296,18 @@ insert into pedidos (id, empresa_id, data, status) values
 insert into pedido_itens (empresa_id, pedido_id, produto_id, quantidade, preco_unitario) values
   ('20000000-0000-0000-0000-00000000000b', '70000000-0000-0000-0000-00000000000b', '50000000-0000-0000-0000-00000000000b', 1, 200.00);
 
--- Recebimento: um item aceito (200) e um rejeitado (999), que não pode entrar em compras.
+-- Recebimento com três itens: I1 aprovado (200), I2 rejeitado (999) e I3 SEM
+-- inspeção (250) — nenhum dos dois últimos pode entrar em compras.
 insert into recebimentos (id, empresa_id, lote, data, fornecedor_id) values
   ('80000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000a', 'LT-260705-001', '2026-07-05', '30000000-0000-0000-0000-000000000001');
-insert into recebimento_itens (empresa_id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, status_recebimento) values
-  ('20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-001', 10, 20.00, 'Aceito'),
-  ('20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-002',  1, 999.00, 'Rejeitado');
+insert into recebimento_itens (id, empresa_id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario) values
+  ('81000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-001', 10,  20.00),
+  ('81000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-002',  1, 999.00),
+  ('81000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-003',  5,  50.00);
+insert into inspecoes_qualidade (empresa_id, recebimento_item_id, status) values
+  ('20000000-0000-0000-0000-00000000000a', '81000000-0000-0000-0000-000000000001', 'aprovado'),
+  ('20000000-0000-0000-0000-00000000000a', '81000000-0000-0000-0000-000000000002', 'rejeitado');
+-- I3 de propósito sem linha em inspecoes_qualidade.
 
 -- Despesa avulsa de julho (500) + conta ligada ao recebimento (200), que NÃO é despesa.
 insert into contas_a_pagar (id, empresa_id, descricao, categoria_conta, fornecedor_id, recebimento_id, valor_total, created_at) values
@@ -265,10 +316,13 @@ insert into contas_a_pagar (id, empresa_id, descricao, categoria_conta, forneced
   -- lançada 01/08 às 01h UTC = 31/07 às 22h em São Paulo: tem que cair em 2026-07.
   ('90000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-00000000000a', 'Virada',   'Custos Fixos',   '30000000-0000-0000-0000-000000000001', null,  70.00, '2026-08-01T01:00:00Z');
 
--- Parcela paga em julho (300) e parcela pendente (200), que não entra no caixa.
+-- Energia: parcela paga em julho (300) e parcela pendente (200), que não entra
+-- no caixa. NF de compra: parcela paga em julho (200) — a compra que sai do
+-- caixa quando a nota é quitada, e que não pode ser subtraída de novo.
 insert into contas_a_pagar_parcelas (empresa_id, conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento) values
   ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 1, 300.00, '2026-07-20', 'Pago', '2026-07-20'),
-  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 2, 200.00, '2026-08-20', 'Pendente', null);
+  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 2, 200.00, '2026-08-20', 'Pendente', null),
+  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000002', 1, 200.00, '2026-07-25', 'Pago', '2026-07-25');
 ```
 
 - [ ] **Step 2: Escrever os cenários de teste**
@@ -347,8 +401,9 @@ begin
   -- 500 (energia) + 70 (lançada 01/08 UTC = 31/07 em SP). A NF de compra (200) fica fora.
   if r.despesa_competencia <> 570.00 then
     raise exception 'despesa_competencia deveria ser 570, veio %', r.despesa_competencia; end if;
-  if r.despesa_caixa <> 300.00 then
-    raise exception 'despesa_caixa deveria ser 300 (só a parcela paga), veio %', r.despesa_caixa; end if;
+  -- 300 (parcela da energia) + 200 (parcela da NF de compra).
+  if r.despesa_caixa <> 500.00 then
+    raise exception 'despesa_caixa deveria ser 500 (as duas parcelas pagas), veio %', r.despesa_caixa; end if;
 end $$;
 
 \echo '# compras ignoram item rejeitado'
@@ -358,7 +413,7 @@ begin
   select * into r from vw_consolidado_mensal
    where empresa_id = '20000000-0000-0000-0000-00000000000a' and mes = '2026-07';
   if r.compras <> 200.00 then
-    raise exception 'compras deveria ser 200 (10 x 20, rejeitado fora), veio %', r.compras; end if;
+    raise exception 'compras deveria ser 200 (10 x 20; rejeitado e sem inspeção fora), veio %', r.compras; end if;
 end $$;
 
 \echo '# a permissão grupo foi concedida a quem tinha relatorios, e só a esses'
@@ -497,6 +552,10 @@ begin;
 -- Zero significa "não informado" — o cálculo cai no custo teórico da ficha.
 alter table produtos add column if not exists custo_unitario numeric(12,2) not null default 0;
 
+alter table produtos drop constraint if exists produtos_custo_unitario_check;
+alter table produtos add constraint produtos_custo_unitario_check
+  check (custo_unitario >= 0);
+
 comment on column produtos.custo_unitario is
   'Custo unitário informado no cadastro. Zero = não informado; vw_produto_custo cai na ficha técnica.';
 
@@ -581,7 +640,8 @@ compras_mp as (
     sum(ri.quantidade * ri.custo_unitario) as compras
   from recebimento_itens ri
   join recebimentos r on r.id = ri.recebimento_id and r.empresa_id = ri.empresa_id
-  where ri.status_recebimento in ('Aceito', 'Aceito com ressalva')
+  join inspecoes_qualidade iq on iq.recebimento_item_id = ri.id
+  where iq.status in ('aprovado', 'aprovado_com_ressalva')
   group by 1, 2
 ),
 base as (
@@ -744,7 +804,7 @@ test('consolidar calcula margem, lucro líquido e saldo de caixa', () => {
   })]);
   assert.equal(t.margemBrutaPct, 60);
   assert.equal(t.lucroLiquido, 400);
-  assert.equal(t.saldoCaixa, 500);
+  assert.equal(t.saldoCaixa, 750);  // 900 - 150; `compras` é competência e fica fora
 });
 
 test('consolidar sem linhas devolve zeros, não NaN', () => {
@@ -888,7 +948,7 @@ export function consolidar(linhas) {
     margemBrutaPct: div(lucroBruto, t.receitaCompetencia) * 100,
     lucroLiquido: lucroBruto - t.despesaCompetencia,
     ticketMedio: div(t.receitaCompetencia, t.pedidos),
-    saldoCaixa: t.receitaCaixa - t.despesaCaixa - t.compras,
+    saldoCaixa: t.receitaCaixa - t.despesaCaixa,
   };
 }
 
@@ -1193,7 +1253,8 @@ function Conteudo() {
   const ranking = porEmpresa(doMes, empresas);
   const serie = serie12(linhas, mes);
   const rotulo = new Date(`${mes}-02T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  const semMovimento = t.receitaCompetencia === 0 && t.despesaCompetencia === 0 && t.compras === 0;
+  const semMovimento = t.receitaCompetencia === 0 && t.despesaCompetencia === 0
+    && t.compras === 0 && t.receitaCaixa === 0 && t.despesaCaixa === 0;
 
   return (
     <>
@@ -1240,9 +1301,10 @@ function Conteudo() {
               <table>
                 <tbody>
                   <tr><td>Entradas (pedidos faturados/enviados)</td><td className="num">{fmtMoney(t.receitaCaixa)}</td></tr>
-                  <tr><td>Saídas (compras de matéria-prima)</td><td className="num">{fmtMoney(t.compras)}</td></tr>
-                  <tr><td>Saídas (parcelas pagas)</td><td className="num">{fmtMoney(t.despesaCaixa)}</td></tr>
+                  <tr><td>(–) Saídas (parcelas pagas)</td><td className="num">{fmtMoney(t.despesaCaixa)}</td></tr>
                   <tr><td><b>= Saldo</b></td><td className="num"><b>{fmtMoney(t.saldoCaixa)}</b></td></tr>
+                  {/* informativo, fora da conta: a compra sai do caixa como parcela paga */}
+                  <tr className="muted"><td>Compras recebidas no mês (competência)</td><td className="num">{fmtMoney(t.compras)}</td></tr>
                 </tbody>
               </table>
             </div>
