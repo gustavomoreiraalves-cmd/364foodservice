@@ -7,7 +7,7 @@ import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 
 const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '' };
-const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', preco_venda: '', validade_dias: 90, producao_interna: false };
+const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false };
 
 export default function ProdutosPage() {
   return (
@@ -77,6 +77,7 @@ function Conteudo() {
       nome: formProd.nome,
       categoria: formProd.categoria || null,
       unidade: formProd.unidade,
+      custo_unitario: Number(formProd.custo_unitario) || 0,
       preco_venda: Number(formProd.preco_venda),
       validade_dias: Number(formProd.validade_dias) || 90,
       producao_interna: !!formProd.producao_interna,
@@ -91,6 +92,14 @@ function Conteudo() {
     if (!confirm('Excluir este produto (e sua ficha técnica)?')) return;
     const { error } = await supabase.from('produtos').delete().eq('id', id);
     if (error) alert('Não foi possível excluir (pode haver produções ou pedidos vinculados): ' + error.message);
+    carregar();
+  }
+
+  async function salvarCusto(produtoId, valor) {
+    const { error } = await supabase.from('produtos')
+      .update({ custo_unitario: Number(valor) || 0 })
+      .eq('id', produtoId);
+    if (error) { alert('Erro ao salvar o custo: ' + error.message); return; }
     carregar();
   }
 
@@ -205,6 +214,11 @@ function Conteudo() {
               <option value="un">un</option><option value="kg">kg</option><option value="pct">pacote</option>
             </select>
           </div>
+          <div>
+            <label>Custo unitário (R$)</label>
+            <input type="number" step="0.01" placeholder="0,00" value={formProd.custo_unitario}
+                   onChange={e => setFormProd({ ...formProd, custo_unitario: e.target.value })} />
+          </div>
           <div><label>Preço de venda (R$)</label><input type="number" step="0.01" required value={formProd.preco_venda} onChange={e => setFormProd({ ...formProd, preco_venda: e.target.value })} /></div>
           <div><label>Validade do produto (dias)</label><input type="number" value={formProd.validade_dias} onChange={e => setFormProd({ ...formProd, validade_dias: e.target.value })} /></div>
           <div><label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -214,7 +228,7 @@ function Conteudo() {
           <div><button className="btn" type="submit">Adicionar produto</button></div>
         </form>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-          O código (0364-XXX) é gerado automaticamente. Depois de criar, defina a ficha técnica (matérias-primas usadas) na lista abaixo.
+          O código (0364-XXX) é gerado automaticamente. Depois de criar, defina a ficha técnica (matérias-primas usadas) na lista abaixo. Deixar o custo em branco faz o sistema usar o custo teórico da ficha técnica no cálculo de CMV.
         </p>
       </div>
 
@@ -222,7 +236,8 @@ function Conteudo() {
         <h3>Catálogo de produtos ({produtos.length})</h3>
         {produtos.length ? produtos.map(p => {
           const custoT = custoTeorico(p.id);
-          const margem = Number(p.preco_venda) ? ((Number(p.preco_venda) - custoT) / Number(p.preco_venda) * 100) : 0;
+          const custoEfetivo = Number(p.custo_unitario) > 0 ? Number(p.custo_unitario) : custoT;
+          const margem = Number(p.preco_venda) ? ((Number(p.preco_venda) - custoEfetivo) / Number(p.preco_venda) * 100) : 0;
           const itens = fichas.filter(f => f.produto_id === p.id);
           const item = itemFicha[p.id] || { materia_prima_id: mps[0]?.id || '', quantidade: '' };
           return (
@@ -234,8 +249,18 @@ function Conteudo() {
                 </div>
                 <div className="row-actions">
                   <span className="muted" style={{ fontSize: 11.5 }}>
-                    Custo teórico: {fmtMoney(custoT)} · Preço: {fmtMoney(p.preco_venda)} · Margem: {margem.toFixed(1)}%
+                    Custo: {fmtMoney(custoEfetivo)}
+                    {Number(p.custo_unitario) > 0
+                      ? <span className="tag ok" style={{ marginLeft: 6 }}>cadastrado</span>
+                      : custoT > 0
+                        ? <span className="tag warn" style={{ marginLeft: 6 }}>pela ficha</span>
+                        : <span className="tag bad" style={{ marginLeft: 6 }}>sem custo</span>}
+                    {' · '}Preço: {fmtMoney(p.preco_venda)} · Margem: {margem.toFixed(1)}%
                   </span>
+                  <button className="btn secondary small"
+                          onClick={() => salvarCusto(p.id, prompt(`Custo unitário de ${p.nome} (R$). Custo teórico da ficha: ${fmtMoney(custoT)}`, p.custo_unitario || custoT.toFixed(2)) ?? p.custo_unitario)}>
+                    Editar custo
+                  </button>
                   <button className="btn secondary small" onClick={() => toggleProducaoInterna(p)}>
                     {p.producao_interna ? 'Remover de produção interna' : 'Marcar como produção interna'}
                   </button>
