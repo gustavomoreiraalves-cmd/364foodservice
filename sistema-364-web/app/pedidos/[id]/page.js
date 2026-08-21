@@ -21,13 +21,16 @@ export default function PedidoPage() {
   );
 }
 
+const CABECALHO_VAZIO = { data: '', cliente_id: '', responsavel_id: '', observacoes: '' };
+
 function Conteudo({ setFicha }) {
   const { id } = useParams();
   const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
 
   const [pedido, setPedido] = useState(null);
-  const [cabecalho, setCabecalho] = useState({ data: '', cliente_id: '', responsavel_id: '', observacoes: '' });
+  const [cabecalho, setCabecalho] = useState(CABECALHO_VAZIO);
+  const [cabecalhoOriginal, setCabecalhoOriginal] = useState(CABECALHO_VAZIO);
   const [itensOriginais, setItensOriginais] = useState([]);
   const [itens, setItens] = useState([]);
   const [clientes, setClientes] = useState([]);
@@ -37,11 +40,13 @@ function Conteudo({ setFicha }) {
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+  const [erroCarregar, setErroCarregar] = useState('');
 
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
     setErro('');
+    setErroCarregar('');
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
       // O filtro por empresa_id é o que impede alcançar pedido de outra marca
@@ -54,6 +59,17 @@ function Conteudo({ setFicha }) {
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
     ]);
+
+    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS). Sem essa
+    // checagem a tela seguia com dado parcial e nada avisava o operador — o pior
+    // caso é abrir "normal" com saldo e produto errados por baixo.
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    if (falha) {
+      setErroCarregar(falha.error.message);
+      setLoading(false);
+      return;
+    }
+
     setClientes(r2.data || []);
     setProdutos(r3.data || []);
     setFuncionarios(r4.data || []);
@@ -62,12 +78,14 @@ function Conteudo({ setFicha }) {
     const p = r1.data;
     setPedido(p || null);
     if (p) {
-      setCabecalho({
+      const cab = {
         data: p.data,
         cliente_id: p.cliente_id || '',
         responsavel_id: p.responsavel_id || '',
         observacoes: p.observacoes || '',
-      });
+      };
+      setCabecalho(cab);
+      setCabecalhoOriginal(cab);
       const lista = (p.pedido_itens || []).map(i => ({
         id: i.id, produto_id: i.produto_id,
         quantidade: Number(i.quantidade), preco_unitario: Number(i.preco_unitario),
@@ -84,12 +102,38 @@ function Conteudo({ setFicha }) {
     return Number(estoqueProd.find(e => e.produto_id === pid)?.saldo || 0);
   }
 
+  // Cabeçalho ou itens diferentes do que veio do banco: usado para travar a
+  // troca de status pela lateral enquanto há edição não salva na tela — trocar
+  // o status sem isso descartava o trabalho em silêncio e ainda podia travar
+  // a reinserção dos itens (fn_pedido_bloquear_edicao fora de Pendente).
+  function temAlteracoesNaoSalvas() {
+    const { inserir, atualizar, remover } = diffItens(itensOriginais, itens);
+    if (inserir.length || atualizar.length || remover.length) return true;
+    return cabecalho.data !== cabecalhoOriginal.data
+      || cabecalho.cliente_id !== cabecalhoOriginal.cliente_id
+      || cabecalho.responsavel_id !== cabecalhoOriginal.responsavel_id
+      || cabecalho.observacoes !== cabecalhoOriginal.observacoes;
+  }
+
   async function salvar() {
     if (!itens.length) { alert('O pedido precisa de ao menos um item.'); return; }
     if (!cabecalho.cliente_id) { alert('Selecione o cliente.'); return; }
     setSalvando(true);
     setErro('');
     const eid = empresaAtual.id;
+
+    // As gravações abaixo não são uma transação: se outra pessoa faturou o
+    // pedido enquanto esta tela estava aberta, o update do cabeçalho pode ir
+    // e o dos itens ser recusado pelo trigger, relatando uma falha parcial
+    // como se fosse total. Conferimos o status atual antes de escrever nada.
+    const { data: atual, error: eStatus } = await supabase.from('pedidos')
+      .select('status').eq('id', id).eq('empresa_id', eid).maybeSingle();
+    if (eStatus || !atual || atual.status !== 'Pendente') {
+      setSalvando(false);
+      setErro('Este pedido foi alterado por outra pessoa e não está mais Pendente. A tela foi recarregada.');
+      await carregar();
+      return;
+    }
 
     const { error: eCab } = await supabase.from('pedidos').update({
       data: cabecalho.data,
@@ -102,13 +146,13 @@ function Conteudo({ setFicha }) {
     const { inserir, atualizar, remover } = diffItens(itensOriginais, itens);
 
     if (remover.length) {
-      const { error } = await supabase.from('pedido_itens').delete().in('id', remover);
+      const { error } = await supabase.from('pedido_itens').delete().in('id', remover).eq('empresa_id', eid);
       if (error) { setSalvando(false); setErro(error.message); carregar(); return; }
     }
     for (const it of atualizar) {
       const { error } = await supabase.from('pedido_itens')
         .update({ produto_id: it.produto_id, quantidade: it.quantidade, preco_unitario: it.preco_unitario })
-        .eq('id', it.id);
+        .eq('id', it.id).eq('empresa_id', eid);
       if (error) { setSalvando(false); setErro(error.message); carregar(); return; }
     }
     if (inserir.length) {
@@ -126,6 +170,9 @@ function Conteudo({ setFicha }) {
   }
 
   async function mudarStatus(status) {
+    // Segunda trava além do select desabilitado: se por algum motivo chegar
+    // aqui com edição pendente, não troca o status por baixo do operador.
+    if (temAlteracoesNaoSalvas()) return;
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) setErro(error.message);
     carregar();
@@ -160,6 +207,16 @@ function Conteudo({ setFicha }) {
   }
 
   if (loading) return <p className="muted">Carregando…</p>;
+
+  if (erroCarregar) {
+    return (
+      <div className="banner bad">
+        Não foi possível carregar o pedido: {erroCarregar}{' '}
+        <button className="btn secondary small" onClick={carregar}>Tentar novamente</button>
+      </div>
+    );
+  }
+
   if (!pedido) {
     return (
       <div className="banner info">
@@ -169,6 +226,7 @@ function Conteudo({ setFicha }) {
   }
 
   const editavel = podeEditar(pedido.status);
+  const alteracoesPendentes = editavel && temAlteracoesNaoSalvas();
 
   return (
     <>
@@ -180,7 +238,8 @@ function Conteudo({ setFicha }) {
           <div className="row-actions">
             <select style={{ width: 'auto' }} value={pedido.status}
               onChange={e => mudarStatus(e.target.value)}
-              disabled={pedido.status === 'Cancelado'}>
+              disabled={pedido.status === 'Cancelado' || alteracoesPendentes}
+              title={alteracoesPendentes ? 'Salve ou descarte as alterações antes de trocar o status.' : undefined}>
               {STATUS_PEDIDO.filter(s => s !== 'Cancelado').map(s => <option key={s}>{s}</option>)}
               {pedido.status === 'Cancelado' && <option>Cancelado</option>}
             </select>
@@ -188,6 +247,12 @@ function Conteudo({ setFicha }) {
             <button className="btn secondary small" onClick={() => router.push('/pedidos')}>Voltar</button>
           </div>
         </div>
+
+        {alteracoesPendentes && (
+          <div className="banner info">
+            Há alterações não salvas — salve ou recarregue a página antes de trocar o status.
+          </div>
+        )}
 
         {!editavel && (
           <div className="banner info">

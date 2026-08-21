@@ -80,7 +80,7 @@ function Conteudo() {
   }
 
   async function mudarStatus(id, status) {
-    const { error } = await supabase.from('pedidos').update({ status }).eq('id', id);
+    const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) alert('Erro ao atualizar status: ' + error.message);
     carregar();
   }
@@ -132,8 +132,11 @@ function Conteudo() {
                   <td>
                     <div className="row-actions">
                       {statusTag(p.status)}
-                      <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}>
-                        {STATUS_PEDIDO.map(s => <option key={s}>{s}</option>)}
+                      <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}
+                        disabled={p.status === 'Cancelado'}>
+                        {/* Cancelar exige motivo (check pedidos_cancelamento_motivo) — só na página do pedido. */}
+                        {STATUS_PEDIDO.filter(s => s !== 'Cancelado').map(s => <option key={s}>{s}</option>)}
+                        {p.status === 'Cancelado' && <option>Cancelado</option>}
                       </select>
                     </div>
                   </td>
