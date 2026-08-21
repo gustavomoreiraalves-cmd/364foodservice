@@ -75,6 +75,9 @@ create table recebimentos (
   fornecedor_id uuid references fornecedores(id)
 );
 
+-- Formato de produção: `status_recebimento` saiu daqui quando a condição
+-- sanitária migrou para `inspecoes_qualidade`; entraram `deposito_id` e
+-- `observacoes`. Ver docs/superpowers/specs/2026-08-20-controle-lote-rastreabilidade-design.md.
 create table recebimento_itens (
   id uuid primary key default gen_random_uuid(),
   empresa_id uuid not null references empresas(id),
@@ -83,7 +86,17 @@ create table recebimento_itens (
   lote text not null,
   quantidade numeric(12,4) not null,
   custo_unitario numeric(12,2) not null,
-  status_recebimento text not null default 'Aceito'
+  deposito_id uuid,
+  observacoes text
+);
+
+-- Só as colunas que a migração 21 realmente lê. O DDL de produção tem mais
+-- campos (temperatura_c, motivo_rejeicao, foto_url...), irrelevantes aqui.
+create table inspecoes_qualidade (
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid not null references empresas(id),
+  recebimento_item_id uuid not null references recebimento_itens(id),
+  status text not null default 'pendente'
 );
 
 create table contas_a_pagar (
@@ -121,6 +134,11 @@ alter table recebimentos enable row level security;
 alter table recebimento_itens enable row level security;
 alter table contas_a_pagar enable row level security;
 alter table contas_a_pagar_parcelas enable row level security;
+alter table inspecoes_qualidade enable row level security;
+-- vw_produto_custo lê materias_primas e ficha_tecnica pelo lateral: sem RLS
+-- nelas o custo da ficha de outra empresa vazaria pela view.
+alter table materias_primas enable row level security;
+alter table ficha_tecnica enable row level security;
 create policy empresa_scoped on pedidos for all
   using (empresa_id in (select public.empresas_permitidas()));
 create policy empresa_scoped on pedido_itens for all
@@ -134,6 +152,12 @@ create policy empresa_scoped on recebimento_itens for all
 create policy empresa_scoped on contas_a_pagar for all
   using (empresa_id in (select public.empresas_permitidas()));
 create policy empresa_scoped on contas_a_pagar_parcelas for all
+  using (empresa_id in (select public.empresas_permitidas()));
+create policy empresa_scoped on inspecoes_qualidade for all
+  using (empresa_id in (select public.empresas_permitidas()));
+create policy empresa_scoped on materias_primas for all
+  using (empresa_id in (select public.empresas_permitidas()));
+create policy empresa_scoped on ficha_tecnica for all
   using (empresa_id in (select public.empresas_permitidas()));
 
 grant usage on schema public to authenticated;
@@ -192,12 +216,24 @@ insert into pedidos (id, empresa_id, data, status) values
 insert into pedido_itens (empresa_id, pedido_id, produto_id, quantidade, preco_unitario) values
   ('20000000-0000-0000-0000-00000000000b', '70000000-0000-0000-0000-00000000000b', '50000000-0000-0000-0000-00000000000b', 1, 200.00);
 
--- Recebimento: um item aceito (200) e um rejeitado (999), que não pode entrar em compras.
+-- Recebimento com três itens:
+--   I1 aprovado    (10 x 20  =   200) — entra em compras;
+--   I2 rejeitado   ( 1 x 999 =   999) — inspeção reprovada, fica fora;
+--   I3 SEM inspeção( 5 x 50  =   250) — nunca gerou movimento de estoque, fica
+--                                       fora. É o caso que o `join` (e não
+--                                       `left join`) da migração 21 existe para
+--                                       cobrir.
 insert into recebimentos (id, empresa_id, lote, data, fornecedor_id) values
   ('80000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000a', 'LT-260705-001', '2026-07-05', '30000000-0000-0000-0000-000000000001');
-insert into recebimento_itens (empresa_id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, status_recebimento) values
-  ('20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-001', 10, 20.00, 'Aceito'),
-  ('20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-002',  1, 999.00, 'Rejeitado');
+insert into recebimento_itens (id, empresa_id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario) values
+  ('81000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-001', 10,  20.00),
+  ('81000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-002',  1, 999.00),
+  ('81000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-00000000000a', '80000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'LT-260705-003',  5,  50.00);
+
+insert into inspecoes_qualidade (empresa_id, recebimento_item_id, status) values
+  ('20000000-0000-0000-0000-00000000000a', '81000000-0000-0000-0000-000000000001', 'aprovado'),
+  ('20000000-0000-0000-0000-00000000000a', '81000000-0000-0000-0000-000000000002', 'rejeitado');
+-- I3 de propósito sem linha em inspecoes_qualidade.
 
 -- Despesa avulsa de julho (500) + conta ligada ao recebimento (200), que NÃO é despesa.
 insert into contas_a_pagar (id, empresa_id, descricao, categoria_conta, fornecedor_id, recebimento_id, valor_total, created_at) values
@@ -206,7 +242,14 @@ insert into contas_a_pagar (id, empresa_id, descricao, categoria_conta, forneced
   -- lançada 01/08 às 01h UTC = 31/07 às 22h em São Paulo: tem que cair em 2026-07.
   ('90000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-00000000000a', 'Virada',   'Custos Fixos',   '30000000-0000-0000-0000-000000000001', null,  70.00, '2026-08-01T01:00:00Z');
 
--- Parcela paga em julho (300) e parcela pendente (200), que não entra no caixa.
+-- Energia: parcela paga em julho (300) e parcela pendente (200), que não entra
+-- no caixa.
+--
+-- NF de compra: parcela paga em julho (200). É o caso que o `saldoCaixa` errava
+-- — a mesma compra saía do caixa como parcela paga E era subtraída de novo como
+-- `compras`. Aqui ela tem que aparecer em despesa_caixa e continuar FORA de
+-- despesa_competencia.
 insert into contas_a_pagar_parcelas (empresa_id, conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento) values
   ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 1, 300.00, '2026-07-20', 'Pago', '2026-07-20'),
-  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 2, 200.00, '2026-08-20', 'Pendente', null);
+  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000001', 2, 200.00, '2026-08-20', 'Pendente', null),
+  ('20000000-0000-0000-0000-00000000000a', '90000000-0000-0000-0000-000000000002', 1, 200.00, '2026-07-25', 'Pago', '2026-07-25');

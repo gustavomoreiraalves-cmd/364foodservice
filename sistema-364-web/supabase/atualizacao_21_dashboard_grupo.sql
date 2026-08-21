@@ -11,12 +11,31 @@
 -- =========================================================
 begin;
 
+-- ---------- PRÉ-REQUISITO ----------
+-- vw_consolidado_mensal descobre quais recebimentos entraram de fato pelo
+-- status da inspeção sanitária. Se a tabela não existir neste banco, é melhor
+-- parar aqui com uma mensagem clara do que criar uma view que conta compras
+-- erradas — o repositório não versiona o DDL de inspecoes_qualidade e não pode
+-- inventá-lo.
+do $$ begin
+  if to_regclass('public.inspecoes_qualidade') is null then
+    raise exception 'inspecoes_qualidade não existe neste banco. A 21 depende dela para saber quais recebimentos foram aprovados. Confirme o schema antes de rodar.';
+  end if;
+end $$;
+
 -- ---------- CUSTO CADASTRADO NO PRODUTO ----------
 -- Zero significa "não informado" — o cálculo cai no custo teórico da ficha.
 alter table produtos add column if not exists custo_unitario numeric(12,2) not null default 0;
 
 comment on column produtos.custo_unitario is
   'Custo unitário informado no cadastro. Zero = não informado; vw_produto_custo cai na ficha técnica.';
+
+-- Custo negativo passaria despercebido: todo leitor testa `> 0` e cairia na
+-- ficha técnica, relatando um custo que o produto não tem. O banco é o
+-- backstop das validações da tela.
+alter table produtos drop constraint if exists produtos_custo_unitario_check;
+alter table produtos add constraint produtos_custo_unitario_check
+  check (custo_unitario >= 0);
 
 -- ---------- CUSTO EFETIVO POR PRODUTO ----------
 drop view if exists vw_consolidado_mensal;
@@ -44,6 +63,10 @@ left join lateral (
 -- Uma linha por (empresa, mês). As fontes entram por union all e só depois
 -- são somadas: juntá-las por join multiplicaria as linhas de venda pelas de
 -- despesa e inflaria todo número da tela.
+--
+-- O status sanitário do item mora em `inspecoes_qualidade.status` (minúsculo:
+-- 'aprovado', 'aprovado_com_ressalva', ...) — `recebimento_itens.status_recebimento`
+-- não existe mais em produção. Ver lib/qualidade.js.
 --
 -- pedidos.data, recebimentos.data e parcelas.data_pagamento são `date` — o mês
 -- sai direto. contas_a_pagar.created_at é `timestamptz` em UTC, e uma conta
@@ -99,7 +122,10 @@ compras_mp as (
     sum(ri.quantidade * ri.custo_unitario) as compras
   from recebimento_itens ri
   join recebimentos r on r.id = ri.recebimento_id and r.empresa_id = ri.empresa_id
-  where ri.status_recebimento in ('Aceito', 'Aceito com ressalva')
+  -- join (e não left join) de propósito: item sem inspeção não gerou movimento
+  -- de estoque, logo não é compra. Mesmo critério de lib/qualidade.js.
+  join inspecoes_qualidade iq on iq.recebimento_item_id = ri.id
+  where iq.status in ('aprovado', 'aprovado_com_ressalva')
   group by 1, 2
 ),
 base as (

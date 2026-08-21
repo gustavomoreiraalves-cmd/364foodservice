@@ -75,18 +75,76 @@ begin
   -- 500 (energia) + 70 (lançada 01/08 UTC = 31/07 em SP). A NF de compra (200) fica fora.
   if r.despesa_competencia <> 570.00 then
     raise exception 'despesa_competencia deveria ser 570, veio %', r.despesa_competencia; end if;
-  if r.despesa_caixa <> 300.00 then
-    raise exception 'despesa_caixa deveria ser 300 (só a parcela paga), veio %', r.despesa_caixa; end if;
+  -- caixa: 300 (parcela da energia) + 200 (parcela da NF de compra). A parcela
+  -- pendente de 200 fica fora.
+  if r.despesa_caixa <> 500.00 then
+    raise exception 'despesa_caixa deveria ser 500 (as duas parcelas pagas), veio %', r.despesa_caixa; end if;
 end $$;
 
-\echo '# compras ignoram item rejeitado'
+\echo '# parcela paga de conta ligada a recebimento entra no caixa e fica fora da competência'
 do $$
-declare r record;
+declare pago numeric; competencia numeric;
+begin
+  -- A NF de compra é ao mesmo tempo `compras` (competência, na data do
+  -- recebimento) e saída de caixa (na data do pagamento da parcela). São bases
+  -- diferentes: subtrair as duas do mesmo saldo contaria a compra duas vezes.
+  select sum(pa.valor) into pago
+    from contas_a_pagar_parcelas pa
+    join contas_a_pagar cp on cp.id = pa.conta_a_pagar_id
+   where cp.recebimento_id is not null and pa.status = 'Pago'
+     and to_char(pa.data_pagamento, 'YYYY-MM') = '2026-07';
+  if coalesce(pago, 0) <> 200.00 then
+    raise exception 'o fixture deveria ter 200 de parcela paga ligada a recebimento, tem %', pago; end if;
+
+  select sum(cp.valor_total) into competencia
+    from contas_a_pagar cp
+   where cp.recebimento_id is not null
+     and to_char(cp.created_at at time zone 'America/Sao_Paulo', 'YYYY-MM') = '2026-07';
+  if coalesce(competencia, 0) <> 200.00 then
+    raise exception 'o fixture deveria ter 200 de conta ligada a recebimento em julho, tem %', competencia; end if;
+
+  -- despesa_caixa (500) inclui os 200; despesa_competencia (570) não.
+  select despesa_caixa into pago from vw_consolidado_mensal
+   where empresa_id = '20000000-0000-0000-0000-00000000000a' and mes = '2026-07';
+  if pago <> 500.00 then
+    raise exception 'despesa_caixa deveria incluir a parcela da NF de compra, veio %', pago; end if;
+
+  select despesa_competencia into competencia from vw_consolidado_mensal
+   where empresa_id = '20000000-0000-0000-0000-00000000000a' and mes = '2026-07';
+  if competencia <> 570.00 then
+    raise exception 'despesa_competencia deveria excluir a NF de compra, veio %', competencia; end if;
+end $$;
+
+\echo '# compras ignoram item rejeitado e item sem inspeção'
+do $$
+declare r record; n int;
 begin
   select * into r from vw_consolidado_mensal
    where empresa_id = '20000000-0000-0000-0000-00000000000a' and mes = '2026-07';
+  -- I1 aprovado (10 x 20 = 200) entra. I2 rejeitado (999) e I3 sem inspeção
+  -- (5 x 50 = 250) ficam fora.
   if r.compras <> 200.00 then
-    raise exception 'compras deveria ser 200 (10 x 20, rejeitado fora), veio %', r.compras; end if;
+    raise exception 'compras deveria ser 200 (10 x 20; rejeitado e sem inspeção fora), veio %', r.compras; end if;
+
+  -- Guarda contra o fixture silenciosamente deixar de exercitar o caso: I3 tem
+  -- que continuar existindo e continuar sem inspeção.
+  select count(*) into n from recebimento_itens ri
+   where ri.id = '81000000-0000-0000-0000-000000000003'
+     and not exists (select 1 from inspecoes_qualidade iq where iq.recebimento_item_id = ri.id);
+  if n <> 1 then
+    raise exception 'o item sem inspeção sumiu do fixture — o cenário do join deixou de provar algo'; end if;
+end $$;
+
+\echo '# o banco recusa custo unitário negativo'
+do $$
+begin
+  begin
+    update produtos set custo_unitario = -1
+     where id = '50000000-0000-0000-0000-000000000003';
+    raise exception 'o banco aceitou custo_unitario negativo — o check não está valendo';
+  exception when check_violation then
+    null;  -- esperado
+  end;
 end $$;
 
 \echo '# a permissão grupo foi concedida a quem tinha relatorios, e só a esses'
