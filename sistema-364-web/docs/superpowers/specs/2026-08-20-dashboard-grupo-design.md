@@ -130,10 +130,11 @@ Três detalhes que mudam o número se forem ignorados:
    recebimento já são contabilizadas na coluna `compras`. Sem esse filtro a
    compra de matéria-prima entra duas vezes. `app/relatorios/page.js` já aplica
    o mesmo filtro.
-2. **Fuso horário.** `created_at` e `data_pagamento` são `timestamptz` gravados
-   em UTC. Uma conta lançada às 21h do dia 31 cai no mês seguinte se o mês for
-   extraído direto. Todo agrupamento usa
-   `to_char(coluna at time zone 'America/Sao_Paulo', 'YYYY-MM')`.
+2. **Fuso horário.** `pedidos.data`, `recebimentos.data` e
+   `contas_a_pagar_parcelas.data_pagamento` são do tipo `date` — o mês sai
+   direto. Já `contas_a_pagar.created_at` é `timestamptz` gravado em UTC, e uma
+   conta lançada às 21h do dia 31 cairia no mês seguinte. Só essa coluna
+   converte com `at time zone 'America/Sao_Paulo'`.
 3. **`security_invoker = true` nas duas views.** Sem isso a view roda com o dono
    (`postgres`) e devolve linhas de empresas às quais o usuário não tem acesso,
    furando a RLS. É o padrão já adotado em `atualizacao_07_views_empresa.sql`.
