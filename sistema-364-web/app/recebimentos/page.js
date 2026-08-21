@@ -5,9 +5,11 @@ import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes } from '../../lib/for
 import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebimento } from '../../lib/storage';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
+import ImportarNota from '../../components/ImportarNota';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { CATEGORIAS_CONTA, gerarParcelas } from '../../lib/financeiro';
+import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
+import { parcelasDoRecebimento } from '../../lib/nfe/parcelas';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -59,6 +61,8 @@ function Conteudo({ setFicha }) {
   const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
   const proximaKey = useRef(0);
+  const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
+  const [itensPendentes, setItensPendentes] = useState([]); // itens da nota sem de-para
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -107,6 +111,61 @@ function Conteudo({ setFicha }) {
   const validadeAbaixoDoMinimo = diasValidade != null && diasValidade < mpSelecionada.dias_minimos_validade;
   const exigeMotivo = ['rejeitado', 'quarentena'].includes(itemForm.status_qualidade);
 
+  // Recebe o corpo de /preparar: preenche o cabeçalho, joga os itens já mapeados
+  // direto no staging e deixa os não mapeados numa fila de casamento.
+  function aplicarNotaImportada(dados) {
+    setNotaImportada(dados);
+    setHeader(h => ({
+      ...h,
+      data: (dados.nota.emitidaEm || '').slice(0, 10) || h.data,
+      nota_fiscal: dados.nota.numero || h.nota_fiscal,
+      fornecedor_id: dados.fornecedor?.id || '',
+    }));
+
+    const mapeados = dados.itens.filter(i => i.mapeado);
+    const pendentes = dados.itens.filter(i => !i.mapeado);
+    setItensPendentes(pendentes.map(i => ({ ...i, materiaPrimaId: '', fatorConversao: 1 })));
+    mapeados.forEach(empilharItemDaNota);
+
+    if (!dados.fornecedor && dados.fornecedorSugerido) {
+      alert(`Fornecedor ${dados.fornecedorSugerido.nome} (CNPJ ${dados.fornecedorSugerido.cnpj}) `
+        + 'ainda não está cadastrado. Cadastre em Fornecedores e importe a nota de novo.');
+    }
+  }
+
+  // Um item da nota vira uma linha do staging. O peso conferido fica VAZIO de
+  // propósito: quem preenche é a balança, e a divergência com a nota tem que aparecer.
+  function empilharItemDaNota(item) {
+    const mp = mps.find(m => m.id === item.materiaPrimaId);
+    if (!mp) return;
+    proximaKey.current += 1;
+    setItens(anteriores => [...anteriores, {
+      ...ITEM_VAZIO(),
+      materia_prima_id: item.materiaPrimaId,
+      quantidade: '',
+      peso_nota_kg: String(item.pesoNotaKg),
+      custo_unitario: String(item.custoUnitario),
+      _key: proximaKey.current,
+      _mp: mp,
+      _nfe: { codigo: item.codigo, descricao: item.descricao, unidadeNota: item.unidadeNota, fatorConversao: item.fatorConversao },
+    }]);
+  }
+
+  // Casa um item pendente com a matéria-prima escolhida e o manda para o staging.
+  function confirmarItemPendente(indice) {
+    const item = itensPendentes.find(i => i.indice === indice);
+    if (!item?.materiaPrimaId) { alert('Escolha a matéria-prima deste item.'); return; }
+    const fator = Number(item.fatorConversao) > 0 ? Number(item.fatorConversao) : 1;
+    const pesoNotaKg = Math.round(item.quantidadeNota * fator * 10000) / 10000;
+    empilharItemDaNota({
+      ...item,
+      fatorConversao: fator,
+      pesoNotaKg,
+      custoUnitario: pesoNotaKg > 0 ? Math.round((item.valorTotalItem / pesoNotaKg) * 100) / 100 : 0,
+    });
+    setItensPendentes(lista => lista.filter(i => i.indice !== indice));
+  }
+
   function adicionarItem(e) {
     e.preventDefault();
     if (!mpSelecionada) { alert('Selecione a matéria-prima.'); return; }
@@ -139,6 +198,8 @@ function Conteudo({ setFicha }) {
         nota_fiscal: header.nota_fiscal || null,
         responsavel_id: header.responsavel_id || null,
         empresa_id: empresaAtual.id,
+        nfe_chave: notaImportada?.nota.chave || null,
+        nfe_documento_id: notaImportada?.documento.id || null,
       }]).select('id').single();
 
       if (errCabecalho) { alert('Erro ao salvar: ' + errCabecalho.message); return; }
@@ -248,7 +309,18 @@ function Conteudo({ setFicha }) {
           alert('Recebimento registrado, mas houve erro ao gerar a conta a pagar: ' + e3.message);
         } else {
           const numeroParcelas = header.condicao_pagamento === 'Parcelado' ? Number(header.numero_parcelas) : 1;
-          const parcelas = gerarParcelas(header.data, totalAceito, numeroParcelas, Number(header.intervalo_dias));
+          const { origem, parcelas } = parcelasDoRecebimento({
+            duplicatas: notaImportada?.duplicatas || [],
+            dataBase: header.data,
+            valorLancado: totalAceito,
+            valorTotalNota: notaImportada?.nota.valorTotal ?? totalAceito,
+            numeroParcelas,
+            intervaloDias: Number(header.intervalo_dias),
+          });
+          if (origem === 'manual_divergencia') {
+            alert('O valor aceito ficou diferente do total da nota (item rejeitado?), '
+              + 'então as parcelas seguiram a condição informada, e não os vencimentos da nota.');
+          }
           const { error: e4 } = await supabase.from('contas_a_pagar_parcelas').insert(
             parcelas.map(p => ({ conta_a_pagar_id: conta.id, numero: p.numero, valor: p.valor, vencimento: p.vencimento, empresa_id: empresaAtual.id }))
           );
@@ -259,8 +331,31 @@ function Conteudo({ setFicha }) {
         }
       }
 
+      if (notaImportada) {
+        const aprender = itens
+          .filter(it => it._nfe)
+          .map(it => ({
+            empresa_id: empresaAtual.id,
+            cnpj_emitente: notaImportada.nota.emitente.cnpj,
+            codigo_produto: it._nfe.codigo,
+            materia_prima_id: it.materia_prima_id,
+            unidade_nf: it._nfe.unidadeNota,
+            fator_conversao: it._nfe.fatorConversao,
+          }));
+        if (aprender.length) {
+          const { error: errMapa } = await supabase.from('fornecedor_produto_mapa')
+            .upsert(aprender, { onConflict: 'empresa_id,cnpj_emitente,codigo_produto' });
+          if (errMapa) alert('Recebimento salvo, mas o de-para não foi gravado: ' + errMapa.message);
+        }
+        await supabase.from('nfe_documentos')
+          .update({ status: 'vinculada', recebimento_id: cabecalho.id })
+          .eq('id', notaImportada.documento.id);
+      }
+
       setHeader(HEADER_VAZIO());
       setItens([]);
+      setNotaImportada(null);
+      setItensPendentes([]);
       carregar();
     } finally {
       setSalvando(false);
@@ -342,6 +437,48 @@ function Conteudo({ setFicha }) {
     <>
       <div className="panel">
         <h3>Novo recebimento de mercadoria</h3>
+
+        <ImportarNota empresaId={empresaAtual?.id} onImportado={aplicarNotaImportada} />
+
+        {notaImportada && (
+          <p className="muted">
+            Nota {notaImportada.nota.numero} de {notaImportada.nota.emitente.nome} — total{' '}
+            {fmtMoney(notaImportada.nota.valorTotal)}
+            {notaImportada.duplicatas.length > 0
+              && ` · ${notaImportada.duplicatas.length} parcela(s) na nota`}
+          </p>
+        )}
+
+        {itensPendentes.length > 0 && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <strong>Itens da nota sem matéria-prima ({itensPendentes.length})</strong>
+            <p className="muted">
+              Case cada item uma vez; nas próximas notas deste fornecedor ele já vem preenchido.
+            </p>
+            {itensPendentes.map(item => (
+              <div key={item.indice} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{ minWidth: 260 }}>
+                  {item.codigo} — {item.descricao} ({item.quantidadeNota} {item.unidadeNota})
+                </span>
+                <select value={item.materiaPrimaId}
+                  onChange={e => setItensPendentes(lista => lista.map(i =>
+                    i.indice === item.indice ? { ...i, materiaPrimaId: e.target.value } : i))}>
+                  <option value="">Matéria-prima…</option>
+                  {mps.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                </select>
+                <label>
+                  {item.unidadeNota} → kg
+                  <input type="number" step="0.0001" min="0.0001" style={{ width: 90, marginLeft: 6 }}
+                    value={item.fatorConversao}
+                    onChange={e => setItensPendentes(lista => lista.map(i =>
+                      i.indice === item.indice ? { ...i, fatorConversao: e.target.value } : i))} />
+                </label>
+                <button type="button" onClick={() => confirmarItemPendente(item.indice)}>Casar item</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <form className="form-grid">
           <div><label>Data</label><input type="date" required value={header.data} onChange={e => setHeader({ ...header, data: e.target.value })} /></div>
           <div><label>Fornecedor</label>
