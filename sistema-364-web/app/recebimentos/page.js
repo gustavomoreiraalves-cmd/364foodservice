@@ -127,7 +127,9 @@ function Conteudo({ setFicha }) {
       ...h,
       data: (dados.nota.emitidaEm || '').slice(0, 10) || h.data,
       nota_fiscal: dados.nota.numero || h.nota_fiscal,
-      fornecedor_id: dados.fornecedor?.id || '',
+      // Nota sem fornecedor casado não apaga o fornecedor que o operador já tinha
+      // escolhido — e fornecedor_id vazio viraria uuid inválido no contas a pagar.
+      fornecedor_id: dados.fornecedor?.id || h.fornecedor_id,
     }));
 
     setItensDaNota(dados.itens.map(i => ({
@@ -137,8 +139,9 @@ function Conteudo({ setFicha }) {
     })));
 
     if (!dados.fornecedor && dados.fornecedorSugerido) {
-      alert(`Fornecedor ${dados.fornecedorSugerido.nome} (CNPJ ${dados.fornecedorSugerido.cnpj}) `
-        + 'ainda não está cadastrado. Cadastre em Fornecedores e importe a nota de novo.');
+      alert(`Não encontrei nenhum fornecedor com o CNPJ ${dados.fornecedorSugerido.cnpj} `
+        + `(${dados.fornecedorSugerido.nome}). Selecione o fornecedor no campo abaixo — `
+        + 'se ele ainda não estiver cadastrado, cadastre em Fornecedores.');
     }
   }
 
@@ -330,7 +333,7 @@ function Conteudo({ setFicha }) {
         const { data: conta, error: e3 } = await supabase.from('contas_a_pagar').insert([{
           descricao: `Nota ${header.nota_fiscal || cabecalho.id.slice(0, 8)} — ${nomeFornecedor}`,
           categoria_conta: header.categoria_conta_pagar,
-          fornecedor_id: header.fornecedor_id,
+          fornecedor_id: header.fornecedor_id || null,
           recebimento_id: cabecalho.id,
           valor_total: totalAceito,
           responsavel_id: header.responsavel_id || null,
