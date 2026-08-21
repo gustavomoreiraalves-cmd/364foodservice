@@ -119,7 +119,8 @@ function Conteudo({ setFicha }) {
   // matéria-prima é pulada.
   function aplicarNotaImportada(dados) {
     if (notaImportada) {
-      alert('Já existe uma nota importada em andamento. Registre ou limpe o recebimento atual antes de importar outra.');
+      alert('Já existe uma nota importada em andamento. Registre este recebimento ou use '
+        + '"Descartar nota importada" antes de importar outra.');
       return;
     }
     setNotaImportada(dados);
@@ -143,6 +144,62 @@ function Conteudo({ setFicha }) {
         + `(${dados.fornecedorSugerido.nome}). Selecione o fornecedor no campo abaixo — `
         + 'se ele ainda não estiver cadastrado, cadastre em Fornecedores.');
     }
+  }
+
+  // A fila de conferência e o formulário guardam a mesma linha da nota em formatos
+  // diferentes. Estes dois ajudantes fazem a linha voltar para a fila — no cancelamento
+  // da conferência e na remoção de um item já montado — sem reimportar o XML.
+  function filaDoNfe(nfe, materiaPrimaId) {
+    return {
+      indice: nfe.indice,
+      codigo: nfe.codigo,
+      descricao: nfe.descricao,
+      unidadeNota: nfe.unidadeNota,
+      quantidadeNota: nfe.quantidadeNota,
+      valorTotalItem: nfe.valorTotalItem,
+      fatorConversao: nfe.fatorConversao,
+      materiaPrimaId: materiaPrimaId || '',
+    };
+  }
+
+  function devolverAFila(item) {
+    setItensDaNota(lista => (lista.some(i => i.indice === item.indice)
+      ? lista
+      : [...lista, item].sort((a, b) => a.indice - b.indice)));
+  }
+
+  // Sem isto a conferência só terminava adicionando o item: abandonar uma linha
+  // deixava `itemDaNotaEmConferencia` pendurado e o próximo item adicionado herdava
+  // o _nfe da linha abandonada, gravando o de-para do código A na matéria-prima B.
+  function cancelarConferencia() {
+    if (!itemDaNotaEmConferencia) return;
+    devolverAFila(filaDoNfe(itemDaNotaEmConferencia, itemForm.materia_prima_id));
+    setItemDaNotaEmConferencia(null);
+    setItemForm(ITEM_VAZIO());
+  }
+
+  function descartarNotaImportada() {
+    if (!confirm('Descartar a nota importada? Os itens que vieram dela saem do recebimento; '
+      + 'os que você digitou à mão continuam.')) return;
+    setNotaImportada(null);
+    setItensDaNota([]);
+    setItemDaNotaEmConferencia(null);
+    setItens(lista => lista.filter(i => !i._nfe));
+    if (itemDaNotaEmConferencia) setItemForm(ITEM_VAZIO());
+  }
+
+  // Trocar a matéria-prima limpa o resto do formulário. Com uma linha da nota em
+  // conferência, o peso e o custo que vieram dela continuam valendo: trocar a
+  // matéria-prima aqui é justamente corrigir o de-para (mesmo código do fornecedor,
+  // outra matéria-prima), e não começar um item do zero.
+  function trocarMateriaPrima(materiaPrimaId) {
+    setItemForm(f => ({
+      ...ITEM_VAZIO(),
+      materia_prima_id: materiaPrimaId,
+      ...(itemDaNotaEmConferencia
+        ? { peso_nota_kg: f.peso_nota_kg, custo_unitario: f.custo_unitario }
+        : {}),
+    }));
   }
 
   // Carrega um item da nota no formulário de item existente, com o custo e o peso
@@ -178,8 +235,11 @@ function Conteudo({ setFicha }) {
       peso_nota_kg: String(pesoNotaKg),
       custo_unitario: String(custoUnitario),
     });
+    // quantidadeNota e valorTotalItem viajam junto para a linha poder voltar à fila
+    // depois, sem depender de a nota ainda estar carregada.
     setItemDaNotaEmConferencia({
       indice, codigo: item.codigo, descricao: item.descricao, unidadeNota: item.unidadeNota,
+      quantidadeNota: item.quantidadeNota, valorTotalItem: item.valorTotalItem,
       fatorConversao: fator, cnpjEmitente: notaImportada.nota.emitente.cnpj,
     });
   }
@@ -207,8 +267,13 @@ function Conteudo({ setFicha }) {
     }
   }
 
+  // Item que veio da nota volta para a fila de conferência em vez de sumir — assim
+  // uma linha removida por engano pode ser conferida de novo sem recarregar a página,
+  // e o aviso de "itens não conferidos" volta a contá-la.
   function removerItemStaged(key) {
+    const alvo = itens.find(i => i._key === key);
     setItens(itens.filter(i => i._key !== key));
+    if (alvo?._nfe) devolverAFila(filaDoNfe(alvo._nfe, alvo.materia_prima_id));
   }
 
   async function registrar(e) {
@@ -479,17 +544,22 @@ function Conteudo({ setFicha }) {
         <ImportarNota empresaId={empresaAtual?.id} onImportado={aplicarNotaImportada} />
 
         {notaImportada && (
-          <p className="muted">
-            Nota {notaImportada.nota.numero} de {notaImportada.nota.emitente.nome} — total{' '}
-            {fmtMoney(notaImportada.nota.valorTotal)}
-            {notaImportada.duplicatas.length > 0
-              && ` · ${notaImportada.duplicatas.length} parcela(s) na nota`}
+          <p className="muted" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              Nota {notaImportada.nota.numero} de {notaImportada.nota.emitente.nome} — total{' '}
+              {fmtMoney(notaImportada.nota.valorTotal)}
+              {notaImportada.duplicatas.length > 0
+                && ` · ${notaImportada.duplicatas.length} parcela(s) na nota`}
+            </span>
+            <button className="btn secondary small" type="button" onClick={descartarNotaImportada}>
+              Descartar nota importada
+            </button>
           </p>
         )}
 
         {itensDaNota.length > 0 && (
           <div className="card" style={{ marginBottom: 16 }}>
-            <strong>Itens da nota ({itensDaNota.length})</strong>
+            <strong>Itens da nota a conferir ({itensDaNota.length})</strong>
             <p className="muted">
               Confira cada item uma vez; nas próximas notas deste fornecedor o de-para já vem preenchido.
             </p>
@@ -512,6 +582,8 @@ function Conteudo({ setFicha }) {
                       i.indice === item.indice ? { ...i, fatorConversao: e.target.value } : i))} />
                 </label>
                 <button type="button" onClick={() => carregarItemDaNota(item.indice)}>Conferir item</button>
+                {itemDaNotaEmConferencia?.indice === item.indice
+                  && <span className="tag warn">Em conferência abaixo</span>}
               </div>
             ))}
           </div>
@@ -558,10 +630,23 @@ function Conteudo({ setFicha }) {
           </div>
         </form>
 
-        <h4 style={{ marginTop: 18 }}>Itens da nota</h4>
+        <h4 style={{ marginTop: 18 }}>Item do recebimento</h4>
+
+        {itemDaNotaEmConferencia && (
+          <div className="banner info" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            <span>
+              Conferindo o item <b>{itemDaNotaEmConferencia.codigo}</b> — {itemDaNotaEmConferencia.descricao}
+              {' '}({itemDaNotaEmConferencia.quantidadeNota} {itemDaNotaEmConferencia.unidadeNota}) da nota importada.
+            </span>
+            <button className="btn secondary small" type="button" onClick={cancelarConferencia}>
+              Cancelar conferência
+            </button>
+          </div>
+        )}
+
         <div className="form-grid">
           <div><label>Matéria-prima</label>
-            <select value={itemForm.materia_prima_id} onChange={e => setItemForm({ ...ITEM_VAZIO(), materia_prima_id: e.target.value })}>
+            <select value={itemForm.materia_prima_id} onChange={e => trocarMateriaPrima(e.target.value)}>
               <option value="">Selecione…</option>
               {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
             </select>
