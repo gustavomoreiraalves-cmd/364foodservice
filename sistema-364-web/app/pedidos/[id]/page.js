@@ -67,7 +67,7 @@ function Conteudo({ setFicha }) {
       supabase.from('pedidos')
         .select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), cancelado_por:funcionarios!pedidos_cancelado_por_id_fkey(nome), reaberto_por:funcionarios!pedidos_reaberto_por_id_fkey(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
-      supabase.from('clientes').select('id, nome, ativo').eq('empresa_id', eid).order('nome'),
+      supabase.from('clientes').select('*').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),

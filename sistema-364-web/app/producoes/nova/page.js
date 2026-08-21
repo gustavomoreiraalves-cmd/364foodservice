@@ -55,7 +55,7 @@ function Conteudo({ setEtiqueta }) {
       if (!empresaAtual) return;
       const eid = empresaAtual.id;
       const [r1, r2, r3, r4] = await Promise.all([
-        supabase.from('produtos').select('id, codigo, nome, unidade, modelo_etiqueta, ativo').eq('empresa_id', eid).eq('producao_interna', true).order('nome'),
+        supabase.from('produtos').select('*').eq('empresa_id', eid).eq('producao_interna', true).order('nome'),
         supabase.from('unidades').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
         supabase.from('produto_regras_validade').select('*').eq('empresa_id', eid).eq('ativo', true),
         supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),

@@ -237,7 +237,7 @@ function Conteudo() {
           const custoEfetivo = Number(p.custo_unitario) > 0 ? Number(p.custo_unitario) : custoT;
           const margem = Number(p.preco_venda) ? ((Number(p.preco_venda) - custoEfetivo) / Number(p.preco_venda) * 100) : 0;
           const itens = fichas.filter(f => f.produto_id === p.id);
-          const item = itemFicha[p.id] || { materia_prima_id: mps[0]?.id || '', quantidade: '' };
+          const item = itemFicha[p.id] || { materia_prima_id: mps.find(m => m.ativo !== false)?.id || '', quantidade: '' };
           return (
             <div className="items-list" style={{ marginBottom: 12, ...(p.ativo === false ? { opacity: 0.55 } : {}) }} key={p.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>

@@ -85,7 +85,7 @@ function Conteudo({ setFicha }) {
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
       supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
-      supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
@@ -599,7 +599,9 @@ function Conteudo({ setFicha }) {
           <div><label>Fornecedor</label>
             <select required value={header.fornecedor_id} onChange={e => setHeader({ ...header, fornecedor_id: e.target.value })}>
               <option value="">Selecione…</option>
-              {fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {fornecedores
+                .filter(f => f.ativo !== false || f.id === header.fornecedor_id)
+                .map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div><label>Nota fiscal (nº)</label><input value={header.nota_fiscal} onChange={e => setHeader({ ...header, nota_fiscal: e.target.value })} /></div>
