@@ -1,4 +1,4 @@
--- Atualização 24: libera XML no bucket 'recebimentos'
+-- Atualização 25: libera XML no bucket 'recebimentos'
 --
 -- O bucket foi criado pelo painel com allowed_mime_types restrito a PDF e
 -- imagens (anexo de nota fiscal digitalizada). A importação de NF-e por XML

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Exercita a atualização 24 (edição de pedido de venda) num Postgres local
+# Exercita a atualização 27 (edição de pedido de venda) num Postgres local
 # descartável. Não toca em produção. Requer psql no PATH e um servidor local.
 #
-# Uso: tests/migracao-24/verificar.sh
+# Uso: tests/migracao-27/verificar.sh
 set -euo pipefail
 
 export PGOPTIONS='-c client_min_messages=warning'
@@ -22,7 +22,7 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 # A migração sob teste é o arquivo real que vai para produção.
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_27_pedidos_edicao.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
 # Os cenários rodam como dono do banco, onde RLS não se aplica, então eles não
@@ -36,7 +36,7 @@ echo "OK: triggers em security definer"
 
 # O bloco de rollback vive comentado no fim da migração; extrai e aplica para
 # provar que ele é SQL válido e desfaz o que a migração criou.
-sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
+sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_27_pedidos_edicao.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql"
 rm -f "$AQUI/.rollback.sql"
 

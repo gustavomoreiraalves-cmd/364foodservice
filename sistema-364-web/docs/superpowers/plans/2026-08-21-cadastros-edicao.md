@@ -31,7 +31,7 @@
 | --- | --- |
 | `lib/cadastro.js` | `camposDoFormulario` (pura) e o hook `useCadastro`, com o comportamento repetido das quatro telas. |
 | `tests/cadastro.test.mjs` | Testes de `camposDoFormulario`. |
-| `supabase/atualizacao_24_cadastros_ativo.sql` | Coluna `ativo` em clientes, fornecedores e produtos. |
+| `supabase/atualizacao_26_cadastros_ativo.sql` | Coluna `ativo` em clientes, fornecedores e produtos. |
 
 **Modificar:**
 
@@ -51,7 +51,7 @@
 ## Task 1: Migração da coluna `ativo`
 
 **Files:**
-- Create: `supabase/atualizacao_24_cadastros_ativo.sql`
+- Create: `supabase/atualizacao_26_cadastros_ativo.sql`
 
 **Interfaces:**
 - Consumes: nada.
@@ -61,7 +61,7 @@
 
 - [ ] **Step 1: Escrever a migração**
 
-Criar `supabase/atualizacao_24_cadastros_ativo.sql`:
+Criar `supabase/atualizacao_26_cadastros_ativo.sql`:
 
 ```sql
 -- =========================================================
@@ -97,7 +97,7 @@ Esperado: a suíte atual passando, sem alteração (a migração não é exercit
 - [ ] **Step 3: Commit**
 
 ```bash
-git add supabase/atualizacao_24_cadastros_ativo.sql
+git add supabase/atualizacao_26_cadastros_ativo.sql
 git commit -m "feat(cadastros): coluna ativo em clientes, fornecedores e produtos"
 ```
 
@@ -307,7 +307,7 @@ Dentro de `Conteudo`, remover `const [form, setForm] = useState(FORM_VAZIO);` e 
   const visiveis = mostrarInativos ? lista : lista.filter(c => c.ativo !== false);
 ```
 
-O `c.ativo !== false` — e não `c.ativo === true` — é proposital: enquanto a migração 24 não rodar, a coluna não existe, `c.ativo` é `undefined`, e a tela precisa continuar mostrando todo mundo em vez de esvaziar.
+O `c.ativo !== false` — e não `c.ativo === true` — é proposital: enquanto a migração 26 não rodar, a coluna não existe, `c.ativo` é `undefined`, e a tela precisa continuar mostrando todo mundo em vez de esvaziar.
 
 - [ ] **Step 2: Trocar o formulário**
 
@@ -430,7 +430,7 @@ Dentro de `Conteudo`, remover `const [form, setForm] = useState(FORM_VAZIO);` e 
   const visiveis = mostrarInativos ? lista : lista.filter(f => f.ativo !== false);
 ```
 
-O `f.ativo !== false` — e não `f.ativo === true` — é proposital: enquanto a migração 24 não rodar, a coluna não existe, `f.ativo` é `undefined`, e a tela precisa continuar mostrando todo mundo em vez de esvaziar.
+O `f.ativo !== false` — e não `f.ativo === true` — é proposital: enquanto a migração 26 não rodar, a coluna não existe, `f.ativo` é `undefined`, e a tela precisa continuar mostrando todo mundo em vez de esvaziar.
 
 Mantenha `soDigitos` e o `onChange` do campo CNPJ exatamente como estão.
 
@@ -852,7 +852,7 @@ git commit -m "feat(cadastros): esconder registro inativo das listas de selecao"
 ## Verificação final
 
 - [ ] `npm run verify` passa: os 6 testes novos de `cadastro` mais os que já existiam, e o build sem erro.
-- [ ] A migração 24 está aplicada no Supabase.
+- [ ] A migração 26 está aplicada no Supabase.
 - [ ] Editar um cliente, um fornecedor, uma matéria-prima e um produto muda o registro e não cria duplicado.
 - [ ] Cancelar a edição devolve o formulário ao estado de cadastro novo.
 - [ ] Desativar tira o registro do `<select>` correspondente e o mantém no histórico e nos relatórios.

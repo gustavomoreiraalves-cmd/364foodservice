@@ -4,7 +4,7 @@
 
 **Goal:** permitir editar um pedido de venda em `Pendente` numa rota própria, e substituir a exclusão por cancelamento com motivo.
 
-**Architecture:** o formulário de pedido sai de `app/pedidos/page.js` para `components/PedidoForm.js` e passa a servir tanto o cadastro quanto a nova rota `app/pedidos/[id]/page.js`. A lógica que dá para testar sem navegador (permissão de edição, total, diff de itens) vive em `lib/pedidos.js`. As regras de imutabilidade são impostas por trigger e check constraint na migração `atualizacao_24_pedidos_edicao.sql`, não apenas pela tela.
+**Architecture:** o formulário de pedido sai de `app/pedidos/page.js` para `components/PedidoForm.js` e passa a servir tanto o cadastro quanto a nova rota `app/pedidos/[id]/page.js`. A lógica que dá para testar sem navegador (permissão de edição, total, diff de itens) vive em `lib/pedidos.js`. As regras de imutabilidade são impostas por trigger e check constraint na migração `atualizacao_27_pedidos_edicao.sql`, não apenas pela tela.
 
 **Tech Stack:** Next.js 14 (App Router, componentes client), React 18, Supabase JS v2, Postgres/Supabase, testes com `node --test` (nativo, sem framework) e testes de SQL com `psql` num banco local descartável.
 
@@ -19,7 +19,7 @@
 - **`.env.local` aponta para o Supabase de produção.** Nenhum passo deste plano roda migração contra ele. As migrações são exercitadas num Postgres local descartável; aplicar em produção é decisão do dono do sistema, fora do plano.
 - **`npm run dev` e `npm run build` colidem no diretório `.next`.** Nunca rode os dois ao mesmo tempo; pare o dev server antes de `npm run verify`.
 - Migrações vão em `supabase/atualizacao_NN_*.sql`, com o bloco de rollback comentado no fim do arquivo, no padrão de `atualizacao_20_rls_escopo_empresa.sql`.
-- O número da próxima migração é **24**: `main` já tem 21 (`dashboard_grupo`), 22 (`nfe_documentos`) e 23 (`fornecedor_cnpj_normalizado`). Neste branch só existe `atualizacao_20_rls_escopo_empresa.sql`; o `atualizacao_20_apuracao_ajustes_fechamento.sql` vive em `feat/menu-categorias`, que não está aqui — a colisão de número é entre branches, não dentro deste.
+- A migração foi escrita como **24** e renumerada para **27** quando `feat/menu-categorias` entrou em `main`, merge que juntou três arquivos disputando o 24 e dois disputando o 20. A sequência final é 24 (`apuracao_ajustes_fechamento`), 25 (`bucket_recebimentos_xml`), 26 (`cadastros_ativo`), 27 (`pedidos_edicao`).
 - Status de pedido são exatamente: `Pendente`, `Faturado`, `Enviado`, `Cancelado`.
 
 ---
@@ -186,7 +186,7 @@ Criar `lib/pedidos.js`:
 ```js
 // Helpers do módulo Pedidos de venda.
 // Só lógica pura: as regras de imutabilidade valem de verdade no banco
-// (trigger fn_pedido_bloquear_edicao, atualização 24). O que está aqui serve
+// (trigger fn_pedido_bloquear_edicao, atualização 27). O que está aqui serve
 // para a tela decidir o que mostrar e para montar o diff antes de gravar.
 
 export const STATUS_PEDIDO = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];
@@ -262,13 +262,13 @@ git commit -m "feat(pedidos): helpers de edição e diff de itens"
 
 ---
 
-### Task 2: Migração 24 — colunas, checks e travas de imutabilidade
+### Task 2: Migração 27 — colunas, checks e travas de imutabilidade
 
 **Files:**
-- Create: `supabase/atualizacao_24_pedidos_edicao.sql`
-- Create: `tests/migracao-24/fixture.sql`
-- Create: `tests/migracao-24/cenarios.sql`
-- Create: `tests/migracao-24/verificar.sh`
+- Create: `supabase/atualizacao_27_pedidos_edicao.sql`
+- Create: `tests/migracao-27/fixture.sql`
+- Create: `tests/migracao-27/cenarios.sql`
+- Create: `tests/migracao-27/verificar.sh`
 
 **Interfaces:**
 - Consumes: nada.
@@ -276,10 +276,10 @@ git commit -m "feat(pedidos): helpers de edição e diff de itens"
 
 - [ ] **Step 1: Escrever o fixture do banco de teste**
 
-Criar `tests/migracao-24/fixture.sql` — esqueleto mínimo do schema de produção, no padrão de `tests/rls/fixture.sql`:
+Criar `tests/migracao-27/fixture.sql` — esqueleto mínimo do schema de produção, no padrão de `tests/rls/fixture.sql`:
 
 ```sql
--- Esqueleto mínimo para exercitar a atualização 24 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 27 num Postgres local.
 -- Só as tabelas que a migração toca, com as colunas que ela usa.
 create table empresas (id uuid primary key, nome text);
 create table clientes (id uuid primary key, empresa_id uuid references empresas(id), nome text);
@@ -313,10 +313,10 @@ insert into produtos (id, empresa_id, nome) values ('44444444-4444-4444-4444-444
 
 - [ ] **Step 2: Escrever os cenários que falham**
 
-Criar `tests/migracao-24/cenarios.sql`. Cada bloco prova uma regra; `raise exception` derruba o script com `ON_ERROR_STOP=1`:
+Criar `tests/migracao-27/cenarios.sql`. Cada bloco prova uma regra; `raise exception` derruba o script com `ON_ERROR_STOP=1`:
 
 ```sql
--- Exercita as regras da atualização 24. Roda depois do fixture e da migração.
+-- Exercita as regras da atualização 27. Roda depois do fixture e da migração.
 \set QUIET on
 set client_min_messages = warning;
 
@@ -480,14 +480,14 @@ end $$;
 
 - [ ] **Step 3: Escrever o runner e ver os cenários falharem**
 
-Criar `tests/migracao-24/verificar.sh`, no padrão de `tests/rls/verificar.sh`:
+Criar `tests/migracao-27/verificar.sh`, no padrão de `tests/rls/verificar.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# Exercita a atualização 24 (edição de pedido de venda) num Postgres local
+# Exercita a atualização 27 (edição de pedido de venda) num Postgres local
 # descartável. Não toca em produção. Requer psql no PATH e um servidor local.
 #
-# Uso: tests/migracao-24/verificar.sh
+# Uso: tests/migracao-27/verificar.sh
 set -euo pipefail
 
 export PGOPTIONS='-c client_min_messages=warning'
@@ -507,12 +507,12 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 # A migração sob teste é o arquivo real que vai para produção.
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_27_pedidos_edicao.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
 # O bloco de rollback vive comentado no fim da migração; extrai e aplica para
 # provar que ele é SQL válido e desfaz o que a migração criou.
-sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_24_pedidos_edicao.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
+sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_27_pedidos_edicao.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql"
 rm -f "$AQUI/.rollback.sql"
 
@@ -524,14 +524,14 @@ echo "OK: rollback desfaz a migração"
 Tornar executável e rodar:
 
 ```bash
-chmod +x tests/migracao-24/verificar.sh && tests/migracao-24/verificar.sh
+chmod +x tests/migracao-27/verificar.sh && tests/migracao-27/verificar.sh
 ```
 
-Esperado: FAIL — `psql: error: ... supabase/atualizacao_24_pedidos_edicao.sql: No such file or directory`.
+Esperado: FAIL — `psql: error: ... supabase/atualizacao_27_pedidos_edicao.sql: No such file or directory`.
 
 - [ ] **Step 4: Escrever a migração**
 
-Criar `supabase/atualizacao_24_pedidos_edicao.sql`:
+Criar `supabase/atualizacao_27_pedidos_edicao.sql`:
 
 ```sql
 -- Edição de pedido de venda: colunas de cancelamento e travas de imutabilidade.
@@ -552,7 +552,7 @@ Criar `supabase/atualizacao_24_pedidos_edicao.sql`:
 --   select count(*) from pedido_itens where quantidade <= 0 or preco_unitario < 0;
 --   select count(*) from pedidos where status = 'Cancelado';
 -- A primeira precisa dar 0. Se a segunda for maior que 0, os cancelados antigos
--- não têm motivo: preencha com 'Cancelado antes da atualização 24' antes de
+-- não têm motivo: preencha com 'Cancelado antes da atualização 27' antes de
 -- criar a constraint.
 
 begin;
@@ -670,7 +670,7 @@ commit;
 - [ ] **Step 5: Rodar os cenários e ver passar**
 
 ```bash
-tests/migracao-24/verificar.sh
+tests/migracao-27/verificar.sh
 ```
 
 Esperado: os oito `OK n:` na saída, seguidos de `OK: rollback desfaz a migração`. Se `pg_isready` falhar, suba um Postgres local antes — o teste nunca aponta para produção.
@@ -682,8 +682,8 @@ Esperado: os oito `OK n:` na saída, seguidos de `OK: rollback desfaz a migraç�
 - [ ] **Step 7: Commit**
 
 ```bash
-git add supabase/atualizacao_24_pedidos_edicao.sql supabase/schema.sql tests/migracao-24
-git commit -m "feat(pedidos): migração 24 com cancelamento e travas de imutabilidade"
+git add supabase/atualizacao_27_pedidos_edicao.sql supabase/schema.sql tests/migracao-27
+git commit -m "feat(pedidos): migração 27 com cancelamento e travas de imutabilidade"
 ```
 
 ---
@@ -865,7 +865,7 @@ git commit -m "refactor(pedidos): extrai PedidoForm compartilhado entre cadastro
 - Modify: `app/pedidos/page.js`
 
 **Interfaces:**
-- Consumes: `PedidoForm` (Task 3); `podeEditar`, `totalPedido`, `diffItens` (Task 1); triggers da migração 24 (Task 2).
+- Consumes: `PedidoForm` (Task 3); `podeEditar`, `totalPedido`, `diffItens` (Task 1); triggers da migração 27 (Task 2).
 - Produces: a rota `/pedidos/<uuid>`. A Task 5 acrescenta o cancelamento a esta mesma página.
 
 - [ ] **Step 1: Criar a página**

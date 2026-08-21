@@ -1,6 +1,6 @@
 // Helpers do módulo Pedidos de venda.
 // Só lógica pura: as regras de imutabilidade valem de verdade no banco
-// (trigger fn_pedido_bloquear_edicao, atualização 24). O que está aqui serve
+// (trigger fn_pedido_bloquear_edicao, atualização 27). O que está aqui serve
 // para a tela decidir o que mostrar e para montar o diff antes de gravar.
 
 export const STATUS_PEDIDO = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];

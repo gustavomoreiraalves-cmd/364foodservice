@@ -1,5 +1,5 @@
 -- =========================================================
--- 364 — ATUALIZAÇÃO 24: SITUAÇÃO NOS CADASTROS
+-- 364 — ATUALIZAÇÃO 26: SITUAÇÃO NOS CADASTROS
 -- Clientes, fornecedores e produtos ganham `ativo`, para que um cadastro que
 -- já tem movimento possa sair das listas de seleção sem ser apagado.
 --

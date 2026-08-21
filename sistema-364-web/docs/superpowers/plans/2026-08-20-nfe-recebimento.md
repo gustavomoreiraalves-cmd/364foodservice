@@ -17,7 +17,7 @@
 - Nenhum código de `lib/nfe/*` ou `lib/sefaz/*` que toque certificado pode ser importado por componente client. Componentes client só chamam as rotas.
 - O material do certificado (`.pfx`, senha, chave privada em PEM) nunca é logado, nunca entra em resposta HTTP e nunca é gravado em disco.
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
-- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, toma o **proximo numero livre no dia em que a fase 2 for implementada** — nao reserve numero para trabalho nao feito, que foi o que obrigou a renumeracao acima. Os nomes `atualizacao_24_certificado_digital.sql` que aparecem nas Tasks 8 em diante sao ilustrativos.)*
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, toma o **proximo numero livre no dia em que a fase 2 for implementada** — nao reserve numero para trabalho nao feito, que foi o que obrigou a renumeracao acima. Os nomes `atualizacao_28_certificado_digital.sql` que aparecem nas Tasks 8 em diante sao ilustrativos.)*
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
 - Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
@@ -50,7 +50,7 @@
 | `components/RecebimentoTabs.js` | Navegação entre "Entradas" e "Notas fiscais". |
 | `components/ImportarNota.js` | Bloco de importação no formulário de recebimento. |
 | `supabase/atualizacao_22_nfe_documentos.sql` | Tabelas de documento, estado e de-para. |
-| `supabase/atualizacao_24_certificado_digital.sql` | Tabela do certificado. |
+| `supabase/atualizacao_28_certificado_digital.sql` | Tabela do certificado. |
 | `tests/nfe-parse.test.mjs`, `tests/nfe-depara.test.mjs`, `tests/nfe-parcelas.test.mjs`, `tests/nfe-cripto.test.mjs`, `tests/sefaz-envelopes.test.mjs` | Testes. |
 | `tests/fixtures/nfe-exemplo.xml`, `tests/fixtures/dist-retorno.xml` | Fixtures. |
 | `vercel.json` | Cron da sincronização. |
@@ -1354,7 +1354,7 @@ git commit -m "feat(recebimento): importar NF-e por XML e aprender o de-para de 
 **Files:**
 - Create: `lib/nfe/cripto.js`
 - Create: `tests/nfe-cripto.test.mjs`
-- Create: `supabase/atualizacao_24_certificado_digital.sql`
+- Create: `supabase/atualizacao_28_certificado_digital.sql`
 
 **Interfaces:**
 - Consumes: `node:crypto`.
@@ -1464,7 +1464,7 @@ Esperado: PASS nos 6 testes de `nfe-cripto`.
 
 - [ ] **Step 5: Escrever a migração da tabela**
 
-Criar `supabase/atualizacao_24_certificado_digital.sql`:
+Criar `supabase/atualizacao_28_certificado_digital.sql`:
 
 ```sql
 -- =========================================================
@@ -1539,7 +1539,7 @@ acesso ao certificado guardado — nesse caso, subir o `.pfx` de novo.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_24_certificado_digital.sql
+git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_28_certificado_digital.sql
 git commit -m "feat(nfe): cifra AES-256-GCM e tabela do certificado digital"
 ```
 

@@ -22,7 +22,7 @@
 --   select count(*) from pedidos where status = 'Cancelado';
 --   select count(*) from pedidos p where not exists (select 1 from pedido_itens where pedido_id = p.id);
 -- A primeira precisa dar 0. Se a segunda for maior que 0, os cancelados antigos
--- não têm motivo: preencha com 'Cancelado antes da atualização 24' antes de
+-- não têm motivo: preencha com 'Cancelado antes da atualização 27' antes de
 -- criar a constraint. A terceira conta os pedidos vazios que já existem: eles
 -- continuam podendo ser cancelados, mas não vão mais poder ser faturados sem
 -- ganhar um item antes.
@@ -151,7 +151,7 @@ begin
   -- cabeçalho e os itens em duas chamadas separadas, e quando a segunda falha
   -- sobra um pedido `Pendente` sem item nenhum. Sem esta exceção esse pedido
   -- não sairia de lugar nenhum — a exclusão saiu da interface junto com a
-  -- atualização 24.
+  -- atualização 27.
   if old.status = 'Pendente' and new.status not in ('Pendente', 'Cancelado')
      and not exists (select 1 from public.pedido_itens where pedido_id = new.id) then
     raise exception 'Pedido sem itens não pode sair de Pendente.'

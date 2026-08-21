@@ -59,11 +59,11 @@ O que falta é o motivo, o autor e a data, e é isso que a migração acrescenta
 | `pedidos` | `+ reaberto_motivo text`, `+ reaberto_em timestamptz`, `+ reaberto_por_id uuid references funcionarios(id)` |
 | `pedidos` | `+ updated_at timestamptz not null default now()` |
 
-Migração `atualizacao_24_pedidos_edicao.sql`. O número 24 é o próximo livre: `main` já
-tem 21 (`dashboard_grupo`), 22 (`nfe_documentos`) e 23 (`fornecedor_cnpj_normalizado`). Neste
-branch só existe `atualizacao_20_rls_escopo_empresa.sql`; o
-`atualizacao_20_apuracao_ajustes_fechamento.sql` vive em `feat/menu-categorias`, que ainda
-não chegou aqui — a colisão de número é entre branches, não dentro deste.
+Migração `atualizacao_27_pedidos_edicao.sql`. O arquivo nasceu como `atualizacao_24_` e foi
+renumerado quando `feat/menu-categorias` entrou em `main`: o merge juntou três arquivos
+disputando o número 24 (este, `cadastros_ativo` e `bucket_recebimentos_xml`) e dois disputando
+o 20. A sequência final ficou 24 (`apuracao_ajustes_fechamento`), 25
+(`bucket_recebimentos_xml`), 26 (`cadastros_ativo`) e 27 (`pedidos_edicao`).
 
 Nenhuma tabela nova.
 

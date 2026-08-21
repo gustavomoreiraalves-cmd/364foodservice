@@ -38,7 +38,7 @@ function Conteudo() {
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
       // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
-      // cancelado_por_id, da atualização 24), então `funcionarios(nome)` sem
+      // cancelado_por_id, da atualização 27), então `funcionarios(nome)` sem
       // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
       // padrão de app/recebimentos/page.js depois da atualização 09.
       supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),

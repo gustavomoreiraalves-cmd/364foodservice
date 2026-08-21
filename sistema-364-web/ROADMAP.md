@@ -235,7 +235,7 @@ sob demanda em `lib/apuracao.js` a partir de dados imutáveis (colaboradores/
 escalas/escala_dias/ponto_marcacoes) — nunca persistido como fonte de
 verdade; só o fechamento grava um snapshot. Limitação conhecida: não trata
 escalas cujo horário cruza a meia-noite (nenhuma cadastrada hoje faz isso).
-Migration `atualizacao_20_apuracao_ajustes_fechamento.sql` (já aplicada em
+Migration `atualizacao_24_apuracao_ajustes_fechamento.sql` (já aplicada em
 produção) criou `ponto_ajustes` e `ponto_fechamentos`.
 
 - **`/ponto/apuracao`** — espelho de ponto por colaborador/mês: dia a dia
