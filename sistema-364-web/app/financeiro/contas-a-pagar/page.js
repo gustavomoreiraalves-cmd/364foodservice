@@ -44,7 +44,7 @@ function Conteudo() {
         .select('*, fornecedores(nome), responsavel:funcionarios(nome), recebimentos(data, nota_fiscal), contas_a_pagar_parcelas(*)')
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
-      supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('fornecedores').select('id, nome, ativo').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
     if (r1.error) console.error(r1.error);
@@ -186,7 +186,9 @@ function Conteudo() {
           <div><label>Fornecedor</label>
             <select required value={lancamento.fornecedor_id} onChange={e => setLancamento({ ...lancamento, fornecedor_id: e.target.value })}>
               <option value="">Selecione…</option>
-              {fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {fornecedores
+                .filter(f => f.ativo !== false || f.id === lancamento.fornecedor_id)
+                .map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div><label>Nota fiscal (nº, opcional)</label>

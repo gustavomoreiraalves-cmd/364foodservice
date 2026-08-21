@@ -42,7 +42,7 @@ function Conteudo() {
       // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
       // padrão de app/recebimentos/page.js depois da atualização 09.
       supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),
-      supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
+      supabase.from('clientes').select('id, nome, ativo').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),

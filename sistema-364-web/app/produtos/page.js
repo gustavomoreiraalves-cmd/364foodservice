@@ -316,7 +316,9 @@ function Conteudo() {
                 <form className="form-grid" style={{ marginTop: 8 }} onSubmit={e => addItemFicha(e, p.id)}>
                   <div><label>Matéria-prima</label>
                     <select value={item.materia_prima_id} onChange={e => setItemFicha({ ...itemFicha, [p.id]: { ...item, materia_prima_id: e.target.value } })}>
-                      {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+                      {mps
+                        .filter(m => m.ativo !== false || m.id === item.materia_prima_id)
+                        .map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
                     </select>
                   </div>
                   <div><label>Qtd por unidade</label>

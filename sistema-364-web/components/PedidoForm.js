@@ -40,7 +40,9 @@ export default function PedidoForm({
           <select disabled={somenteLeitura} value={cabecalho.cliente_id}
             onChange={e => setCabecalho({ ...cabecalho, cliente_id: e.target.value })}>
             <option value="">Selecione…</option>
-            {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            {clientes
+              .filter(c => c.ativo !== false || c.id === cabecalho.cliente_id)
+              .map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </div>
         <div><label>Responsável</label>
@@ -65,7 +67,9 @@ export default function PedidoForm({
               <select required value={novoItem.produto_id}
                 onChange={e => setNovoItem({ ...novoItem, produto_id: e.target.value })}>
                 <option value="">Selecione…</option>
-                {produtos.map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome} (saldo: {saldoProduto(p.id).toFixed(1)})</option>)}
+                {produtos
+                  .filter(p => p.ativo !== false || p.id === novoItem.produto_id)
+                  .map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome} (saldo: {saldoProduto(p.id).toFixed(1)})</option>)}
               </select>
             </div>
             <div><label>Quantidade</label>
