@@ -7,6 +7,10 @@ export const runtime = 'nodejs';
 
 const LIMITE_XML = 2 * 1024 * 1024; // NF-e realista não passa disso; corta abuso
 
+// Status que já passaram do simples "xml baixado" — reenviar o mesmo XML não
+// pode rebaixar um documento que já foi manifestado ou já virou recebimento.
+const STATUS_AVANCADOS = ['manifestada', 'vinculada'];
+
 // POST: registra um XML enviado à mão (fornecedor mandou por e-mail, ou o
 // certificado ainda não está configurado). body: { empresaId, xml }
 export async function POST(request) {
@@ -39,6 +43,16 @@ export async function POST(request) {
     .upload(path, Buffer.from(xml, 'utf8'), { contentType: 'application/xml', upsert: true });
   if (errUp) return NextResponse.json({ error: 'Falha ao guardar o XML: ' + errUp.message }, { status: 500 });
 
+  // Reupload de uma nota que já avançou (manifestada/vinculada) não pode voltar
+  // pra "xml_baixado" — senão a listagem mostra como pendente algo que já foi
+  // lançado, mesmo com o recebimento_id (preservado por não entrar no upsert)
+  // ainda apontando pro recebimento existente.
+  const { data: existente } = await sb.from('nfe_documentos')
+    .select('status').eq('empresa_id', empresaId).eq('chave', nota.chave).maybeSingle();
+  const statusFinal = existente && STATUS_AVANCADOS.includes(existente.status)
+    ? existente.status
+    : (ehNFe ? 'xml_baixado' : 'ignorada');
+
   const { data, error } = await sb.from('nfe_documentos').upsert([{
     empresa_id: empresaId,
     chave: nota.chave,
@@ -49,7 +63,7 @@ export async function POST(request) {
     serie: nota.serie,
     emitida_em: nota.emitidaEm || null,
     valor_total: nota.valorTotal,
-    status: ehNFe ? 'xml_baixado' : 'ignorada',
+    status: statusFinal,
     origem: 'upload',
     xml_path: path,
     ultimo_erro: null,
