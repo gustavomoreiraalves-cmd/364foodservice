@@ -41,6 +41,9 @@ sobraram=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.col
      or (table_name = 'empresas' and column_name in ('sim_numero','sim_municipio'));")
 [ "$sobraram" = "0" ] || { echo "rollback não removeu todas as colunas novas (achou $sobraram)"; exit 1; }
 
+constraint_lote=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_constraint where conname = 'recebimento_itens_empresa_lote_unico';")
+[ "$constraint_lote" = "0" ] || { echo "rollback não removeu a constraint unique(empresa_id, lote)"; exit 1; }
+
 # O rollback NÃO estreita o check de source_type de volta a ('producao',
 # 'producao_interna') — ver comentário no bloco de rollback da migração:
 # a tabela é append-only e apagar auditoria para caber num rollback de schema

@@ -8,7 +8,16 @@
 -- Também entram os dois campos que a etiqueta de despacho vai imprimir na Fase
 -- 4 e que são cadastro, não processo: o dizer de conservação por produto e o
 -- registro no Serviço de Inspeção Municipal por empresa. Ficam aqui porque são
--- `alter table` de uma linha e porque quem cadastra produto já vai preenchê-los.
+-- `alter table` de uma linha. Entram sem tela para preenchê-los — não é que
+-- "quem cadastra produto já vai preenchê-los": a Fase 4 é quem traz a tela.
+-- Até lá as colunas ficam nulas.
+--
+-- O lote (`LT-AAMMDD-###`) é numerado por empresa, sem constraint que impeça
+-- repetição — e a numeração é contagem de linhas, então dois operadores
+-- lançando no mesmo dia geram corrida real, não hipótese. Esta migração
+-- também fecha isso com `unique (empresa_id, lote)` em `recebimento_itens`:
+-- sem ela, duas caixas de empresas diferentes (ou pior, da mesma empresa)
+-- podem ganhar o mesmo lote e o mesmo QR.
 --
 -- Idempotente: `add column if not exists`, `drop constraint if exists` e
 -- `create or replace` em tudo. Não altera dado existente: `volumes` nasce nulo
@@ -18,6 +27,13 @@
 -- `etiqueta_impressoes` e `registrar_impressao`, que esta migração altera):
 --   select count(*) from information_schema.tables where table_name = 'etiqueta_impressoes';
 -- Precisa dar 1.
+--
+-- Antes de aplicar, confira também que não existem lotes duplicados na mesma
+-- empresa — a `unique (empresa_id, lote)` abaixo falha se houver:
+--   select empresa_id, lote, count(*) from recebimento_itens group by 1,2 having count(*) > 1;
+-- Precisa dar zero linhas. Se aparecer alguma, resolva manualmente (renomeie
+-- um dos lotes duplicados) antes de aplicar — não dá para rodar por cima de
+-- dado sujo.
 
 begin;
 
@@ -33,20 +49,31 @@ alter table public.recebimento_itens add constraint recebimento_itens_volumes_po
 comment on column public.recebimento_itens.volumes is
   'Quantas caixas/volumes deste lote chegaram. Define quantas etiquetas imprimir. Nulo = item anterior à atualização 28.';
 
+-- O lote é numerado por empresa (contagem de linhas do dia) e o QR passa a
+-- levar o prefixo da empresa no caminho (/rastreio/<prefixo>/<lote>) por
+-- causa disso — mas o texto do lote sozinho ainda precisa ser único dentro
+-- da própria empresa, senão dois itens da MESMA empresa colidem e ganham o
+-- mesmo QR.
+alter table public.recebimento_itens drop constraint if exists recebimento_itens_empresa_lote_unico;
+alter table public.recebimento_itens add constraint recebimento_itens_empresa_lote_unico
+  unique (empresa_id, lote);
+
 -- ---------- CADASTRO: dizeres do rótulo ----------
+-- Colunas de cadastro sem tela nesta fase: entram nulas e ganham tela na
+-- Fase 4, junto com a etiqueta de despacho que vai lê-las.
 
 alter table public.produtos
   add column if not exists conservacao_texto text;
 comment on column public.produtos.conservacao_texto is
-  'Dizer de conservação impresso na etiqueta de despacho, igual ao rótulo da gráfica. Ex.: MANTER CONGELADO A -12 °C.';
+  'Dizer de conservação impresso na etiqueta de despacho, igual ao rótulo da gráfica. Ex.: MANTER CONGELADO A -12 °C. Sem tela até a Fase 4.';
 
 alter table public.empresas
   add column if not exists sim_numero text,
   add column if not exists sim_municipio text;
 comment on column public.empresas.sim_numero is
-  'Número do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho.';
+  'Número do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho. Sem tela até a Fase 4.';
 comment on column public.empresas.sim_municipio is
-  'Município do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho.';
+  'Município do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho. Sem tela até a Fase 4.';
 
 -- ---------- AUDITORIA DE IMPRESSÃO: novos tipos de origem ----------
 -- `embalagem_item` e `expedicao_caixa` entram junto porque o check é um só e
@@ -69,6 +96,7 @@ declare
   v_status text;
   v_codigo text;
   v_modulo text;
+  v_modulo_label text;
 begin
   if p_source_type = 'producao_interna' then
     v_modulo := 'producoes';
@@ -98,7 +126,15 @@ begin
     raise exception 'Sem acesso à empresa desta impressão.';
   end if;
   if not public.tem_permissao(v_modulo) then
-    raise exception 'Sem permissão para imprimir etiquetas de %.', v_modulo;
+    -- v_modulo é o slug técnico do módulo (ex.: "producoes"); o operador não
+    -- deve ver isso na mensagem de erro — mapeia para o rótulo em português
+    -- que aparece no menu (lib/menu.js).
+    v_modulo_label := case v_modulo
+      when 'producoes' then 'Produção'
+      when 'recebimentos' then 'Recebimento'
+      else v_modulo
+    end;
+    raise exception 'Sem permissão para imprimir etiquetas de %.', v_modulo_label;
   end if;
   if p_tipo = 'reimpressao' and (p_motivo is null or btrim(p_motivo) = '') then
     raise exception 'Informe o motivo da reimpressão.';
@@ -138,6 +174,7 @@ commit;
 --   check (source_type in ('producao', 'producao_interna', 'recebimento_item', 'embalagem_item', 'expedicao_caixa'));
 --
 -- alter table public.recebimento_itens drop constraint if exists recebimento_itens_volumes_positivo;
+-- alter table public.recebimento_itens drop constraint if exists recebimento_itens_empresa_lote_unico;
 -- alter table public.recebimento_itens drop column if exists volumes;
 -- alter table public.produtos drop column if exists conservacao_texto;
 -- alter table public.empresas drop column if exists sim_numero;

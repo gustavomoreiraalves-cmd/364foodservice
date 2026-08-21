@@ -63,6 +63,10 @@ yarn-error.log*
 postgres_data/
 dump.sql
 
+# tests/migracao-*/verificar.sh cria e apaga este arquivo em cada execução;
+# uma falha no meio do script o deixa para trás.
+sistema-364-web/tests/migracao-*/.rollback.sql
+
 # Logs
 logs/
 *.log

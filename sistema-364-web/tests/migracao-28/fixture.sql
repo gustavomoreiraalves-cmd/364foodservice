@@ -107,3 +107,11 @@ insert into produtos (id, empresa_id, nome) values ('44444444-4444-4444-4444-444
 insert into recebimentos (id, empresa_id, fornecedor_id, nota_fiscal) values ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '61.379.327');
 insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
   values ('66666666-6666-6666-6666-666666666666', '55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333', 'LT-260821-001', 180, 21.90, '11111111-1111-1111-1111-111111111111');
+
+-- Segunda empresa, só para o cenário 10 (unique(empresa_id, lote)): prova que
+-- o MESMO texto de lote em empresas diferentes não colide — só dentro da
+-- mesma empresa é que a repetição é recusada.
+insert into empresas (id, nome) values ('99999999-9999-9999-9999-999999999999', 'Steakhouse');
+insert into fornecedores (id, empresa_id, nome) values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '99999999-9999-9999-9999-999999999999', 'Frigorífico STK');
+insert into materias_primas (id, empresa_id, nome) values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '99999999-9999-9999-9999-999999999999', 'Picanha');
+insert into recebimentos (id, empresa_id, fornecedor_id, nota_fiscal) values ('cccccccc-cccc-cccc-cccc-cccccccccccc', '99999999-9999-9999-9999-999999999999', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '99.001');

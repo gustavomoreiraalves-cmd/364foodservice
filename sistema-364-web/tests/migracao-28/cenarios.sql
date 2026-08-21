@@ -120,7 +120,10 @@ begin
     perform public.registrar_impressao('recebimento_item', '66666666-6666-6666-6666-666666666666', 'original', 1, 'recebimento', null, null);
     raise exception 'FALHA 7: imprimiu sem o módulo recebimentos';
   exception when others then
-    if sqlerrm not like '%Sem permissão para imprimir etiquetas de recebimentos%' then raise; end if;
+    -- A mensagem mostra o rótulo em português ("Recebimento"), não o slug
+    -- técnico do módulo ("recebimentos") — é o que corrige o vazamento do
+    -- slug pro operador.
+    if sqlerrm not like '%Sem permissão para imprimir etiquetas de Recebimento%' then raise; end if;
   end;
   perform set_config('req.permissoes', 'recebimentos,producoes', true);
   raise notice 'OK 7: permissão de módulo exigida';
@@ -161,6 +164,28 @@ begin
     if sqlerrm not like '%só podem ser impressas para produção finalizada%' then raise; end if;
   end;
   raise notice 'OK 9: trava de produção interna preservada';
+end $$;
+
+-- Cenário 10: lote é único DENTRO da empresa, não globalmente. Repetir o
+-- mesmo texto de lote na mesma empresa é recusado (dois operadores lançando
+-- no mesmo dia geram o mesmo LT-* por contagem de linhas — corrida real); o
+-- mesmo texto de lote em empresa diferente passa, porque o QR passa a levar
+-- o prefixo da empresa no caminho e o texto do lote sozinho não precisa
+-- desambiguar entre empresas.
+do $$
+begin
+  begin
+    insert into recebimento_itens (recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+      values ('55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333', 'LT-260821-001', 10, 5.00, '11111111-1111-1111-1111-111111111111');
+    raise exception 'FALHA 10a: lote duplicado na mesma empresa foi aceito';
+  exception when unique_violation then null; end;
+
+  insert into recebimento_itens (recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+    values ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'LT-260821-001', 10, 5.00, '99999999-9999-9999-9999-999999999999');
+  if not exists (select 1 from recebimento_itens where lote = 'LT-260821-001' and empresa_id = '99999999-9999-9999-9999-999999999999') then
+    raise exception 'FALHA 10b: mesmo lote em empresa diferente foi recusado';
+  end if;
+  raise notice 'OK 10: lote único por empresa (empresa_id, lote)';
 end $$;
 
 commit;
