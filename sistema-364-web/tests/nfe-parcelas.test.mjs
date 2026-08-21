@@ -58,6 +58,33 @@ test('divergência de pesagem acima de 0,5% cai no parcelamento manual', () => {
   assert.equal(r.parcelas.reduce((s, p) => s + p.valor, 0), 2700);
 });
 
+test('a borda dos 0,5% decide: 13,78 passa e 13,79 não, sobre 2757,00', () => {
+  // 0,5% de 2757,00 = 13,785. Um centavo de cada lado da fronteira, para os dois
+  // sentidos da divergência — pesou menos e pesou mais do que a nota.
+  const naBorda = valorLancado => parcelasDoRecebimento({
+    duplicatas: DUP, dataBase: '2026-08-18',
+    valorLancado, somaItensNota: 2757, numeroParcelas: 1, intervaloDias: 30,
+  }).origem;
+
+  assert.equal(naBorda(2743.22), ORIGEM_PARCELAS.NOTA);                     // −13,78
+  assert.equal(naBorda(2743.21), ORIGEM_PARCELAS.MANUAL_VALOR_DIVERGENTE);  // −13,79
+  assert.equal(naBorda(2770.78), ORIGEM_PARCELAS.NOTA);                     // +13,78
+  assert.equal(naBorda(2770.79), ORIGEM_PARCELAS.MANUAL_VALOR_DIVERGENTE);  // +13,79
+});
+
+test('em nota de valor baixo quem decide é o piso de um centavo', () => {
+  // 0,5% de R$ 1,00 é meio centavo — sem o piso, meio centavo de arredondamento
+  // já derrubaria as duplicatas.
+  const centavos = [{ numero: '001', vencimento: '2026-09-02', valor: 1 }];
+  const comPiso = valorLancado => parcelasDoRecebimento({
+    duplicatas: centavos, dataBase: '2026-08-18',
+    valorLancado, somaItensNota: 1, numeroParcelas: 1, intervaloDias: 30,
+  }).origem;
+
+  assert.equal(comPiso(1.008), ORIGEM_PARCELAS.NOTA);                     // fora dos 0,5%, dentro do piso
+  assert.equal(comPiso(1.02), ORIGEM_PARCELAS.MANUAL_VALOR_DIVERGENTE);   // fora do piso também
+});
+
 test('item fora do aceite descarta as duplicatas mesmo com o valor batendo', () => {
   const r = parcelasDoRecebimento({
     duplicatas: DUP, dataBase: '2026-08-18',
