@@ -14,7 +14,7 @@
 
 - Textos de interface em português, com acentuação correta.
 - Toda tabela continua com RLS no padrão do projeto; esta entrega não altera policy nenhuma.
-- Migrações SQL entram em `supabase/` com o próximo número livre. Hoje o maior é `atualizacao_23_fornecedor_cnpj_normalizado.sql`, então esta é a **24**.
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(Foi escrita como 24 e renumerada para **26** no merge com a main, junto com as dos outros branches em voo. O arquivo entregue é `atualizacao_26_cadastros_ativo.sql`.)*
 - O código do produto (`0364-XXX`) nunca é editável: é a chave impressa em etiqueta.
 - Editar um cadastro não altera lançamento já feito — recebimento, pedido e produção guardam os próprios valores no momento em que foram gravados.
 - Inativo **some da lista de seleção, nunca do histórico**. O filtro vai onde as `<option>` são montadas, nunca na consulta ao banco.
@@ -65,7 +65,7 @@ Criar `supabase/atualizacao_26_cadastros_ativo.sql`:
 
 ```sql
 -- =========================================================
--- 364 — ATUALIZAÇÃO 24: SITUAÇÃO NOS CADASTROS
+-- 364 — ATUALIZAÇÃO 26: SITUAÇÃO NOS CADASTROS
 -- Clientes, fornecedores e produtos ganham `ativo`, para que um cadastro que
 -- já tem movimento possa sair das listas de seleção sem ser apagado.
 --
