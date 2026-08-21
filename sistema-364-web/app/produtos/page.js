@@ -5,6 +5,7 @@ import { fmtMoney, proximoCodigoProduto, parseCustoUnitario } from '../../lib/fo
 import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
+import { camposDoFormulario } from '../../lib/cadastro';
 
 const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false };
 
@@ -28,6 +29,11 @@ function Conteudo() {
   const [itemFicha, setItemFicha] = useState({});
   const [regras, setRegras] = useState([]);
   const [regraForm, setRegraForm] = useState({});
+  const [editandoProduto, setEditandoProduto] = useState(null);
+  const [mostrarInativos, setMostrarInativos] = useState(false);
+
+  const produtoEmEdicao = editandoProduto ? produtos.find(p => p.id === editandoProduto) : null;
+  const produtosVisiveis = mostrarInativos ? produtos : produtos.filter(p => p.ativo !== false);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -47,15 +53,14 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
-  async function addProduto(e) {
+  async function salvarProduto(e) {
     e.preventDefault();
     // Mesma validação do "Editar custo": sem ela `Number('-5') || 0` gravaria
     // -5 e um texto inválido viraria 0 em silêncio.
     const custo = parseCustoUnitario(formProd.custo_unitario);
     if (custo === null) { alert(CUSTO_INVALIDO); return; }
-    const codigo = await proximoCodigoProduto(empresaAtual.id, empresaAtual.prefixo_codigo);
-    const { error } = await supabase.from('produtos').insert([{
-      codigo,
+
+    const campos = {
       nome: formProd.nome,
       categoria: formProd.categoria || null,
       unidade: formProd.unidade,
@@ -63,10 +68,35 @@ function Conteudo() {
       preco_venda: Number(formProd.preco_venda),
       validade_dias: Number(formProd.validade_dias) || 90,
       producao_interna: !!formProd.producao_interna,
-      empresa_id: empresaAtual.id,
-    }]);
+    };
+
+    let error;
+    if (editandoProduto) {
+      ({ error } = await supabase.from('produtos').update(campos).eq('id', editandoProduto));
+    } else {
+      const codigo = await proximoCodigoProduto(empresaAtual.id, empresaAtual.prefixo_codigo);
+      ({ error } = await supabase.from('produtos').insert([{ ...campos, codigo, empresa_id: empresaAtual.id }]));
+    }
     if (error) { alert('Erro ao salvar: ' + error.message); return; }
+    cancelarEdicaoProduto();
+    carregar();
+  }
+
+  function iniciarEdicaoProduto(p) {
+    setFormProd(camposDoFormulario(p, PROD_VAZIO));
+    setEditandoProduto(p.id);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelarEdicaoProduto() {
     setFormProd(PROD_VAZIO);
+    setEditandoProduto(null);
+  }
+
+  async function alternarAtivoProduto(p) {
+    const { error } = await supabase.from('produtos')
+      .update({ ativo: !(p.ativo !== false) }).eq('id', p.id);
+    if (error) { alert('Não foi possível mudar a situação: ' + error.message); return; }
     carregar();
   }
 
@@ -157,8 +187,8 @@ function Conteudo() {
   return (
     <>
       <div className="panel">
-        <h3>Novo produto</h3>
-        <form onSubmit={addProduto} className="form-grid">
+        <h3>{produtoEmEdicao ? `Editando: ${produtoEmEdicao.codigo} — ${produtoEmEdicao.nome}` : 'Novo produto'}</h3>
+        <form onSubmit={salvarProduto} className="form-grid">
           <div><label>Nome</label><input required value={formProd.nome} onChange={e => setFormProd({ ...formProd, nome: e.target.value })} /></div>
           <div><label>Categoria</label><input placeholder="Defumado, Embutido..." value={formProd.categoria} onChange={e => setFormProd({ ...formProd, categoria: e.target.value })} /></div>
           <div><label>Unidade de venda</label>
@@ -177,7 +207,10 @@ function Conteudo() {
             <input type="checkbox" checked={formProd.producao_interna} onChange={e => setFormProd({ ...formProd, producao_interna: e.target.checked })} />
             Produto de produção interna
           </label></div>
-          <div><button className="btn" type="submit">Adicionar produto</button></div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <button className="btn" type="submit">{editandoProduto ? 'Salvar alterações' : 'Adicionar produto'}</button>
+            {editandoProduto && <button className="btn secondary" type="button" onClick={cancelarEdicaoProduto}>Cancelar</button>}
+          </div>
         </form>
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
           O código (0364-XXX) é gerado automaticamente. Depois de criar, defina a ficha técnica (matérias-primas usadas) na lista abaixo. Deixar o custo em branco faz o sistema usar o custo teórico da ficha técnica no cálculo de CMV.
@@ -185,19 +218,26 @@ function Conteudo() {
       </div>
 
       <div className="panel">
-        <h3>Catálogo de produtos ({produtos.length})</h3>
-        {produtos.length ? produtos.map(p => {
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <h3>Catálogo de produtos ({produtosVisiveis.length})</h3>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} />
+            Mostrar inativos
+          </label>
+        </div>
+        {produtosVisiveis.length ? produtosVisiveis.map(p => {
           const custoT = custoTeorico(p.id);
           const custoEfetivo = Number(p.custo_unitario) > 0 ? Number(p.custo_unitario) : custoT;
           const margem = Number(p.preco_venda) ? ((Number(p.preco_venda) - custoEfetivo) / Number(p.preco_venda) * 100) : 0;
           const itens = fichas.filter(f => f.produto_id === p.id);
           const item = itemFicha[p.id] || { materia_prima_id: mps[0]?.id || '', quantidade: '' };
           return (
-            <div className="items-list" style={{ marginBottom: 12 }} key={p.id}>
+            <div className="items-list" style={{ marginBottom: 12, ...(p.ativo === false ? { opacity: 0.55 } : {}) }} key={p.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <b>{p.codigo}</b> — {p.nome} <span className="muted">({p.categoria || 'sem categoria'})</span>
                   {p.producao_interna && <span style={{ marginLeft: 8, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber-bright)', border: '1px solid var(--amber)', borderRadius: 4, padding: '2px 6px' }}>Produção interna</span>}
+                  {p.ativo === false && <span className="tag warn" style={{ marginLeft: 8 }}>inativo</span>}
                 </div>
                 <div className="row-actions">
                   <span className="muted" style={{ fontSize: 11.5 }}>
@@ -216,6 +256,8 @@ function Conteudo() {
                   <button className="btn secondary small" onClick={() => toggleProducaoInterna(p)}>
                     {p.producao_interna ? 'Remover de produção interna' : 'Marcar como produção interna'}
                   </button>
+                  <button className="btn secondary" onClick={() => iniciarEdicaoProduto(p)}>Editar</button>
+                  <button className="btn secondary" onClick={() => alternarAtivoProduto(p)}>{p.ativo === false ? 'Reativar' : 'Desativar'}</button>
                   <button className="btn danger" onClick={() => delProduto(p.id)}>Excluir produto</button>
                 </div>
               </div>
