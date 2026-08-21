@@ -744,6 +744,9 @@ export const runtime = 'nodejs';
 
 const LIMITE_XML = 2 * 1024 * 1024; // NF-e realista não passa disso; corta abuso
 
+// Status que já passaram do ponto de "só o XML chegou" — um reenvio não pode rebaixá-los.
+const STATUS_AVANCADOS = ['manifestada', 'vinculada'];
+
 // POST: registra um XML enviado à mão (fornecedor mandou por e-mail, ou o
 // certificado ainda não está configurado). body: { empresaId, xml }
 export async function POST(request) {
@@ -776,6 +779,16 @@ export async function POST(request) {
     .upload(path, Buffer.from(xml, 'utf8'), { contentType: 'application/xml', upsert: true });
   if (errUp) return NextResponse.json({ error: 'Falha ao guardar o XML: ' + errUp.message }, { status: 500 });
 
+  // Reenviar o XML de uma nota que já andou no fluxo não pode rebaixá-la: se ela
+  // já foi manifestada ou virou recebimento, o status atual prevalece. Sem isso o
+  // recebimento_id continuaria apontando para o lançamento enquanto o status
+  // dissesse que a nota ainda está esperando para ser lançada.
+  const { data: existente } = await sb.from('nfe_documentos')
+    .select('status').eq('empresa_id', empresaId).eq('chave', nota.chave).maybeSingle();
+  const statusNovo = existente && STATUS_AVANCADOS.includes(existente.status)
+    ? existente.status
+    : (ehNFe ? 'xml_baixado' : 'ignorada');
+
   const { data, error } = await sb.from('nfe_documentos').upsert([{
     empresa_id: empresaId,
     chave: nota.chave,
@@ -786,7 +799,7 @@ export async function POST(request) {
     serie: nota.serie,
     emitida_em: nota.emitidaEm || null,
     valor_total: nota.valorTotal,
-    status: ehNFe ? 'xml_baixado' : 'ignorada',
+    status: statusNovo,
     origem: 'upload',
     xml_path: path,
     ultimo_erro: null,
