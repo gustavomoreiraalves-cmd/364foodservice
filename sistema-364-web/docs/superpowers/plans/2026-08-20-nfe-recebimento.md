@@ -17,9 +17,9 @@
 - Nenhum código de `lib/nfe/*` ou `lib/sefaz/*` que toque certificado pode ser importado por componente client. Componentes client só chamam as rotas.
 - O material do certificado (`.pfx`, senha, chave privada em PEM) nunca é logado, nunca entra em resposta HTTP e nunca é gravado em disco.
 - Toda tabela nova leva `empresa_id uuid not null references empresas(id)` e RLS no padrão do projeto: `using (auth.role() = 'authenticated' and empresa_id in (select public.empresas_permitidas()))`. Exceção: `certificados_digitais`, que é `using (false)`.
-- Migrações SQL entram em `supabase/` com o próximo número livre. Já existem dois arquivos `atualizacao_20_*`; este plano usa **21** e **22**.
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(O que a fase 1 de fato entregou: `atualizacao_22_nfe_documentos.sql` e `atualizacao_23_fornecedor_cnpj_normalizado.sql` — esta última nasceu na revisão final, porque o CNPJ do fornecedor era texto livre e nunca casava com o do XML. Foram escritas como 21 e 22 e renumeradas no merge, quando `main` trouxe uma `atualizacao_21_dashboard_grupo.sql`. A tabela do certificado digital, da fase 2, fica na **24**.)*
 - Testes rodam com `npm test` (`node --test tests/*.test.mjs`). Verificação completa: `npm run verify`.
-- Valores monetários arredondam para 2 casas; pesos e quantidades para 4 casas — mesmo padrão de `lib/financeiro.js`.
+- Valores **derivados e persistidos** arredondam: monetários para 2 casas, pesos e quantidades para 4 — mesmo padrão de `lib/financeiro.js`. Valores **lidos do XML** ficam como vieram: o layout da NF-e permite `vUnCom` com até 10 casas decimais, e arredondar na leitura quebraria a conferência `quantidade × valor unitário = valor total` em item vendido por quilo. Quem arredonda é `aplicarDePara` (Task 2), sobre `pesoNotaKg` e `custoUnitario`.
 - Textos de interface em português, com a acentuação correta.
 
 ---
@@ -49,8 +49,8 @@
 | `app/recebimentos/notas/page.js` | Tela "Notas fiscais" (caixa de entrada). |
 | `components/RecebimentoTabs.js` | Navegação entre "Entradas" e "Notas fiscais". |
 | `components/ImportarNota.js` | Bloco de importação no formulário de recebimento. |
-| `supabase/atualizacao_21_nfe_documentos.sql` | Tabelas de documento, estado e de-para. |
-| `supabase/atualizacao_22_certificado_digital.sql` | Tabela do certificado. |
+| `supabase/atualizacao_22_nfe_documentos.sql` | Tabelas de documento, estado e de-para. |
+| `supabase/atualizacao_24_certificado_digital.sql` | Tabela do certificado. |
 | `tests/nfe-parse.test.mjs`, `tests/nfe-depara.test.mjs`, `tests/nfe-parcelas.test.mjs`, `tests/nfe-cripto.test.mjs`, `tests/sefaz-envelopes.test.mjs` | Testes. |
 | `tests/fixtures/nfe-exemplo.xml`, `tests/fixtures/dist-retorno.xml` | Fixtures. |
 | `vercel.json` | Cron da sincronização. |
@@ -80,6 +80,16 @@
   itens: [{ indice, codigo, descricao, ncm, unidade, quantidade, valorUnitario, valorTotal }],
   duplicatas: [{ numero, vencimento, valor }] }`.
   Lança `Error` quando o XML não é NF-e ou a chave não tem 44 dígitos.
+
+> **Ampliação aprovada na revisão final da fase 1.** A `Nota` ganhou mais dois campos,
+> e o código em `lib/nfe/parseNFe.js` é a referência:
+>
+> - `somaItens` — Σ `vProd`, o que os itens custam sem frete, IPI nem ST. É este valor,
+>   e não o `valorTotal` (vNF), que a Task 3 compara com o total conferido.
+> - `destinatario: { cnpj, nome }` — sem ele nada conferia se a nota era mesmo desta
+>   empresa, e qualquer XML em mãos do operador virava estoque e conta a pagar. A rota
+>   de upload recusa nota emitida para outro CNPJ e nota cujo `tpNF` não seja de saída
+>   do emitente (o `tipoOperacao` era lido e nunca usado).
 
 - [ ] **Step 1: Instalar o parser de XML**
 
@@ -436,6 +446,23 @@ valor lançado deixa de bater com o total da nota e as duplicatas do fornecedor 
 valem mais. Nesse caso o sistema volta para o parcelamento manual e sinaliza a
 divergência, em vez de gravar vencimentos que não correspondem ao valor.
 
+> **Regra substituída na revisão final da fase 1 — a interface e a "Decisão
+> importante" acima estão superadas.** A decisão raciocinou só sobre item rejeitado e
+> foi implementada como `|valorLancado − valorTotalNota| ≤ 0,01`, que quase nunca vale
+> numa nota real: o `vNF` inclui frete, IPI e ST, que não entram na soma dos itens, e
+> carne vendida por quilo sempre pesa diferente do que a nota diz — a divergência que o
+> desenho quer justamente deixar visível. Na prática toda nota caía no parcelamento
+> manual acusando "item rejeitado?" sem item rejeitado nenhum.
+>
+> **Regra implementada:** `parcelasDoRecebimento({ duplicatas, dataBase, valorLancado,
+> somaItensNota, temItemNaoAceito, numeroParcelas, intervaloDias })`. O caso do item
+> fora do aceite é decidido direto pela tela, que conhece o status de cada item, e não
+> por comparação de valores; a comparação de valor é contra `somaItens` (Σ vProd) com
+> tolerância relativa de 0,5%; e duplicata sem `dVenc` utilizável também derruba as
+> duplicatas, porque `contas_a_pagar_parcelas.vencimento` é NOT NULL e gravar vazio
+> desfazia a conta a pagar inteira. Os motivos vivem em `ORIGEM_PARCELAS` e cada um tem
+> seu texto em `AVISO_PARCELAS`. `lib/nfe/parcelas.js` é a referência.
+
 - [ ] **Step 1: Escrever o teste que falha**
 
 Criar `tests/nfe-parcelas.test.mjs`:
@@ -553,7 +580,7 @@ git commit -m "feat(nfe): parcelas do contas a pagar a partir das duplicatas"
 ## Task 4: Migração das tabelas de NF-e
 
 **Files:**
-- Create: `supabase/atualizacao_21_nfe_documentos.sql`
+- Create: `supabase/atualizacao_22_nfe_documentos.sql`
 
 **Interfaces:**
 - Consumes: `public.empresas_permitidas()` (já existe, de `atualizacao_05`).
@@ -562,7 +589,7 @@ git commit -m "feat(nfe): parcelas do contas a pagar a partir das duplicatas"
 
 - [ ] **Step 1: Escrever a migração**
 
-Criar `supabase/atualizacao_21_nfe_documentos.sql`:
+Criar `supabase/atualizacao_22_nfe_documentos.sql`:
 
 ```sql
 -- =========================================================
@@ -691,7 +718,7 @@ Esperado: as duas linhas.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add supabase/atualizacao_21_nfe_documentos.sql
+git add supabase/atualizacao_22_nfe_documentos.sql
 git commit -m "feat(nfe): migração das tabelas de documento, estado e de-para"
 ```
 
@@ -744,6 +771,9 @@ export const runtime = 'nodejs';
 
 const LIMITE_XML = 2 * 1024 * 1024; // NF-e realista não passa disso; corta abuso
 
+// Status que já passaram do ponto de "só o XML chegou" — um reenvio não pode rebaixá-los.
+const STATUS_AVANCADOS = ['manifestada', 'vinculada'];
+
 // POST: registra um XML enviado à mão (fornecedor mandou por e-mail, ou o
 // certificado ainda não está configurado). body: { empresaId, xml }
 export async function POST(request) {
@@ -776,6 +806,16 @@ export async function POST(request) {
     .upload(path, Buffer.from(xml, 'utf8'), { contentType: 'application/xml', upsert: true });
   if (errUp) return NextResponse.json({ error: 'Falha ao guardar o XML: ' + errUp.message }, { status: 500 });
 
+  // Reenviar o XML de uma nota que já andou no fluxo não pode rebaixá-la: se ela
+  // já foi manifestada ou virou recebimento, o status atual prevalece. Sem isso o
+  // recebimento_id continuaria apontando para o lançamento enquanto o status
+  // dissesse que a nota ainda está esperando para ser lançada.
+  const { data: existente } = await sb.from('nfe_documentos')
+    .select('status').eq('empresa_id', empresaId).eq('chave', nota.chave).maybeSingle();
+  const statusNovo = existente && STATUS_AVANCADOS.includes(existente.status)
+    ? existente.status
+    : (ehNFe ? 'xml_baixado' : 'ignorada');
+
   const { data, error } = await sb.from('nfe_documentos').upsert([{
     empresa_id: empresaId,
     chave: nota.chave,
@@ -786,7 +826,7 @@ export async function POST(request) {
     serie: nota.serie,
     emitida_em: nota.emitidaEm || null,
     valor_total: nota.valorTotal,
-    status: ehNFe ? 'xml_baixado' : 'ignorada',
+    status: statusNovo,
     origem: 'upload',
     xml_path: path,
     ultimo_erro: null,
@@ -904,7 +944,24 @@ export async function GET(request, { params }) {
 
   const { data: arquivo, error: errDl } = await sb.storage.from('recebimentos').download(documento.xml_path);
   if (errDl) return NextResponse.json({ error: 'Falha ao ler o XML guardado: ' + errDl.message }, { status: 500 });
-  const nota = parseNFe(await arquivo.text());
+
+  // O XML aqui é dado nosso, não entrada do usuário: se ele não abre, o problema é
+  // do que foi guardado, e a resposta é 500 com mensagem em português — não o erro
+  // genérico do Next. A rota de upload faz o mesmo, mas com 400, porque lá o XML
+  // vem do cliente.
+  let xmlContent;
+  try {
+    xmlContent = await arquivo.text();
+  } catch (e) {
+    return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
+  }
+
+  let nota;
+  try {
+    nota = parseNFe(xmlContent);
+  } catch (e) {
+    return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
+  }
 
   const [{ data: fornecedor }, { data: mapa }, { data: recebimentoExistente }] = await Promise.all([
     sb.from('fornecedores').select('id, nome, cnpj')
@@ -969,6 +1026,30 @@ git commit -m "feat(nfe): rota que monta o rascunho de recebimento a partir da n
 
 Esta é a tarefa que entrega valor sem certificado nenhum: com o XML que o fornecedor
 manda por e-mail, o recebimento já para de ser digitado.
+
+> **Redesenho aprovado durante a execução — os Steps 3 a 5 abaixo estão superados.**
+>
+> O desenho original mandava empilhar os itens importados direto na lista de itens já
+> montados. A revisão mostrou que essa lista é somente leitura: como o peso conferido
+> nasce vazio de propósito, o item importado ficava com peso zero e sem campo para
+> digitar. Registrar assim gravava lote de 0 kg e, com `totalAceito` zerado, nenhuma
+> conta a pagar era criada — o código de parcelas nunca rodava pelo caminho da
+> importação. Junto vinham três outros defeitos: item com matéria-prima inativa sumia
+> da tela, importar dois XML seguidos duplicava linhas e carimbava o CNPJ da última
+> nota no de-para de todas, e itens importados escapavam das validações de validade,
+> temperatura e inspeção.
+>
+> **Desenho que foi implementado:** os itens da nota entram numa fila de conferência.
+> Clicar em "Conferir item" carrega o item no formulário de item que a tela já tem
+> (matéria-prima, peso da nota e custo pré-preenchidos, peso conferido vazio ao lado
+> do peso da nota); o operador pesa, preenche o que a regra do produto exigir e clica
+> "Adicionar item" como sempre fez. Assim todas as validações de `adicionarItem` são
+> reaproveitadas, em vez de duplicadas. Cada item leva o CNPJ do emitente no próprio
+> `_nfe`, e as linhas do de-para são deduplicadas por `cnpjEmitente + codigo_produto`
+> antes do upsert.
+>
+> O código em `app/recebimentos/page.js` e `components/ImportarNota.js` é a referência
+> desta parte, não os blocos abaixo. Os Steps 1, 2, 6 e 7 continuam valendo como estão.
 
 - [ ] **Step 1: Criar o componente de importação**
 
@@ -1273,7 +1354,7 @@ git commit -m "feat(recebimento): importar NF-e por XML e aprender o de-para de 
 **Files:**
 - Create: `lib/nfe/cripto.js`
 - Create: `tests/nfe-cripto.test.mjs`
-- Create: `supabase/atualizacao_22_certificado_digital.sql`
+- Create: `supabase/atualizacao_24_certificado_digital.sql`
 
 **Interfaces:**
 - Consumes: `node:crypto`.
@@ -1383,7 +1464,7 @@ Esperado: PASS nos 6 testes de `nfe-cripto`.
 
 - [ ] **Step 5: Escrever a migração da tabela**
 
-Criar `supabase/atualizacao_22_certificado_digital.sql`:
+Criar `supabase/atualizacao_24_certificado_digital.sql`:
 
 ```sql
 -- =========================================================
@@ -1395,7 +1476,7 @@ Criar `supabase/atualizacao_22_certificado_digital.sql`:
 -- Só o service role (rotas em app/api/nfe/*) alcança o conteúdo, e a chave de
 -- decifragem fica em env var da Vercel (NFE_CERT_MASTER_KEY), fora do banco.
 --
--- Rode depois de atualizacao_21_nfe_documentos.sql.
+-- Rode depois de atualizacao_22_nfe_documentos.sql.
 -- =========================================================
 
 begin;
@@ -1458,7 +1539,7 @@ acesso ao certificado guardado — nesse caso, subir o `.pfx` de novo.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_22_certificado_digital.sql
+git add lib/nfe/cripto.js tests/nfe-cripto.test.mjs supabase/atualizacao_24_certificado_digital.sql
 git commit -m "feat(nfe): cifra AES-256-GCM e tabela do certificado digital"
 ```
 
@@ -3015,7 +3096,7 @@ git commit -m "feat(nfe): sincronização agendada com a SEFAZ"
 ## Verificação final
 
 - [ ] `npm run verify` passa: os 29 testes novos (6 parse + 5 de-para + 4 parcelas + 6 cripto + 5 envelopes + 3 resumo), mais os que já existiam, e o build do Next sem erro.
-- [ ] As migrações 21 e 22 estão aplicadas no Supabase de produção.
+- [ ] As migrações 22 (NF-e), 23 (CNPJ de fornecedor) e 24 (certificado) estão aplicadas no Supabase de produção.
 - [ ] `NFE_CERT_MASTER_KEY` e `CRON_SECRET` estão configurados na Vercel.
 - [ ] Uma nota real foi importada por XML, uma por chave e uma pela caixa de entrada.
 - [ ] A segunda nota do mesmo fornecedor veio com os itens já casados.

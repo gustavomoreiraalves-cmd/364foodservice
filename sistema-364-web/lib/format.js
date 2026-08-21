@@ -11,6 +11,31 @@ export function fmtDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Lê o custo unitário digitado (cadastro de produto ou prompt de edição) e
+// devolve um número >= 0, ou `null` quando o texto não é um custo válido.
+//
+// Regras, iguais nos dois caminhos que gravam a coluna:
+//   - vazio / null / undefined  -> 0. Zero é o valor documentado de "não
+//     informado": o CMV cai no custo teórico da ficha técnica, que é o que o
+//     texto de ajuda do formulário promete.
+//   - vírgula decimal aceita ('45,50' == '45.50' == 45.5). A troca é global,
+//     para o resultado não depender de quantas vírgulas o usuário digitou.
+//   - separador de milhar NÃO é aceito: '1.234,56' vira '1.234.56', que não é
+//     número, e a função devolve null para a tela avisar. Aceitá-lo exigiria
+//     remover os pontos, e isso estragaria '1.5' — que o <input type="number">
+//     produz querendo dizer um e meio, não mil e quinhentos.
+//   - qualquer coisa que não vire número finito, ou número negativo -> null.
+//     Custo negativo é pior que erro visível: todo leitor testa `> 0`, então
+//     ele passaria a cair na ficha e reportaria um custo que o produto não tem.
+export function parseCustoUnitario(valor) {
+  if (valor === null || valor === undefined) return 0;
+  const texto = String(valor).trim();
+  if (texto === '') return 0;
+  const numerico = Number(texto.replace(/,/g, '.'));
+  if (!Number.isFinite(numerico) || numerico < 0) return null;
+  return numerico;
+}
+
 export function hoje() {
   return new Date().toISOString().slice(0, 10);
 }

@@ -5,9 +5,12 @@ import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes } from '../../lib/for
 import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebimento } from '../../lib/storage';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
+import ImportarNota from '../../components/ImportarNota';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { CATEGORIAS_CONTA, gerarParcelas } from '../../lib/financeiro';
+import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
+import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
+import { calcularItem } from '../../lib/nfe/dePara';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -59,6 +62,9 @@ function Conteudo({ setFicha }) {
   const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
   const proximaKey = useRef(0);
+  const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
+  const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
+  const [itemDaNotaEmConferencia, setItemDaNotaEmConferencia] = useState(null); // item carregado no formulário
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -107,25 +113,180 @@ function Conteudo({ setFicha }) {
   const validadeAbaixoDoMinimo = diasValidade != null && diasValidade < mpSelecionada.dias_minimos_validade;
   const exigeMotivo = ['rejeitado', 'quarentena'].includes(itemForm.status_qualidade);
 
+  // Recebe o corpo de /preparar: preenche o cabeçalho e joga todos os itens da
+  // nota numa fila de conferência. Cada item passa pelo formulário normal de item
+  // (adicionarItem) antes de virar staging, então nenhuma regra de qualidade da
+  // matéria-prima é pulada.
+  function aplicarNotaImportada(dados) {
+    if (notaImportada) {
+      alert('Já existe uma nota importada em andamento. Registre este recebimento ou use '
+        + '"Descartar nota importada" antes de importar outra.');
+      return;
+    }
+    setNotaImportada(dados);
+    setHeader(h => ({
+      ...h,
+      data: (dados.nota.emitidaEm || '').slice(0, 10) || h.data,
+      nota_fiscal: dados.nota.numero || h.nota_fiscal,
+      // Nota sem fornecedor casado não apaga o fornecedor que o operador já tinha
+      // escolhido — e fornecedor_id vazio viraria uuid inválido no contas a pagar.
+      fornecedor_id: dados.fornecedor?.id || h.fornecedor_id,
+    }));
+
+    setItensDaNota(dados.itens.map(i => ({
+      ...i,
+      materiaPrimaId: mps.some(m => m.id === i.materiaPrimaId) ? i.materiaPrimaId : '',
+      fatorConversao: i.fatorConversao || 1,
+    })));
+
+    if (!dados.fornecedor && dados.fornecedorSugerido) {
+      alert(`Não encontrei nenhum fornecedor com o CNPJ ${dados.fornecedorSugerido.cnpj} `
+        + `(${dados.fornecedorSugerido.nome}). Selecione o fornecedor no campo abaixo — `
+        + 'se ele ainda não estiver cadastrado, cadastre em Fornecedores.');
+    }
+  }
+
+  // A fila de conferência e o formulário guardam a mesma linha da nota em formatos
+  // diferentes. Estes dois ajudantes fazem a linha voltar para a fila — no cancelamento
+  // da conferência e na remoção de um item já montado — sem reimportar o XML.
+  function filaDoNfe(nfe, materiaPrimaId) {
+    return {
+      indice: nfe.indice,
+      codigo: nfe.codigo,
+      descricao: nfe.descricao,
+      unidadeNota: nfe.unidadeNota,
+      quantidadeNota: nfe.quantidadeNota,
+      valorTotalItem: nfe.valorTotalItem,
+      fatorConversao: nfe.fatorConversao,
+      materiaPrimaId: materiaPrimaId || '',
+    };
+  }
+
+  function devolverAFila(item) {
+    setItensDaNota(lista => (lista.some(i => i.indice === item.indice)
+      ? lista
+      : [...lista, item].sort((a, b) => a.indice - b.indice)));
+  }
+
+  // Sem isto a conferência só terminava adicionando o item: abandonar uma linha
+  // deixava `itemDaNotaEmConferencia` pendurado e o próximo item adicionado herdava
+  // o _nfe da linha abandonada, gravando o de-para do código A na matéria-prima B.
+  function cancelarConferencia() {
+    if (!itemDaNotaEmConferencia) return;
+    devolverAFila(filaDoNfe(itemDaNotaEmConferencia, itemForm.materia_prima_id));
+    setItemDaNotaEmConferencia(null);
+    setItemForm(ITEM_VAZIO());
+  }
+
+  function descartarNotaImportada() {
+    if (!confirm('Descartar a nota importada? Os itens que vieram dela saem do recebimento; '
+      + 'os que você digitou à mão continuam.')) return;
+    setNotaImportada(null);
+    setItensDaNota([]);
+    setItemDaNotaEmConferencia(null);
+    setItens(lista => lista.filter(i => !i._nfe));
+    if (itemDaNotaEmConferencia) setItemForm(ITEM_VAZIO());
+    // O cabeçalho volta ao estado de recebimento digitado à mão. Sem isto, a data,
+    // o número e principalmente o fornecedor da nota descartada ficavam de pé, e
+    // uma nota seguinte de fornecedor não reconhecido (que preserva o fornecedor já
+    // escolhido) lançaria a conta a pagar no fornecedor da nota anterior.
+    setHeader(h => ({ ...h, data: hoje(), nota_fiscal: '', fornecedor_id: '' }));
+  }
+
+  // Trocar a matéria-prima limpa o resto do formulário. Com uma linha da nota em
+  // conferência, o peso e o custo que vieram dela continuam valendo: trocar a
+  // matéria-prima aqui é justamente corrigir o de-para (mesmo código do fornecedor,
+  // outra matéria-prima), e não começar um item do zero.
+  function trocarMateriaPrima(materiaPrimaId) {
+    setItemForm(f => ({
+      ...ITEM_VAZIO(),
+      materia_prima_id: materiaPrimaId,
+      ...(itemDaNotaEmConferencia
+        ? { peso_nota_kg: f.peso_nota_kg, custo_unitario: f.custo_unitario }
+        : {}),
+    }));
+  }
+
+  // Carrega um item da nota no formulário de item existente, com o custo e o peso
+  // da nota já calculados. O peso conferido fica VAZIO de propósito: quem preenche
+  // é a balança, e a divergência com a nota tem que aparecer antes de gravar.
+  function carregarItemDaNota(indice) {
+    const item = itensDaNota.find(i => i.indice === indice);
+    if (!item?.materiaPrimaId) { alert('Escolha a matéria-prima deste item.'); return; }
+    const fator = Number(item.fatorConversao);
+    if (!(fator > 0)) { alert('Informe um fator de conversão válido para este item.'); return; }
+    // Mesma função que a rota /preparar usa — a conta que define o custo do lote
+    // não pode existir em duas versões.
+    const { pesoNotaKg, custoUnitario } = calcularItem({
+      quantidade: item.quantidadeNota, valorTotal: item.valorTotalItem, fator,
+    });
+    // O parser devolve 0 quando o campo do XML está ausente ou ilegível, e um
+    // custo zero passaria batido pela validação do item (a string '0' é truthy),
+    // gravando lote de estoque a custo zero.
+    if (!(pesoNotaKg > 0)) {
+      alert(`O item ${item.codigo} veio sem quantidade utilizável no XML (campo qCom da NF-e). `
+        + 'Lance este item à mão no formulário abaixo.');
+      return;
+    }
+    if (!(custoUnitario > 0)) {
+      alert(`O item ${item.codigo} veio sem valor utilizável no XML (campo vProd da NF-e). `
+        + 'Lance este item à mão no formulário abaixo.');
+      return;
+    }
+    setItemForm({
+      ...ITEM_VAZIO(),
+      materia_prima_id: item.materiaPrimaId,
+      quantidade: '',
+      peso_nota_kg: String(pesoNotaKg),
+      custo_unitario: String(custoUnitario),
+    });
+    // quantidadeNota e valorTotalItem viajam junto para a linha poder voltar à fila
+    // depois, sem depender de a nota ainda estar carregada.
+    setItemDaNotaEmConferencia({
+      indice, codigo: item.codigo, descricao: item.descricao, unidadeNota: item.unidadeNota,
+      quantidadeNota: item.quantidadeNota, valorTotalItem: item.valorTotalItem,
+      fatorConversao: fator, cnpjEmitente: notaImportada.nota.emitente.cnpj,
+    });
+  }
+
   function adicionarItem(e) {
     e.preventDefault();
     if (!mpSelecionada) { alert('Selecione a matéria-prima.'); return; }
-    if (!itemForm.quantidade || !itemForm.custo_unitario) { alert('Preencha peso conferido e custo unitário.'); return; }
+    // Comparação numérica, e não por veracidade: a string '0' é truthy e passaria,
+    // gravando item sem peso ou lote a custo zero.
+    if (!(Number(itemForm.quantidade) > 0)) { alert('Informe o peso conferido (maior que zero).'); return; }
+    if (!(Number(itemForm.custo_unitario) > 0)) { alert('Informe o custo unitário (maior que zero).'); return; }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
     if (regra !== 'simples' && exigeMotivo && !itemForm.motivo_rejeicao) { alert('Informe o motivo da rejeição/quarentena.'); return; }
     proximaKey.current += 1;
-    setItens([...itens, { ...itemForm, _key: proximaKey.current, _mp: mpSelecionada }]);
+    setItens([...itens, {
+      ...itemForm, _key: proximaKey.current, _mp: mpSelecionada,
+      ...(itemDaNotaEmConferencia ? { _nfe: itemDaNotaEmConferencia } : {}),
+    }]);
     setItemForm(ITEM_VAZIO());
+    if (itemDaNotaEmConferencia) {
+      setItensDaNota(lista => lista.filter(i => i.indice !== itemDaNotaEmConferencia.indice));
+      setItemDaNotaEmConferencia(null);
+    }
   }
 
+  // Item que veio da nota volta para a fila de conferência em vez de sumir — assim
+  // uma linha removida por engano pode ser conferida de novo sem recarregar a página,
+  // e o aviso de "itens não conferidos" volta a contá-la.
   function removerItemStaged(key) {
+    const alvo = itens.find(i => i._key === key);
     setItens(itens.filter(i => i._key !== key));
+    if (alvo?._nfe) devolverAFila(filaDoNfe(alvo._nfe, alvo.materia_prima_id));
   }
 
   async function registrar(e) {
     e.preventDefault();
+    if (itensDaNota.length > 0) {
+      const singular = itensDaNota.length === 1;
+      if (!confirm(`${itensDaNota.length} ${singular ? 'item' : 'itens'} da nota ainda ${singular ? 'não foi conferido' : 'não foram conferidos'}. Registrar mesmo assim?`)) return;
+    }
     if (!itens.length) { alert('Adicione ao menos um item antes de registrar o recebimento.'); return; }
     if (header.condicao_pagamento === 'Parcelado' && (Number(header.numero_parcelas) < 2 || Number(header.intervalo_dias) < 1)) {
       alert('Informe um número de parcelas válido (mínimo 2) e um intervalo de dias válido (mínimo 1) para condição parcelada.');
@@ -139,6 +300,8 @@ function Conteudo({ setFicha }) {
         nota_fiscal: header.nota_fiscal || null,
         responsavel_id: header.responsavel_id || null,
         empresa_id: empresaAtual.id,
+        nfe_chave: notaImportada?.nota.chave || null,
+        nfe_documento_id: notaImportada?.documento.id || null,
       }]).select('id').single();
 
       if (errCabecalho) { alert('Erro ao salvar: ' + errCabecalho.message); return; }
@@ -231,13 +394,16 @@ function Conteudo({ setFicha }) {
       const totalAceito = Math.round(inseridos
         .filter(it => STATUS_QUALIDADE_APROVADO.includes(it.statusEfetivo))
         .reduce((s, it) => s + it.quantidade * it.custoUnitario, 0) * 100) / 100;
+      // Item fora do aceite é o que invalida as duplicatas do fornecedor — e quem
+      // sabe disso é aqui, não uma comparação de valores lá em parcelas.js.
+      const temItemNaoAceito = inseridos.some(it => !STATUS_QUALIDADE_APROVADO.includes(it.statusEfetivo));
 
       if (totalAceito > 0) {
         const nomeFornecedor = fornecedores.find(f => f.id === header.fornecedor_id)?.nome || '';
         const { data: conta, error: e3 } = await supabase.from('contas_a_pagar').insert([{
           descricao: `Nota ${header.nota_fiscal || cabecalho.id.slice(0, 8)} — ${nomeFornecedor}`,
           categoria_conta: header.categoria_conta_pagar,
-          fornecedor_id: header.fornecedor_id,
+          fornecedor_id: header.fornecedor_id || null,
           recebimento_id: cabecalho.id,
           valor_total: totalAceito,
           responsavel_id: header.responsavel_id || null,
@@ -248,7 +414,16 @@ function Conteudo({ setFicha }) {
           alert('Recebimento registrado, mas houve erro ao gerar a conta a pagar: ' + e3.message);
         } else {
           const numeroParcelas = header.condicao_pagamento === 'Parcelado' ? Number(header.numero_parcelas) : 1;
-          const parcelas = gerarParcelas(header.data, totalAceito, numeroParcelas, Number(header.intervalo_dias));
+          const { origem, parcelas } = parcelasDoRecebimento({
+            duplicatas: notaImportada?.duplicatas || [],
+            dataBase: header.data,
+            valorLancado: totalAceito,
+            somaItensNota: notaImportada?.nota.somaItens ?? 0,
+            temItemNaoAceito,
+            numeroParcelas,
+            intervaloDias: Number(header.intervalo_dias),
+          });
+          if (AVISO_PARCELAS[origem]) alert(AVISO_PARCELAS[origem]);
           const { error: e4 } = await supabase.from('contas_a_pagar_parcelas').insert(
             parcelas.map(p => ({ conta_a_pagar_id: conta.id, numero: p.numero, valor: p.valor, vencimento: p.vencimento, empresa_id: empresaAtual.id }))
           );
@@ -259,8 +434,36 @@ function Conteudo({ setFicha }) {
         }
       }
 
+      if (notaImportada) {
+        const porChave = new Map();
+        for (const it of itens) {
+          if (!it._nfe) continue;
+          porChave.set(`${it._nfe.cnpjEmitente}|${it._nfe.codigo}`, {
+            empresa_id: empresaAtual.id,
+            cnpj_emitente: it._nfe.cnpjEmitente,
+            codigo_produto: it._nfe.codigo,
+            materia_prima_id: it.materia_prima_id,
+            unidade_nf: it._nfe.unidadeNota,
+            fator_conversao: it._nfe.fatorConversao,
+          });
+        }
+        const aprender = Array.from(porChave.values());
+        if (aprender.length) {
+          const { error: errMapa } = await supabase.from('fornecedor_produto_mapa')
+            .upsert(aprender, { onConflict: 'empresa_id,cnpj_emitente,codigo_produto' });
+          if (errMapa) alert('Recebimento salvo, mas o de-para não foi gravado: ' + errMapa.message);
+        }
+        const { error: errVinculo } = await supabase.from('nfe_documentos')
+          .update({ status: 'vinculada', recebimento_id: cabecalho.id })
+          .eq('id', notaImportada.documento.id);
+        if (errVinculo) alert('Recebimento salvo, mas a nota não foi marcada como vinculada: ' + errVinculo.message);
+      }
+
       setHeader(HEADER_VAZIO());
       setItens([]);
+      setNotaImportada(null);
+      setItensDaNota([]);
+      setItemDaNotaEmConferencia(null);
       carregar();
     } finally {
       setSalvando(false);
@@ -342,6 +545,55 @@ function Conteudo({ setFicha }) {
     <>
       <div className="panel">
         <h3>Novo recebimento de mercadoria</h3>
+
+        <ImportarNota empresaId={empresaAtual?.id} onImportado={aplicarNotaImportada} />
+
+        {notaImportada && (
+          <p className="muted" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              Nota {notaImportada.nota.numero} de {notaImportada.nota.emitente.nome} — total{' '}
+              {fmtMoney(notaImportada.nota.valorTotal)}
+              {notaImportada.duplicatas.length > 0
+                && ` · ${notaImportada.duplicatas.length} parcela(s) na nota`}
+            </span>
+            <button className="btn secondary small" type="button" onClick={descartarNotaImportada}>
+              Descartar nota importada
+            </button>
+          </p>
+        )}
+
+        {itensDaNota.length > 0 && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <strong>Itens da nota a conferir ({itensDaNota.length})</strong>
+            <p className="muted">
+              Confira cada item uma vez; nas próximas notas deste fornecedor o de-para já vem preenchido.
+            </p>
+            {itensDaNota.map(item => (
+              <div key={item.indice} style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{ minWidth: 260 }}>
+                  {item.codigo} — {item.descricao} ({item.quantidadeNota} {item.unidadeNota})
+                </span>
+                <select value={item.materiaPrimaId}
+                  onChange={e => setItensDaNota(lista => lista.map(i =>
+                    i.indice === item.indice ? { ...i, materiaPrimaId: e.target.value } : i))}>
+                  <option value="">Matéria-prima…</option>
+                  {mps.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                </select>
+                <label>
+                  {item.unidadeNota} → kg
+                  <input type="number" step="0.0001" min="0.0001" style={{ width: 90, marginLeft: 6 }}
+                    value={item.fatorConversao}
+                    onChange={e => setItensDaNota(lista => lista.map(i =>
+                      i.indice === item.indice ? { ...i, fatorConversao: e.target.value } : i))} />
+                </label>
+                <button type="button" onClick={() => carregarItemDaNota(item.indice)}>Conferir item</button>
+                {itemDaNotaEmConferencia?.indice === item.indice
+                  && <span className="tag warn">Em conferência abaixo</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
         <form className="form-grid">
           <div><label>Data</label><input type="date" required value={header.data} onChange={e => setHeader({ ...header, data: e.target.value })} /></div>
           <div><label>Fornecedor</label>
@@ -383,10 +635,23 @@ function Conteudo({ setFicha }) {
           </div>
         </form>
 
-        <h4 style={{ marginTop: 18 }}>Itens da nota</h4>
+        <h4 style={{ marginTop: 18 }}>Item do recebimento</h4>
+
+        {itemDaNotaEmConferencia && (
+          <div className="banner info" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            <span>
+              Conferindo o item <b>{itemDaNotaEmConferencia.codigo}</b> — {itemDaNotaEmConferencia.descricao}
+              {' '}({itemDaNotaEmConferencia.quantidadeNota} {itemDaNotaEmConferencia.unidadeNota}) da nota importada.
+            </span>
+            <button className="btn secondary small" type="button" onClick={cancelarConferencia}>
+              Cancelar conferência
+            </button>
+          </div>
+        )}
+
         <div className="form-grid">
           <div><label>Matéria-prima</label>
-            <select value={itemForm.materia_prima_id} onChange={e => setItemForm({ ...ITEM_VAZIO(), materia_prima_id: e.target.value })}>
+            <select value={itemForm.materia_prima_id} onChange={e => trocarMateriaPrima(e.target.value)}>
               <option value="">Selecione…</option>
               {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
             </select>

@@ -7,6 +7,11 @@ import { useEmpresaAtual } from '../../lib/empresa';
 const FORM_VAZIO = { nome: '', cnpj: '', categoria: 'Carnes', contato: '', telefone: '', email: '' };
 const CATEGORIAS = ['Carnes', 'Temperos', 'Embalagens', 'Equipamentos', 'Serviços', 'Outros'];
 
+// O CNPJ é gravado só com dígitos: é assim que ele vem no XML da NF-e, e é por
+// igualdade exata que a importação encontra o fornecedor da nota. Fornecedor
+// cadastrado como 12.345.678/0001-99 nunca casava com a nota.
+const soDigitos = v => String(v || '').replace(/\D/g, '');
+
 export default function FornecedoresPage() {
   return (
     <AppShell modulo="fornecedores" titulo="Fornecedores" desc="Cadastro de fornecedores e categorias">
@@ -33,7 +38,10 @@ function Conteudo() {
 
   async function adicionar(e) {
     e.preventDefault();
-    const { error } = await supabase.from('fornecedores').insert([{ ...form, empresa_id: empresaAtual.id }]);
+    // CNPJ em branco vai como null: a coluna é opcional e string vazia não passa
+    // no check de "só dígitos" da migração 22.
+    const { error } = await supabase.from('fornecedores')
+      .insert([{ ...form, cnpj: soDigitos(form.cnpj) || null, empresa_id: empresaAtual.id }]);
     if (!error) {
       setForm(FORM_VAZIO);
       carregar();
@@ -55,7 +63,10 @@ function Conteudo() {
         <h3>Novo fornecedor</h3>
         <form onSubmit={adicionar} className="form-grid">
           <div><label>Nome / Razão social</label><input required value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} /></div>
-          <div><label>CNPJ</label><input value={form.cnpj} onChange={e => setForm({ ...form, cnpj: e.target.value })} /></div>
+          <div><label>CNPJ</label>
+            <input inputMode="numeric" maxLength={14} placeholder="Só números"
+              value={form.cnpj} onChange={e => setForm({ ...form, cnpj: soDigitos(e.target.value) })} />
+          </div>
           <div><label>Categoria</label>
             <select value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })}>
               {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
