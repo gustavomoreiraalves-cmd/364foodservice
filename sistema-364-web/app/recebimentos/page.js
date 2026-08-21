@@ -535,13 +535,14 @@ function Conteudo({ setFicha }) {
 
   if (loading) return <p className="muted">Carregando…</p>;
 
-  if (!mps.length || !fornecedores.length) {
-    return (
-      <div className="banner info">
-        Cadastre ao menos um <b>fornecedor</b> e uma <b>matéria-prima</b> (aba Produtos) antes de lançar um recebimento.
-      </div>
-    );
-  }
+  // As duas listas de seleção do lançamento novo, montadas uma vez: o guard logo
+  // abaixo e os <select> correspondentes têm que enxergar exatamente a mesma
+  // coisa. Decidir o guard por `mps.length`/`fornecedores.length` — que desde a
+  // correção do de-para da NF-e contam também os inativos — abria o formulário
+  // com um campo obrigatório sem nenhuma opção, que é o beco sem saída.
+  const mpsSelecionaveis = mps.filter(m => m.ativo !== false || m.id === itemForm.materia_prima_id);
+  const fornecedoresSelecionaveis = fornecedores.filter(f => f.ativo !== false || f.id === header.fornecedor_id);
+  const podeLancar = mpsSelecionaveis.length > 0 && fornecedoresSelecionaveis.length > 0;
 
   const grupos = [];
   const grupoPorId = {};
@@ -557,6 +558,20 @@ function Conteudo({ setFicha }) {
 
   return (
     <>
+      {/* Sem lista de seleção não dá para lançar, mas bloquear o lançamento não
+          pode esconder o histórico: inativo some da seleção, nunca do histórico.
+          Por isso o banner substitui só este painel — a lista de recebimentos
+          continua logo abaixo, em qualquer situação. */}
+      {!podeLancar ? (
+      <div className="banner info">
+        Para lançar um recebimento novo é preciso ter ao menos um <b>fornecedor</b> e uma{' '}
+        <b>matéria-prima</b> ativos.{' '}
+        {!fornecedores.length || !mps.length
+          ? 'Cadastre o que estiver faltando nas abas Fornecedores e Matérias-primas.'
+          : 'Há cadastros, mas os que faltam aqui estão todos desativados — reative em Fornecedores ou em Matérias-primas.'}
+        {' '}Os recebimentos já registrados continuam na lista abaixo.
+      </div>
+      ) : (
       <div className="panel">
         <h3>Novo recebimento de mercadoria</h3>
 
@@ -615,9 +630,7 @@ function Conteudo({ setFicha }) {
           <div><label>Fornecedor</label>
             <select required value={header.fornecedor_id} onChange={e => setHeader({ ...header, fornecedor_id: e.target.value })}>
               <option value="">Selecione…</option>
-              {fornecedores
-                .filter(f => f.ativo !== false || f.id === header.fornecedor_id)
-                .map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {fornecedoresSelecionaveis.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div><label>Nota fiscal (nº)</label><input value={header.nota_fiscal} onChange={e => setHeader({ ...header, nota_fiscal: e.target.value })} /></div>
@@ -671,9 +684,7 @@ function Conteudo({ setFicha }) {
           <div><label>Matéria-prima</label>
             <select value={itemForm.materia_prima_id} onChange={e => trocarMateriaPrima(e.target.value)}>
               <option value="">Selecione…</option>
-              {mps
-                .filter(m => m.ativo !== false || m.id === itemForm.materia_prima_id)
-                .map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+              {mpsSelecionaveis.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
             </select>
             {mpSelecionada && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 4 }}>Regra: {REGRA_LABEL[regra]}</span>}
           </div>
@@ -772,6 +783,7 @@ function Conteudo({ setFicha }) {
           quarentena ou rejeitados ficam registrados, mas fora do saldo disponível.
         </p>
       </div>
+      )}
 
       <div className="panel">
         <h3>Recebimentos ({grupos.length})</h3>
