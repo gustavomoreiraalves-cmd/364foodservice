@@ -46,6 +46,7 @@ function Conteudo({ setFicha }) {
   const [erroCarregar, setErroCarregar] = useState('');
   const [cancelando, setCancelando] = useState(false);
   const [motivo, setMotivo] = useState('');
+  const [erroCancelar, setErroCancelar] = useState('');
   const [reabrindo, setReabrindo] = useState(false);
   const [motivoReabertura, setMotivoReabertura] = useState('');
   const [erroReabrir, setErroReabrir] = useState('');
@@ -53,7 +54,11 @@ function Conteudo({ setFicha }) {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    setErro('');
+    // `erro` (falha de gravação) não é limpo aqui de propósito: quase toda
+    // falha de escrita termina em `setErro(msg)` seguido de `carregar()`, e
+    // limpar aqui apagava a mensagem no mesmo ciclo de render — nenhum erro de
+    // gravação chegava a aparecer na tela. Quem limpa é cada ação de escrita,
+    // no começo dela.
     setErroCarregar('');
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
@@ -145,11 +150,27 @@ function Conteudo({ setFicha }) {
     // pedido enquanto esta tela estava aberta, o update do cabeçalho pode ir
     // e o dos itens ser recusado pelo trigger, relatando uma falha parcial
     // como se fosse total. Conferimos o status atual antes de escrever nada.
+    //
+    // Os três desfechos ruins são diferentes e mereciam mensagens diferentes:
+    // a consulta falhou (rede, sessão), o pedido sumiu da empresa, ou alguém
+    // realmente trocou o status. A mensagem única culpava "outra pessoa" até
+    // quando o Wi-Fi tinha caído.
     const { data: atual, error: eStatus } = await supabase.from('pedidos')
       .select('status').eq('id', id).eq('empresa_id', eid).maybeSingle();
-    if (eStatus || !atual || atual.status !== 'Pendente') {
+    if (eStatus) {
       setSalvando(false);
-      setErro('Este pedido foi alterado por outra pessoa e não está mais Pendente. A tela foi recarregada.');
+      setErro(`Não foi possível conferir a situação do pedido antes de salvar: ${eStatus.message}. Nada foi gravado — tente de novo.`);
+      return;
+    }
+    if (!atual) {
+      setSalvando(false);
+      setErro('Este pedido não está mais nesta empresa. Nada foi gravado.');
+      await carregar();
+      return;
+    }
+    if (atual.status !== 'Pendente') {
+      setSalvando(false);
+      setErro(`Este pedido foi alterado por outra pessoa e agora está ${atual.status}. Nada foi gravado e a tela foi recarregada.`);
       await carregar();
       return;
     }
@@ -192,6 +213,7 @@ function Conteudo({ setFicha }) {
     // Segunda trava além do select desabilitado: se por algum motivo chegar
     // aqui com edição pendente, não troca o status por baixo do operador.
     if (temAlteracoesNaoSalvas()) return;
+    setErro('');
     // Reabrir não passa direto: abre o diálogo de motivo, como o cancelamento.
     if (exigeMotivoReabertura(pedido.status, status)) { setReabrindo(true); return; }
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
@@ -219,7 +241,7 @@ function Conteudo({ setFicha }) {
   async function cancelar() {
     if (!motivo.trim()) { alert('Informe o motivo do cancelamento.'); return; }
     setSalvando(true);
-    setErro('');
+    setErroCancelar('');
     // `cancelado_em` não vai daqui: quem carimba é o trigger
     // fn_pedido_bloquear_cabecalho, com o relógio do banco. O relógio do
     // navegador pode estar em qualquer hora.
@@ -229,7 +251,7 @@ function Conteudo({ setFicha }) {
       cancelado_por_id: meuFuncionario?.id || null,
     }).eq('id', id).eq('empresa_id', empresaAtual.id);
     setSalvando(false);
-    if (error) { setErro(error.message); carregar(); return; }
+    if (error) { setErroCancelar(error.message); carregar(); return; }
     setCancelando(false);
     setMotivo('');
     carregar();
@@ -359,13 +381,15 @@ function Conteudo({ setFicha }) {
 
         {pedido.status === 'Cancelado' && (
           <div className="banner bad" style={{ marginTop: 12 }}>
-            <b>Pedido cancelado</b> em {fmtDateTime(pedido.cancelado_em)} — {pedido.cancelado_motivo}
+            <b>Pedido cancelado</b> em {fmtDateTime(pedido.cancelado_em)}
+            {pedido.cancelado_por?.nome ? ` por ${pedido.cancelado_por.nome}` : ''} — {pedido.cancelado_motivo}
           </div>
         )}
 
         {pedido.status !== 'Cancelado' && (
           cancelando ? (
             <div className="panel" style={{ marginTop: 12 }}>
+              {erroCancelar && <div className="banner bad">Não foi possível cancelar o pedido: {erroCancelar}</div>}
               <label>Motivo do cancelamento</label>
               <input type="text" value={motivo} autoFocus
                 placeholder="Ex.: cliente desistiu da compra"
@@ -377,7 +401,7 @@ function Conteudo({ setFicha }) {
                 <button className="btn danger" onClick={cancelar} disabled={salvando}>
                   {salvando ? 'Cancelando…' : 'Confirmar cancelamento'}
                 </button>
-                <button className="btn secondary" onClick={() => { setCancelando(false); setMotivo(''); }}>Voltar</button>
+                <button className="btn secondary" onClick={() => { setCancelando(false); setMotivo(''); setErroCancelar(''); }}>Voltar</button>
               </div>
             </div>
           ) : (
