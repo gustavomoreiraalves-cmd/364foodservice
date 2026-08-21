@@ -45,6 +45,8 @@ alter table public.empresas
   add column if not exists sim_municipio text;
 comment on column public.empresas.sim_numero is
   'Número do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho.';
+comment on column public.empresas.sim_municipio is
+  'Município do registro no Serviço de Inspeção Municipal, impresso no selo da etiqueta de despacho.';
 
 -- ---------- AUDITORIA DE IMPRESSÃO: novos tipos de origem ----------
 -- `embalagem_item` e `expedicao_caixa` entram junto porque o check é um só e
@@ -82,8 +84,10 @@ begin
     if not found then raise exception 'Produção não encontrada.'; end if;
   elsif p_source_type = 'recebimento_item' then
     -- Fase 1 do controle de lote: a etiqueta identifica o volume recebido.
+    -- Só `empresa_id` é lido — o item não tem código próprio nas mensagens
+    -- desta RPC (o lote aparece na tela, não na auditoria de impressão).
     v_modulo := 'recebimentos';
-    select empresa_id, lote into v_empresa, v_codigo
+    select empresa_id into v_empresa
       from recebimento_itens where id = p_source_id;
     if not found then raise exception 'Item de recebimento não encontrado.'; end if;
   else
@@ -114,17 +118,24 @@ end $$;
 commit;
 
 -- ---------- ROLLBACK ----------
--- Devolve o check ao estado da atualização 17 e derruba as colunas novas.
+-- Derruba as colunas novas. NÃO desfaz o check de `source_type` para o
+-- conjunto antigo ('producao','producao_interna'): `etiqueta_impressoes` é
+-- append-only (trg_etiqueta_impressoes_imutavel, atualizacao_17 —
+-- `fn_bloquear_alteracao` recusa update e delete), então não há como apagar
+-- de volta as linhas já gravadas com os tipos novos antes de estreitar o
+-- check — e mesmo que houvesse, apagar auditoria de impressão para caber
+-- num rollback de schema estaria errado: rollback desfaz schema, não
+-- histórico. Por isso o check é reinstalado igual ao que a atualização 28
+-- criou (idempotente, não estreita nada) — só para deixar registrado que a
+-- ampliação é definitiva, não um efeito colateral esquecido.
 -- A RPC volta ao original reaplicando `atualizacao_17_producao_interna.sql`,
 -- que é idempotente — não vale duplicar cem linhas de SQL aqui.
 --
 -- begin;
 --
--- delete from etiqueta_impressoes where source_type in ('recebimento_item','embalagem_item','expedicao_caixa');
---
 -- alter table public.etiqueta_impressoes drop constraint if exists etiqueta_impressoes_source_type_check;
 -- alter table public.etiqueta_impressoes add constraint etiqueta_impressoes_source_type_check
---   check (source_type in ('producao', 'producao_interna'));
+--   check (source_type in ('producao', 'producao_interna', 'recebimento_item', 'embalagem_item', 'expedicao_caixa'));
 --
 -- alter table public.recebimento_itens drop constraint if exists recebimento_itens_volumes_positivo;
 -- alter table public.recebimento_itens drop column if exists volumes;

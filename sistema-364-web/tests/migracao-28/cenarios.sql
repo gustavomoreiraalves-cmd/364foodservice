@@ -81,7 +81,7 @@ begin
                                        'reimpressao', 1, 'recebimento', null, '   ');
     raise exception 'FALHA 5a: reimpressão sem motivo aceita';
   exception when others then
-    if sqlerrm like 'FALHA%' then raise; end if;
+    if sqlerrm not like '%motivo da reimpressão%' then raise; end if;
   end;
   perform public.registrar_impressao('recebimento_item', '66666666-6666-6666-6666-666666666666',
                                      'reimpressao', 1, 'recebimento', null, 'Etiqueta danificada');
@@ -98,7 +98,7 @@ begin
     perform public.registrar_impressao('recebimento_item', gen_random_uuid(), 'original', 1, 'recebimento', null, null);
     raise exception 'FALHA 6a: item inexistente aceito';
   exception when others then
-    if sqlerrm like 'FALHA%' then raise; end if;
+    if sqlerrm not like '%Item de recebimento não encontrado%' then raise; end if;
   end;
 
   perform set_config('req.empresa_bloqueada', '11111111-1111-1111-1111-111111111111', true);
@@ -106,7 +106,7 @@ begin
     perform public.registrar_impressao('recebimento_item', '66666666-6666-6666-6666-666666666666', 'original', 1, 'recebimento', null, null);
     raise exception 'FALHA 6b: empresa fora do alcance aceita';
   exception when others then
-    if sqlerrm like 'FALHA%' then raise; end if;
+    if sqlerrm not like '%Sem acesso à empresa%' then raise; end if;
   end;
   perform set_config('req.empresa_bloqueada', '', true);
   raise notice 'OK 6: empresa e existência validadas';
@@ -120,7 +120,7 @@ begin
     perform public.registrar_impressao('recebimento_item', '66666666-6666-6666-6666-666666666666', 'original', 1, 'recebimento', null, null);
     raise exception 'FALHA 7: imprimiu sem o módulo recebimentos';
   exception when others then
-    if sqlerrm like 'FALHA%' then raise; end if;
+    if sqlerrm not like '%Sem permissão para imprimir etiquetas de recebimentos%' then raise; end if;
   end;
   perform set_config('req.permissoes', 'recebimentos,producoes', true);
   raise notice 'OK 7: permissão de módulo exigida';
@@ -135,6 +135,32 @@ begin
     raise exception 'FALHA 8: caminho antigo quebrou';
   end if;
   raise notice 'OK 8: produção continua imprimindo';
+end $$;
+
+-- Cenário 9: produção interna — o ramo que o brief mais manda proteger. A
+-- trava de status (só finalizada imprime) tem que sobreviver intacta.
+do $$
+declare
+  v_fin uuid := gen_random_uuid();
+  v_rasc uuid := gen_random_uuid();
+begin
+  insert into producoes_internas (id, empresa_id, status, codigo)
+    values (v_fin, '11111111-1111-1111-1111-111111111111', 'finalizada', 'PRD-INT-000001');
+  insert into producoes_internas (id, empresa_id, status, codigo)
+    values (v_rasc, '11111111-1111-1111-1111-111111111111', 'rascunho', 'PRD-INT-000002');
+
+  perform public.registrar_impressao('producao_interna', v_fin, 'original', 1, 'validade-cozinha', null, null);
+  if not exists (select 1 from etiqueta_impressoes where source_type = 'producao_interna' and source_id = v_fin) then
+    raise exception 'FALHA 9a: produção interna finalizada não imprimiu';
+  end if;
+
+  begin
+    perform public.registrar_impressao('producao_interna', v_rasc, 'original', 1, 'validade-cozinha', null, null);
+    raise exception 'FALHA 9b: produção interna não finalizada imprimiu';
+  exception when others then
+    if sqlerrm not like '%só podem ser impressas para produção finalizada%' then raise; end if;
+  end;
+  raise notice 'OK 9: trava de produção interna preservada';
 end $$;
 
 commit;

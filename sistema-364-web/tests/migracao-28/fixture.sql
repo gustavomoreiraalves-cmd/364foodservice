@@ -10,6 +10,14 @@ create table produtos (id uuid primary key, empresa_id uuid references empresas(
 create table funcionarios (id uuid primary key, empresa_id uuid references empresas(id), nome text);
 create table producoes (id uuid primary key, empresa_id uuid references empresas(id));
 
+-- Só as colunas que registrar_impressao lê no ramo `producao_interna`.
+create table producoes_internas (
+  id uuid primary key default gen_random_uuid(),
+  empresa_id uuid references empresas(id),
+  status text,
+  codigo text
+);
+
 create table recebimentos (
   id uuid primary key default gen_random_uuid(),
   data date not null default current_date,
@@ -50,6 +58,20 @@ create table audit_logs (
   valores_anteriores jsonb, valores_novos jsonb, justificativa text,
   created_at timestamptz not null default now()
 );
+
+-- Vem da migração 11; a 17 usa em trigger de imutabilidade de
+-- `etiqueta_impressoes`. Sem isso o runner não provaria nada sobre o
+-- rollback: em produção o `delete`/`update` nessa tabela é sempre recusado.
+create or replace function public.fn_bloquear_alteracao() returns trigger
+  language plpgsql as $$
+begin
+  raise exception 'Tabela % é imutável (append-only).', tg_table_name;
+end $$;
+
+drop trigger if exists trg_etiqueta_impressoes_imutavel on etiqueta_impressoes;
+create trigger trg_etiqueta_impressoes_imutavel
+  before update or delete on etiqueta_impressoes
+  for each statement execute function public.fn_bloquear_alteracao();
 
 -- Dublês das funções de permissão que a RPC usa. Os cenários controlam o
 -- retorno por `req.*`, sem precisar montar RLS.
