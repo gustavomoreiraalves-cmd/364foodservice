@@ -43,6 +43,7 @@ export function parseNFe(xml) {
 
   const ide = inf.ide || {};
   const emit = inf.emit || {};
+  const dest = inf.dest || {};
 
   const itens = lista(inf.det).map((d, i) => ({
     indice: Number(d['@_nItem'] || i + 1),
@@ -75,6 +76,13 @@ export function parseNFe(xml) {
       // e o cadastro de fornecedor é preenchido à mão.
       email: emit.email ? String(emit.email) : null,
       uf: emit.enderEmit?.UF ? String(emit.enderEmit.UF) : null,
+    },
+    // Para quem a nota foi emitida. Só o CNPJ interessa: é com ele que a rota de
+    // upload confere se a nota é mesmo desta empresa. Nota emitida para CPF vem
+    // vazia aqui — e nota para CPF não é compra da empresa.
+    destinatario: {
+      cnpj: digitos(dest.CNPJ),
+      nome: dest.xNome ? String(dest.xNome) : null,
     },
     itens,
     duplicatas: lista(inf.cobr?.dup).map(d => ({

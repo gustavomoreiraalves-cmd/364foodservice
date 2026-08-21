@@ -29,6 +29,17 @@ test('parseNFe: itens', () => {
   assert.equal(itens[1].quantidade, 30);
 });
 
+test('parseNFe: destinatário e tipo de operação', () => {
+  const nota = parseNFe(xml);
+  assert.equal(nota.destinatario.cnpj, '98765432000188');
+  assert.equal(nota.tipoOperacao, '1'); // 1 = saída do emitente, ou seja, entrada aqui
+});
+
+test('parseNFe: destinatário sem CNPJ (nota para CPF) vem vazio, não quebra', () => {
+  const paraCpf = xml.replace('<CNPJ>98765432000188</CNPJ>', '<CPF>12345678901</CPF>');
+  assert.equal(parseNFe(paraCpf).destinatario.cnpj, '');
+});
+
 test('parseNFe: somaItens é a soma dos vProd, não o vNF', () => {
   const nota = parseNFe(xml);
   assert.equal(nota.somaItens, 2757); // 1560,00 + 1197,00

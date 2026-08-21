@@ -38,6 +38,46 @@ export async function POST(request) {
   }
 
   const ehNFe = nota.modelo === '55';
+
+  // Só NF-e modelo 55 vira recebimento; o resto entra na caixa como 'ignorada' e
+  // não passa por estas conferências, que existem para proteger estoque e
+  // financeiro de uma nota que não é uma compra desta empresa.
+  if (ehNFe) {
+    // tpNF = 1 é saída do emitente, isto é, entrada aqui — é a nota de compra.
+    // tpNF = 0 é nota de entrada emitida pelo próprio emitente (devolução, nota
+    // própria do grupo) e não pode gerar entrada de estoque com conta a pagar.
+    if (nota.tipoOperacao !== '1') {
+      return NextResponse.json({
+        error: 'Esta NF-e não é uma nota de compra: o tipo de operação (tpNF) indica nota de entrada '
+          + 'emitida pelo próprio emitente. Só nota de saída do fornecedor vira recebimento.',
+      }, { status: 400 });
+    }
+
+    const { data: empresa, error: errEmpresa } = await sb.from('empresas')
+      .select('cnpj').eq('id', empresaId).maybeSingle();
+    if (errEmpresa) {
+      return NextResponse.json({ error: 'Falha ao conferir o CNPJ da empresa: ' + errEmpresa.message }, { status: 500 });
+    }
+    const cnpjEmpresa = String(empresa?.cnpj || '').replace(/\D/g, '');
+    // O CNPJ é opcional no cadastro da empresa. Sem ele não há com o que comparar,
+    // e travar a importação por um campo de cadastro em branco pararia o
+    // recebimento inteiro — então segue sem a conferência, como era antes.
+    if (cnpjEmpresa) {
+      if (!nota.destinatario.cnpj) {
+        return NextResponse.json({
+          error: 'Esta NF-e não traz o CNPJ do destinatário, então não dá para confirmar que ela foi '
+            + 'emitida para esta empresa.',
+        }, { status: 400 });
+      }
+      if (nota.destinatario.cnpj !== cnpjEmpresa) {
+        return NextResponse.json({
+          error: `Esta NF-e foi emitida para o CNPJ ${nota.destinatario.cnpj}, e a empresa selecionada `
+            + `tem o CNPJ ${cnpjEmpresa}. Confira se o XML é da empresa certa.`,
+        }, { status: 400 });
+      }
+    }
+  }
+
   const path = `${empresaId}/nfe/${nota.chave}.xml`;
   const { error: errUp } = await sb.storage.from('recebimentos')
     .upload(path, Buffer.from(xml, 'utf8'), { contentType: 'application/xml', upsert: true });
