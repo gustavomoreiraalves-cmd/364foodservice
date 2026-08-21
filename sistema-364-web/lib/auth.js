@@ -6,6 +6,7 @@ import { supabase } from './supabase';
 // Abas do sistema controladas por permissão (ver ROADMAP.md).
 // O módulo especial 'admin' dá acesso a todas + à aba Usuários.
 export const MODULOS = [
+  { id: 'grupo', label: 'Grupo 364', href: '/grupo', ic: '◉', desc: 'Consolidado de todas as empresas' },
   { id: 'fornecedores', label: 'Fornecedores', href: '/fornecedores', ic: '▤', desc: 'Cadastro de fornecedores e categorias' },
   { id: 'recebimentos', label: 'Recebimento', href: '/recebimentos', ic: '▣', desc: 'Entrada de matéria-prima e geração de lotes' },
   { id: 'estoque', label: 'Estoque', href: '/estoque', ic: '▥', desc: 'Saldo de matéria-prima e produto acabado' },
