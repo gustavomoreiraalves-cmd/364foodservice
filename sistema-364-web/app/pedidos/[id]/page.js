@@ -54,11 +54,6 @@ function Conteudo({ setFicha }) {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    // `erro` (falha de gravação) não é limpo aqui de propósito: quase toda
-    // falha de escrita termina em `setErro(msg)` seguido de `carregar()`, e
-    // limpar aqui apagava a mensagem no mesmo ciclo de render — nenhum erro de
-    // gravação chegava a aparecer na tela. Quem limpa é cada ação de escrita,
-    // no começo dela.
     setErroCarregar('');
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
@@ -114,7 +109,13 @@ function Conteudo({ setFicha }) {
     setLoading(false);
   }
 
-  useEffect(() => { carregar(); }, [empresaAtual?.id, id]);
+  // `erro` (falha de gravação) é limpo aqui, e não dentro de `carregar()`:
+  // limpar lá apagava a mensagem no mesmo ciclo de render em que ela era
+  // setada, e nenhum erro de gravação chegava a aparecer na tela. Aqui a
+  // tarja só sobrevive à troca de pedido ou de empresa se ninguém mandar
+  // ela sumir antes — o que é exatamente o que queremos: ao trocar de
+  // pedido/empresa, a última ação relevante para esta tela terminou.
+  useEffect(() => { setErro(''); carregar(); }, [empresaAtual?.id, id]);
 
   // `itensOriginais` (o que já está gravado), e não `itens` (o que está na
   // tela): o que a view descontou foi o que está no banco.
@@ -181,19 +182,19 @@ function Conteudo({ setFicha }) {
       responsavel_id: cabecalho.responsavel_id || null,
       observacoes: cabecalho.observacoes || null,
     }).eq('id', id).eq('empresa_id', eid);
-    if (eCab) { setSalvando(false); setErro(eCab.message); carregar(); return; }
+    if (eCab) { setSalvando(false); setErro(`Não foi possível salvar as alterações do cabeçalho do pedido: ${eCab.message}`); carregar(); return; }
 
     const { inserir, atualizar, remover } = diffItens(itensOriginais, itens);
 
     if (remover.length) {
       const { error } = await supabase.from('pedido_itens').delete().in('id', remover).eq('empresa_id', eid);
-      if (error) { setSalvando(false); setErro(error.message); carregar(); return; }
+      if (error) { setSalvando(false); setErro(`Não foi possível remover um item do pedido ao salvar: ${error.message}`); carregar(); return; }
     }
     for (const it of atualizar) {
       const { error } = await supabase.from('pedido_itens')
         .update({ produto_id: it.produto_id, quantidade: it.quantidade, preco_unitario: it.preco_unitario })
         .eq('id', it.id).eq('empresa_id', eid);
-      if (error) { setSalvando(false); setErro(error.message); carregar(); return; }
+      if (error) { setSalvando(false); setErro(`Não foi possível atualizar um item do pedido ao salvar: ${error.message}`); carregar(); return; }
     }
     if (inserir.length) {
       const { error } = await supabase.from('pedido_itens').insert(
@@ -202,7 +203,7 @@ function Conteudo({ setFicha }) {
           quantidade: it.quantidade, preco_unitario: it.preco_unitario,
         })),
       );
-      if (error) { setSalvando(false); setErro(error.message); carregar(); return; }
+      if (error) { setSalvando(false); setErro(`Não foi possível inserir um item novo no pedido ao salvar: ${error.message}`); carregar(); return; }
     }
 
     setSalvando(false);
@@ -217,13 +218,14 @@ function Conteudo({ setFicha }) {
     // Reabrir não passa direto: abre o diálogo de motivo, como o cancelamento.
     if (exigeMotivoReabertura(pedido.status, status)) { setReabrindo(true); return; }
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
-    if (error) setErro(error.message);
+    if (error) setErro(`Não foi possível trocar o status do pedido: ${error.message}`);
     carregar();
   }
 
   async function reabrir() {
     if (!motivoReabertura.trim()) { alert('Informe o motivo da reabertura.'); return; }
     setSalvando(true);
+    setErro('');
     setErroReabrir('');
     // `reaberto_em` fica com o trigger, pelo mesmo motivo de `cancelado_em`.
     const { error } = await supabase.from('pedidos').update({
@@ -241,6 +243,7 @@ function Conteudo({ setFicha }) {
   async function cancelar() {
     if (!motivo.trim()) { alert('Informe o motivo do cancelamento.'); return; }
     setSalvando(true);
+    setErro('');
     setErroCancelar('');
     // `cancelado_em` não vai daqui: quem carimba é o trigger
     // fn_pedido_bloquear_cabecalho, com o relógio do banco. O relógio do
@@ -309,7 +312,7 @@ function Conteudo({ setFicha }) {
 
   return (
     <>
-      {erro && <div className="banner bad">Não foi possível salvar: {erro}</div>}
+      {erro && <div className="banner bad">{erro}</div>}
 
       <div className="panel">
         <div className="row-actions" style={{ justifyContent: 'space-between' }}>
@@ -335,7 +338,9 @@ function Conteudo({ setFicha }) {
 
         {!editavel && (
           <div className="banner info">
-            Pedido {pedido.status.toLowerCase()} — somente leitura. Para corrigir, cancele com motivo e lance outro pedido.
+            Pedido {pedido.status.toLowerCase()} — somente leitura. {pedido.status === 'Cancelado'
+              ? 'Para corrigir, lance outro pedido.'
+              : 'Para corrigir, reabra com motivo (volta para Pendente) ou cancele com motivo e lance outro pedido.'}
           </div>
         )}
 

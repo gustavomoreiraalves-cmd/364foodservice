@@ -19,7 +19,7 @@
 - **`.env.local` aponta para o Supabase de produção.** Nenhum passo deste plano roda migração contra ele. As migrações são exercitadas num Postgres local descartável; aplicar em produção é decisão do dono do sistema, fora do plano.
 - **`npm run dev` e `npm run build` colidem no diretório `.next`.** Nunca rode os dois ao mesmo tempo; pare o dev server antes de `npm run verify`.
 - Migrações vão em `supabase/atualizacao_NN_*.sql`, com o bloco de rollback comentado no fim do arquivo, no padrão de `atualizacao_20_rls_escopo_empresa.sql`.
-- O número da próxima migração é **24**: `main` já tem 21 (`dashboard_grupo`), 22 (`nfe_documentos`) e 23 (`fornecedor_cnpj_normalizado`). Existem também dois arquivos `atualizacao_20_` no repositório (`apuracao_ajustes_fechamento` e `rls_escopo_empresa`); a colisão é anterior a este trabalho e não é corrigida aqui.
+- O número da próxima migração é **24**: `main` já tem 21 (`dashboard_grupo`), 22 (`nfe_documentos`) e 23 (`fornecedor_cnpj_normalizado`). Neste branch só existe `atualizacao_20_rls_escopo_empresa.sql`; o `atualizacao_20_apuracao_ajustes_fechamento.sql` vive em `feat/menu-categorias`, que não está aqui — a colisão de número é entre branches, não dentro deste.
 - Status de pedido são exatamente: `Pendente`, `Faturado`, `Enviado`, `Cancelado`.
 
 ---
