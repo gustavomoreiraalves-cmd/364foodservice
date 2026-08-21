@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { fmtMoney, fmtDate } from '../../../lib/format';
 import { fmtDateTime } from '../../../lib/producao';
+import { useAuth } from '../../../lib/auth';
 import AppShell from '../../../components/AppShell';
 import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
@@ -28,6 +29,7 @@ function Conteudo({ setFicha }) {
   const { id } = useParams();
   const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
+  const { session } = useAuth();
 
   const [pedido, setPedido] = useState(null);
   const [cabecalho, setCabecalho] = useState(CABECALHO_VAZIO);
@@ -59,7 +61,7 @@ function Conteudo({ setFicha }) {
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
-      supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
+      supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
     ]);
 
@@ -104,6 +106,10 @@ function Conteudo({ setFicha }) {
   function saldoProduto(pid) {
     return Number(estoqueProd.find(e => e.produto_id === pid)?.saldo || 0);
   }
+
+  // Quem cancela é o usuário logado, não o responsável (vendedor) do pedido —
+  // ver app/producoes/nova/page.js para o mesmo padrão de resolução.
+  const meuFuncionario = funcionarios.find(f => f.user_id === session?.user?.id);
 
   // Cabeçalho ou itens diferentes do que veio do banco: usado para travar a
   // troca de status pela lateral enquanto há edição não salva na tela — trocar
@@ -189,7 +195,7 @@ function Conteudo({ setFicha }) {
       status: 'Cancelado',
       cancelado_motivo: motivo.trim(),
       cancelado_em: new Date().toISOString(),
-      cancelado_por_id: cabecalho.responsavel_id || null,
+      cancelado_por_id: meuFuncionario?.id || null,
     }).eq('id', id).eq('empresa_id', empresaAtual.id);
     setSalvando(false);
     if (error) { setErro(error.message); carregar(); return; }
