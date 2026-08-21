@@ -69,7 +69,32 @@ test('consolidar calcula margem, lucro líquido e saldo de caixa', () => {
   })]);
   assert.equal(t.margemBrutaPct, 60);
   assert.equal(t.lucroLiquido, 400);
-  assert.equal(t.saldoCaixa, 500);
+  // 900 de entradas menos 150 de parcelas pagas. As compras (250) são
+  // competência e não entram no saldo.
+  assert.equal(t.saldoCaixa, 750);
+});
+
+// Regressão: o recebimento aprovado vira `compras` (competência, na data do
+// recebimento) E uma conta a pagar cuja parcela, quando quitada, vira
+// `despesa_caixa`. A fórmula antiga subtraía as duas coisas do mesmo saldo e
+// descontava cada compra duas vezes.
+test('a mesma compra sai do saldo de caixa uma vez só', () => {
+  const semCompra = consolidar([linha({ receita_caixa: '1000', despesa_caixa: '0' })]);
+  const comCompraPaga = consolidar([linha({
+    receita_caixa: '1000',
+    compras: '300',       // recebimento de 300 no mês
+    despesa_caixa: '300', // a parcela dessa mesma nota, paga no mês
+  })]);
+  assert.equal(semCompra.saldoCaixa, 1000);
+  assert.equal(comCompraPaga.saldoCaixa, 700);
+  assert.equal(semCompra.saldoCaixa - comCompraPaga.saldoCaixa, 300);
+  // `compras` continua disponível para a tela mostrar como informação.
+  assert.equal(comCompraPaga.compras, 300);
+});
+
+test('compra ainda não paga não mexe no saldo de caixa', () => {
+  const t = consolidar([linha({ receita_caixa: '1000', compras: '300', despesa_caixa: '0' })]);
+  assert.equal(t.saldoCaixa, 1000);
 });
 
 test('consolidar sem linhas devolve zeros, não NaN', () => {

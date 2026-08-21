@@ -62,7 +62,13 @@ export function consolidar(linhas) {
     margemBrutaPct: div(lucroBruto, t.receitaCompetencia) * 100,
     lucroLiquido: lucroBruto - t.despesaCompetencia,
     ticketMedio: div(t.receitaCompetencia, t.pedidos),
-    saldoCaixa: t.receitaCaixa - t.despesaCaixa - t.compras,
+    // Caixa é caixa: entradas de pedidos faturados/enviados menos as parcelas
+    // efetivamente pagas. `compras` NÃO entra aqui — é um número de
+    // competência, datado no recebimento, e a mesma compra volta como parcela
+    // paga quando a conta a pagar é quitada (app/recebimentos/page.js gera uma
+    // contas_a_pagar com recebimento_id para todo recebimento aprovado).
+    // Subtrair os dois descontava cada compra duas vezes do saldo.
+    saldoCaixa: t.receitaCaixa - t.despesaCaixa,
   };
 }
 
