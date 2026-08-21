@@ -96,8 +96,15 @@ function Conteudo() {
   }
 
   async function salvarCusto(produtoId, valor) {
+    if (valor === null || valor === undefined) return;
+    const texto = String(valor).trim();
+    const numerico = Number(texto.replace(',', '.'));
+    if (texto === '' || !Number.isFinite(numerico) || numerico < 0) {
+      alert('Custo inválido. Informe um número igual ou maior que zero (ex.: 45,50).');
+      return;
+    }
     const { error } = await supabase.from('produtos')
-      .update({ custo_unitario: Number(valor) || 0 })
+      .update({ custo_unitario: numerico })
       .eq('id', produtoId);
     if (error) { alert('Erro ao salvar o custo: ' + error.message); return; }
     carregar();
@@ -258,7 +265,7 @@ function Conteudo() {
                     {' · '}Preço: {fmtMoney(p.preco_venda)} · Margem: {margem.toFixed(1)}%
                   </span>
                   <button className="btn secondary small"
-                          onClick={() => salvarCusto(p.id, prompt(`Custo unitário de ${p.nome} (R$). Custo teórico da ficha: ${fmtMoney(custoT)}`, p.custo_unitario || custoT.toFixed(2)) ?? p.custo_unitario)}>
+                          onClick={() => salvarCusto(p.id, prompt(`Custo unitário de ${p.nome} (R$). Custo teórico da ficha: ${fmtMoney(custoT)}`, p.custo_unitario || custoT.toFixed(2)))}>
                     Editar custo
                   </button>
                   <button className="btn secondary small" onClick={() => toggleProducaoInterna(p)}>
