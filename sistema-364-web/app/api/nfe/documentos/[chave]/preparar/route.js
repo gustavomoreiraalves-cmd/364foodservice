@@ -57,7 +57,11 @@ export async function GET(request, { params }) {
     documento,
     nota: {
       chave: nota.chave, numero: nota.numero, serie: nota.serie,
-      emitidaEm: nota.emitidaEm, valorTotal: nota.valorTotal, emitente: nota.emitente,
+      emitidaEm: nota.emitidaEm, valorTotal: nota.valorTotal,
+      // somaItens (Σ vProd) é o que a tela compara com o total conferido; o
+      // valorTotal (vNF) carrega frete, IPI e ST e serve só para exibição.
+      somaItens: nota.somaItens,
+      emitente: nota.emitente,
     },
     fornecedor: fornecedor || null,
     fornecedorSugerido: fornecedor ? null : {

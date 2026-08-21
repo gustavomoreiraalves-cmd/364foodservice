@@ -25,6 +25,13 @@ function digitos(v) {
   return String(v || '').replace(/\D/g, '');
 }
 
+// Único arredondamento do parser, e ele é sobre um valor DERIVADO (a soma dos
+// itens), não sobre um valor lido: sem isso a soma de floats deixa um resto que
+// atrapalha a comparação com o total conferido.
+function arredMoeda(v) {
+  return Math.round(Number(v) * 100) / 100;
+}
+
 export function parseNFe(xml) {
   const raiz = parser.parse(xml);
   const nfe = raiz?.nfeProc?.NFe || raiz?.NFe;
@@ -37,6 +44,17 @@ export function parseNFe(xml) {
   const ide = inf.ide || {};
   const emit = inf.emit || {};
 
+  const itens = lista(inf.det).map((d, i) => ({
+    indice: Number(d['@_nItem'] || i + 1),
+    codigo: String(d.prod?.cProd ?? ''),
+    descricao: String(d.prod?.xProd ?? ''),
+    ncm: d.prod?.NCM ? String(d.prod.NCM) : null,
+    unidade: String(d.prod?.uCom ?? ''),
+    quantidade: num(d.prod?.qCom),
+    valorUnitario: num(d.prod?.vUnCom),
+    valorTotal: num(d.prod?.vProd),
+  }));
+
   return {
     chave,
     modelo: String(ide.mod ?? ''),
@@ -45,6 +63,9 @@ export function parseNFe(xml) {
     serie: String(ide.serie ?? ''),
     emitidaEm: String(ide.dhEmi ?? ide.dEmi ?? ''),
     valorTotal: num(inf.total?.ICMSTot?.vNF),
+    // Σ vProd: o que os itens custam, sem frete, IPI nem ST. É este valor que se
+    // compara com o total conferido no recebimento — o vNF não serve para isso.
+    somaItens: arredMoeda(itens.reduce((s, i) => s + i.valorTotal, 0)),
     emitente: {
       cnpj: digitos(emit.CNPJ),
       nome: String(emit.xNome ?? ''),
@@ -55,16 +76,7 @@ export function parseNFe(xml) {
       email: emit.email ? String(emit.email) : null,
       uf: emit.enderEmit?.UF ? String(emit.enderEmit.UF) : null,
     },
-    itens: lista(inf.det).map((d, i) => ({
-      indice: Number(d['@_nItem'] || i + 1),
-      codigo: String(d.prod?.cProd ?? ''),
-      descricao: String(d.prod?.xProd ?? ''),
-      ncm: d.prod?.NCM ? String(d.prod.NCM) : null,
-      unidade: String(d.prod?.uCom ?? ''),
-      quantidade: num(d.prod?.qCom),
-      valorUnitario: num(d.prod?.vUnCom),
-      valorTotal: num(d.prod?.vProd),
-    })),
+    itens,
     duplicatas: lista(inf.cobr?.dup).map(d => ({
       numero: String(d.nDup ?? ''),
       vencimento: String(d.dVenc ?? '').slice(0, 10),

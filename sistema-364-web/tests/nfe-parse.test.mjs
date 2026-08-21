@@ -29,6 +29,17 @@ test('parseNFe: itens', () => {
   assert.equal(itens[1].quantidade, 30);
 });
 
+test('parseNFe: somaItens é a soma dos vProd, não o vNF', () => {
+  const nota = parseNFe(xml);
+  assert.equal(nota.somaItens, 2757); // 1560,00 + 1197,00
+  // Numa nota com frete o vNF fica maior que a soma dos itens; quem confere a
+  // conferência é somaItens.
+  const comFrete = xml.replace('<vNF>2757.00</vNF>', '<vNF>2900.00</vNF>');
+  const notaComFrete = parseNFe(comFrete);
+  assert.equal(notaComFrete.valorTotal, 2900);
+  assert.equal(notaComFrete.somaItens, 2757);
+});
+
 test('parseNFe: duplicatas', () => {
   const { duplicatas } = parseNFe(xml);
   assert.equal(duplicatas.length, 2);

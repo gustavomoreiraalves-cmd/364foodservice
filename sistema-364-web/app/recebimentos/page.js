@@ -9,7 +9,7 @@ import ImportarNota from '../../components/ImportarNota';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
-import { parcelasDoRecebimento } from '../../lib/nfe/parcelas';
+import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -301,6 +301,9 @@ function Conteudo({ setFicha }) {
       const totalAceito = Math.round(inseridos
         .filter(it => STATUS_QUALIDADE_APROVADO.includes(it.statusEfetivo))
         .reduce((s, it) => s + it.quantidade * it.custoUnitario, 0) * 100) / 100;
+      // Item fora do aceite é o que invalida as duplicatas do fornecedor — e quem
+      // sabe disso é aqui, não uma comparação de valores lá em parcelas.js.
+      const temItemNaoAceito = inseridos.some(it => !STATUS_QUALIDADE_APROVADO.includes(it.statusEfetivo));
 
       if (totalAceito > 0) {
         const nomeFornecedor = fornecedores.find(f => f.id === header.fornecedor_id)?.nome || '';
@@ -322,14 +325,12 @@ function Conteudo({ setFicha }) {
             duplicatas: notaImportada?.duplicatas || [],
             dataBase: header.data,
             valorLancado: totalAceito,
-            valorTotalNota: notaImportada?.nota.valorTotal ?? totalAceito,
+            somaItensNota: notaImportada?.nota.somaItens ?? 0,
+            temItemNaoAceito,
             numeroParcelas,
             intervaloDias: Number(header.intervalo_dias),
           });
-          if (origem === 'manual_divergencia') {
-            alert('O valor aceito ficou diferente do total da nota (item rejeitado?), '
-              + 'então as parcelas seguiram a condição informada, e não os vencimentos da nota.');
-          }
+          if (AVISO_PARCELAS[origem]) alert(AVISO_PARCELAS[origem]);
           const { error: e4 } = await supabase.from('contas_a_pagar_parcelas').insert(
             parcelas.map(p => ({ conta_a_pagar_id: conta.id, numero: p.numero, valor: p.valor, vencimento: p.vencimento, empresa_id: empresaAtual.id }))
           );
