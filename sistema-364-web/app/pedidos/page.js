@@ -35,7 +35,11 @@ function Conteudo() {
     setLoading(true);
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
-      supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), funcionarios(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),
+      // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
+      // cancelado_por_id, da atualização 24), então `funcionarios(nome)` sem
+      // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
+      // padrão de app/recebimentos/page.js depois da atualização 09.
+      supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),
       supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
@@ -140,7 +144,7 @@ function Conteudo() {
                       </select>
                     </div>
                   </td>
-                  <td className="muted">{p.funcionarios?.nome || '—'}</td>
+                  <td className="muted">{p.responsavel?.nome || '—'}</td>
                   <td>
                     <div className="row-actions">
                       <button className="btn secondary small" onClick={() => router.push(`/pedidos/${p.id}`)}>Abrir</button>

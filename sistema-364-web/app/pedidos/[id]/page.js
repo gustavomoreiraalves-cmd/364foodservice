@@ -56,8 +56,13 @@ function Conteudo({ setFicha }) {
     const [r1, r2, r3, r4, r5] = await Promise.all([
       // O filtro por empresa_id é o que impede alcançar pedido de outra marca
       // do grupo adivinhando o uuid da URL.
+      //
+      // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
+      // cancelado_por_id, da atualização 24), então `funcionarios(nome)` sem
+      // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
+      // padrão de app/recebimentos/page.js depois da atualização 09.
       supabase.from('pedidos')
-        .select('*, clientes(nome, cnpj, telefone), funcionarios(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
+        .select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), cancelado_por:funcionarios!pedidos_cancelado_por_id_fkey(nome), pedido_itens(id, produto_id, quantidade, preco_unitario, produtos(codigo, nome, unidade))')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
@@ -214,7 +219,7 @@ function Conteudo({ setFicha }) {
         { rot: 'Cliente', valor: pedido.clientes?.nome },
         { rot: 'CNPJ/CPF', valor: pedido.clientes?.cnpj },
         { rot: 'Telefone', valor: pedido.clientes?.telefone },
-        { rot: 'Responsável', valor: pedido.funcionarios?.nome },
+        { rot: 'Responsável', valor: pedido.responsavel?.nome },
         { rot: 'Observações', valor: pedido.observacoes },
       ],
       itens: {
