@@ -1,26 +1,23 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
-import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
+import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
-
-const STATUS = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];
+import { totalPedido, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../lib/pedidos';
 
 export default function PedidosPage() {
-  const [ficha, setFicha] = useState(null);
   return (
-    <>
-      <AppShell modulo="pedidos" titulo="Pedidos de Venda" desc="Pedidos, faturamento e baixa de estoque">
-        <Conteudo setFicha={setFicha} />
-      </AppShell>
-      <FichaPrint ficha={ficha} />
-    </>
+    <AppShell modulo="pedidos" titulo="Pedidos de Venda" desc="Pedidos, faturamento e baixa de estoque">
+      <Conteudo />
+    </AppShell>
   );
 }
 
-function Conteudo({ setFicha }) {
+function Conteudo() {
+  const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
   const [pedidos, setPedidos] = useState([]);
   const [clientes, setClientes] = useState([]);
@@ -29,22 +26,38 @@ function Conteudo({ setFicha }) {
   const [funcionarios, setFuncionarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [erroCarregar, setErroCarregar] = useState('');
 
-  const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '' });
+  const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
-  const [novoItem, setNovoItem] = useState({ produto_id: '', quantidade: '', preco_unitario: '' });
 
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
+    setErroCarregar('');
     const eid = empresaAtual.id;
     const [r1, r2, r3, r4, r5] = await Promise.all([
-      supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), funcionarios(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),
+      // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
+      // cancelado_por_id, da atualização 24), então `funcionarios(nome)` sem
+      // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
+      // padrão de app/recebimentos/page.js depois da atualização 09.
+      supabase.from('pedidos').select('*, clientes(nome, cnpj, telefone), responsavel:funcionarios!pedidos_responsavel_id_fkey(nome), pedido_itens(id, quantidade, preco_unitario, produtos(codigo, nome, unidade))').eq('empresa_id', eid).order('created_at', { ascending: false }),
       supabase.from('clientes').select('id, nome').eq('empresa_id', eid).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
     ]);
+
+    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS, embed
+    // ambíguo). Sem essa checagem o `|| []` transformava a falha em lista
+    // vazia: a tela dizia "Nenhum pedido lançado" com o banco cheio.
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    if (falha) {
+      setErroCarregar(falha.error.message);
+      setLoading(false);
+      return;
+    }
+
     setPedidos(r1.data || []);
     setClientes(r2.data || []);
     setProdutos(r3.data || []);
@@ -55,17 +68,10 @@ function Conteudo({ setFicha }) {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
+  // Pedido novo: nenhum item foi gravado ainda, então não há nada que a view já
+  // tenha descontado deste pedido para somar de volta.
   function saldoProduto(id) {
-    return Number(estoqueProd.find(e => e.produto_id === id)?.saldo || 0);
-  }
-
-  function addItem(e) {
-    e.preventDefault();
-    const prod = produtos.find(p => p.id === novoItem.produto_id);
-    if (!prod) return;
-    const preco = Number(novoItem.preco_unitario) || Number(prod.preco_venda);
-    setItens([...itens, { produto_id: prod.id, quantidade: Number(novoItem.quantidade), preco_unitario: preco }]);
-    setNovoItem({ produto_id: '', quantidade: '', preco_unitario: '' });
+    return saldoDisponivel(estoqueProd, [], id);
   }
 
   async function finalizar() {
@@ -77,6 +83,7 @@ function Conteudo({ setFicha }) {
       cliente_id: cabecalho.cliente_id,
       status: 'Pendente',
       responsavel_id: cabecalho.responsavel_id || null,
+      observacoes: cabecalho.observacoes || null,
       empresa_id: empresaAtual.id,
     }]).select().single();
     if (error) { setSalvando(false); alert('Erro ao salvar: ' + error.message); return; }
@@ -87,53 +94,28 @@ function Conteudo({ setFicha }) {
     setSalvando(false);
     if (e2) { alert('Pedido criado, mas houve erro nos itens: ' + e2.message); }
     setItens([]);
-    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '' });
+    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
     carregar();
   }
 
   async function mudarStatus(id, status) {
-    const { error } = await supabase.from('pedidos').update({ status }).eq('id', id);
+    const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) alert('Erro ao atualizar status: ' + error.message);
     carregar();
   }
 
-  async function excluir(id) {
-    if (!confirm('Excluir este pedido?')) return;
-    const { error } = await supabase.from('pedidos').delete().eq('id', id);
-    if (error) alert('Erro ao excluir: ' + error.message);
-    carregar();
-  }
-
-  const totalPedido = p => (p.pedido_itens || []).reduce((s, i) => s + Number(i.quantidade) * Number(i.preco_unitario), 0);
-
-  function imprimir(p) {
-    imprimirFicha(setFicha, {
-      titulo: 'Pedido de Venda',
-      numero: `Pedido ${String(p.id).slice(0, 8).toUpperCase()} · ${fmtDate(p.data)}`,
-      campos: [
-        { rot: 'Data', valor: fmtDate(p.data) },
-        { rot: 'Status', valor: p.status },
-        { rot: 'Cliente', valor: p.clientes?.nome },
-        { rot: 'CNPJ/CPF', valor: p.clientes?.cnpj },
-        { rot: 'Telefone', valor: p.clientes?.telefone },
-        { rot: 'Responsável', valor: p.funcionarios?.nome },
-      ],
-      itens: {
-        headers: ['Código', 'Produto', 'Qtd', 'Preço unit.', 'Subtotal'],
-        rows: (p.pedido_itens || []).map(i => [
-          i.produtos?.codigo || '—',
-          i.produtos?.nome || '—',
-          `${Number(i.quantidade)} ${i.produtos?.unidade || ''}`,
-          fmtMoney(i.preco_unitario),
-          fmtMoney(Number(i.quantidade) * Number(i.preco_unitario)),
-        ]),
-      },
-      totais: `Total do pedido: ${fmtMoney(totalPedido(p))}`,
-      assinaturas: ['Vendedor', 'Cliente'],
-    });
-  }
+  const totalDoPedido = p => totalPedido(p.pedido_itens);
 
   if (loading) return <p className="muted">Carregando…</p>;
+
+  if (erroCarregar) {
+    return (
+      <div className="banner bad">
+        Não foi possível carregar os pedidos: {erroCarregar}{' '}
+        <button className="btn secondary small" onClick={carregar}>Tentar novamente</button>
+      </div>
+    );
+  }
 
   if (!clientes.length || !produtos.length) {
     return (
@@ -152,54 +134,15 @@ function Conteudo({ setFicha }) {
     <>
       <div className="panel">
         <h3>Novo pedido de venda</h3>
-        <div className="form-grid">
-          <div><label>Data</label><input type="date" value={cabecalho.data} onChange={e => setCabecalho({ ...cabecalho, data: e.target.value })} /></div>
-          <div><label>Cliente</label>
-            <select value={cabecalho.cliente_id} onChange={e => setCabecalho({ ...cabecalho, cliente_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-          </div>
-          <div><label>Responsável</label>
-            <select value={cabecalho.responsavel_id} onChange={e => setCabecalho({ ...cabecalho, responsavel_id: e.target.value })}>
-              <option value="">Selecione…</option>
-              {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <label>Itens do pedido</label>
-          <form className="form-grid" onSubmit={addItem}>
-            <div><label>Produto</label>
-              <select required value={novoItem.produto_id} onChange={e => setNovoItem({ ...novoItem, produto_id: e.target.value })}>
-                <option value="">Selecione…</option>
-                {produtos.map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome} (saldo: {saldoProduto(p.id).toFixed(1)})</option>)}
-              </select>
-            </div>
-            <div><label>Quantidade</label><input type="number" step="0.001" required value={novoItem.quantidade} onChange={e => setNovoItem({ ...novoItem, quantidade: e.target.value })} /></div>
-            <div><label>Preço unit. (R$ — vazio usa o preço de venda)</label><input type="number" step="0.01" value={novoItem.preco_unitario} onChange={e => setNovoItem({ ...novoItem, preco_unitario: e.target.value })} /></div>
-            <div><button className="btn secondary" type="submit">Adicionar item</button></div>
-          </form>
-          <div className="items-list">
-            {itens.length ? itens.map((it, idx) => {
-              const prod = produtos.find(p => p.id === it.produto_id);
-              return (
-                <div className="item-line" key={idx}>
-                  <span>{prod?.nome || '—'}</span>
-                  <span className="num">{it.quantidade} × {fmtMoney(it.preco_unitario)}</span>
-                  <button className="btn danger small" onClick={() => setItens(itens.filter((_, i) => i !== idx))}>×</button>
-                </div>
-              );
-            }) : <p className="muted" style={{ fontSize: 12 }}>Nenhum item adicionado ainda.</p>}
-            {itens.length > 0 && (
-              <div className="subtotal">Total: {fmtMoney(itens.reduce((s, i) => s + i.quantidade * i.preco_unitario, 0))}</div>
-            )}
-          </div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={finalizar} disabled={salvando}>
-            {salvando ? 'Salvando…' : 'Finalizar pedido'}
-          </button>
-        </div>
+        <PedidoForm
+          cabecalho={cabecalho} setCabecalho={setCabecalho}
+          itens={itens} setItens={setItens}
+          clientes={clientes} produtos={produtos} funcionarios={funcionarios}
+          saldoProduto={saldoProduto}
+        />
+        <button className="btn" style={{ marginTop: 12 }} onClick={finalizar} disabled={salvando}>
+          {salvando ? 'Salvando…' : 'Finalizar pedido'}
+        </button>
       </div>
 
       <div className="panel">
@@ -213,20 +156,29 @@ function Conteudo({ setFicha }) {
                   <td>{fmtDate(p.data)}</td>
                   <td>{p.clientes?.nome || '—'}</td>
                   <td>{(p.pedido_itens || []).length} item(ns)</td>
-                  <td className="num">{fmtMoney(totalPedido(p))}</td>
+                  <td className="num">{fmtMoney(totalDoPedido(p))}</td>
                   <td>
                     <div className="row-actions">
                       {statusTag(p.status)}
-                      <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}>
-                        {STATUS.map(s => <option key={s}>{s}</option>)}
+                      <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}
+                        disabled={p.status === 'Cancelado'}>
+                        {/*
+                          Cancelar exige motivo (check pedidos_cancelamento_motivo) e reabrir
+                          exige motivo (trigger fn_pedido_bloquear_cabecalho): as duas coisas
+                          só acontecem na página do pedido, onde há diálogo para o motivo.
+                          Aqui a lista só avança o status.
+                        */}
+                        {STATUS_PEDIDO
+                          .filter(s => s !== 'Cancelado' && !exigeMotivoReabertura(p.status, s))
+                          .map(s => <option key={s}>{s}</option>)}
+                        {p.status === 'Cancelado' && <option>Cancelado</option>}
                       </select>
                     </div>
                   </td>
-                  <td className="muted">{p.funcionarios?.nome || '—'}</td>
+                  <td className="muted">{p.responsavel?.nome || '—'}</td>
                   <td>
                     <div className="row-actions">
-                      <button className="btn secondary small" onClick={() => imprimir(p)}>Imprimir pedido</button>
-                      <button className="btn danger" onClick={() => excluir(p.id)}>Excluir</button>
+                      <button className="btn secondary small" onClick={() => router.push(`/pedidos/${p.id}`)}>Abrir</button>
                     </div>
                   </td>
                 </tr>
