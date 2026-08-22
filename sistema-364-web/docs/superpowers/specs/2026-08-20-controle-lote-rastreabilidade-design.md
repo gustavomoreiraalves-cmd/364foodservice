@@ -281,7 +281,7 @@ Reimpressão continua exigindo motivo.
 QR: dependência nova, pacote `qrcode` (MIT, gera SVG no cliente). SVG imprime nítido em
 qualquer DPI e funciona offline, o que importa porque a impressão não pode depender de internet
 no meio do galpão. O conteúdo é sempre a URL pública
-`sistema-364.vercel.app/rastreio/LT-260820-001`.
+`364foodservice.vercel.app/rastreio/LT-260820-001`.
 
 ### Estoque de etiquetas
 

@@ -6,12 +6,16 @@ import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebiment
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import ImportarNota from '../../components/ImportarNota';
+import EtiquetaPrint from '../../components/EtiquetaPrint';
+import ModalEtiquetas from '../../components/ModalEtiquetas';
 import NovoFornecedorRapido from '../../components/NovoFornecedorRapido';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
 import { parcelasDoRecebimento, AVISO_PARCELAS } from '../../lib/nfe/parcelas';
 import { calcularItem } from '../../lib/nfe/dePara';
+import { qrSvg } from '../../lib/qr';
+import { urlRastreio, medidasImpressao } from '../../lib/etiquetas';
 
 const CONDICOES_EMBALAGEM = ['Íntegra', 'Danificada', 'Violada', 'Amassada', 'Outra'];
 const STATUS_TAG = {
@@ -23,6 +27,9 @@ const STATUS_TAG = {
   devolvido: 'bad',
 };
 const REGRA_LABEL = { simples: 'Simples', validade: 'Validade controlada', lote: 'Lote completo' };
+// Teto de segurança: "20" digitado como "2000" não deve virar 2000 volumes
+// nem 1000 páginas de etiqueta sem confirmação nenhuma.
+const VOLUMES_MAX = 500;
 
 const HEADER_VAZIO = () => ({
   data: hoje(), fornecedor_id: '', nota_fiscal: '', responsavel_id: '', notaFiscalArquivo: null,
@@ -33,23 +40,52 @@ const ITEM_VAZIO = () => ({
   materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
   deposito_id: '', local_armazenamento: '', observacoes: '',
   validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_qualidade: 'aprovado',
-  motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '',
+  motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '', volumes: '',
   fotoProdutoArquivo: null, documentoSanitarioArquivo: null,
 });
 
+// Cada uuid custa ~39 caracteres no query string do `.in(...)`; com uma lista
+// grande de itens (algumas centenas), um único GET estoura o limite de
+// tamanho de URL do gateway antes de chegar no PostgREST. Busca em blocos
+// para não depender do tamanho da lista de recebimentos da empresa.
+const BLOCO_IDS_IMPRESSOES = 100;
+
+// Busca etiqueta_impressoes só dos itens passados, em blocos. Devolve
+// { data, error } em vez de engolir o erro: o chamador decide o que fazer
+// quando a consulta falha — aqui, NÃO seguir como se nada tivesse sido
+// impresso (jaImprimiu mentindo `false` reabriria a brecha que a task 6
+// fechou: reimpressão gravada como "original", sem motivo).
+async function carregarImpressoesDosItens(empresaId, ids) {
+  if (!ids.length) return { data: [], error: null };
+  const blocos = [];
+  for (let i = 0; i < ids.length; i += BLOCO_IDS_IMPRESSOES) blocos.push(ids.slice(i, i + BLOCO_IDS_IMPRESSOES));
+  const respostas = await Promise.all(blocos.map(bloco =>
+    supabase.from('etiqueta_impressoes')
+      .select('source_id, quantidade')
+      .eq('empresa_id', empresaId)
+      .eq('source_type', 'recebimento_item')
+      .in('source_id', bloco)
+  ));
+  const comErro = respostas.find(r => r.error);
+  if (comErro) return { data: [], error: comErro.error };
+  return { data: respostas.flatMap(r => r.data || []), error: null };
+}
+
 export default function RecebimentosPage() {
   const [ficha, setFicha] = useState(null);
+  const [etiqueta, setEtiqueta] = useState(null);
   return (
     <>
       <AppShell modulo="recebimentos" titulo="Recebimento" desc="Entrada de matéria-prima, controle de qualidade e geração de lotes">
-        <Conteudo setFicha={setFicha} />
+        <Conteudo setFicha={setFicha} setEtiqueta={setEtiqueta} />
       </AppShell>
       <FichaPrint ficha={ficha} />
+      <EtiquetaPrint etiqueta={etiqueta} />
     </>
   );
 }
 
-function Conteudo({ setFicha }) {
+function Conteudo({ setFicha, setEtiqueta }) {
   const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [mps, setMps] = useState([]);
@@ -62,6 +98,12 @@ function Conteudo({ setFicha }) {
   const [itemForm, setItemForm] = useState(ITEM_VAZIO());
   const [itens, setItens] = useState([]);
   const [expandido, setExpandido] = useState({});
+  const [etiquetaItem, setEtiquetaItem] = useState(null);
+  const [impressoes, setImpressoes] = useState([]);
+  // true quando a consulta de etiqueta_impressoes falhou (ou foi cortada) e
+  // não dá para confiar em `impressoes` — nesse estado a impressão fica
+  // desabilitada em vez de assumir "nada impresso ainda" (ver `carregar`).
+  const [erroImpressoes, setErroImpressoes] = useState(false);
   const proximaKey = useRef(0);
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
@@ -106,7 +148,29 @@ function Conteudo({ setFicha }) {
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
     if (r1.error) console.error(r1.error);
-    setLista((r1.data || []).map(item => ({
+    const itensCarregados = r1.data || [];
+    // Histórico de impressão dos volumes: decide se o botão do item mostra
+    // "Imprimir etiquetas" ou "Reimprimir etiquetas" — mesmo padrão de
+    // app/producoes/completa/page.js. Sem isso, os dois botões fixos
+    // deixavam o operador escolher rotular impressões repetidas como
+    // "original", contornando a exigência de motivo na reimpressão.
+    //
+    // Filtrada por `.in('source_id', ids)` dos itens desta empresa, em vez de
+    // trazer a tabela inteira: sem o filtro, uma resposta que bate no
+    // max-rows do PostgREST cortaria linhas de itens antigos e `jaImprimiu`
+    // voltaria a mentir `false` para item já impresso — reabrindo em
+    // silêncio a brecha da exigência de motivo que a task 6 fechou.
+    const { data: impressoesCarregadas, error: erroCarregarImpressoes } =
+      await carregarImpressoesDosItens(empresaAtual.id, itensCarregados.map(i => i.id));
+    if (erroCarregarImpressoes) {
+      console.error(erroCarregarImpressoes);
+      setErroImpressoes(true);
+      setImpressoes([]);
+    } else {
+      setErroImpressoes(false);
+      setImpressoes(impressoesCarregadas);
+    }
+    setLista(itensCarregados.map(item => ({
       ...item,
       recebimento_id: item.recebimento_id,
       cabecalho: item.recebimentos,
@@ -283,6 +347,18 @@ function Conteudo({ setFicha }) {
     // gravando item sem peso ou lote a custo zero.
     if (!(Number(itemForm.quantidade) > 0)) { alert('Informe o peso conferido (maior que zero).'); return; }
     if (!(Number(itemForm.custo_unitario) > 0)) { alert('Informe o custo unitário (maior que zero).'); return; }
+    // Volumes é obrigatório: sem update para recebimento_itens no app inteiro
+    // (só insert e delete), esquecer o campo deixava o botão de etiqueta
+    // desabilitado PARA SEMPRE — a única saída era excluir e relançar o
+    // item, o que queima um número de lote e mexe no saldo de estoque.
+    if (!(Number.isInteger(Number(itemForm.volumes)) && Number(itemForm.volumes) > 0)) {
+      alert('Informe quantos volumes (caixas) chegaram — o campo é obrigatório e define quantas etiquetas serão impressas.');
+      return;
+    }
+    if (Number(itemForm.volumes) > VOLUMES_MAX) {
+      alert(`Volumes não pode passar de ${VOLUMES_MAX}.`);
+      return;
+    }
     if (regra !== 'simples' && !itemForm.validade) { alert('Este item exige validade (regra: ' + REGRA_LABEL[regra] + ').'); return; }
     if (mpSelecionada.exige_temperatura && !itemForm.temperatura_c) { alert('Este item exige temperatura no recebimento.'); return; }
     if (mpSelecionada.exige_inspecao && !itemForm.inspecionado_por_id) { alert('Este item exige responsável pela inspeção.'); return; }
@@ -351,6 +427,7 @@ function Conteudo({ setFicha }) {
           observacoes: it.observacoes || null,
           validade: !ehSimples ? (it.validade || null) : null,
           numero_lote_fornecedor: it._mp.controle_recebimento === 'lote' ? (it.numero_lote_fornecedor || null) : null,
+          volumes: it.volumes ? Number(it.volumes) : null,
           empresa_id: empresaAtual.id,
         }]).select('id').single();
 
@@ -498,7 +575,17 @@ function Conteudo({ setFicha }) {
   }
 
   async function excluirItem(r) {
-    if (!confirm('Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
+    // Item com etiqueta já impressa pode ter caixas por aí com QR de um lote
+    // que está prestes a deixar de existir — o aviso de saldo sozinho não diz
+    // isso. `impressoes` já traz `quantidade` (mesma consulta usada por
+    // `jaImprimiu`), então a soma é o total de etiquetas emitidas para este item.
+    const totalImpresso = impressoes
+      .filter(i => i.source_id === r.id)
+      .reduce((s, i) => s + Number(i.quantidade || 0), 0);
+    const avisoEtiquetas = totalImpresso > 0
+      ? `Atenção: ${totalImpresso} etiqueta${totalImpresso > 1 ? 's' : ''} deste lote já ${totalImpresso > 1 ? 'foram impressas' : 'foi impressa'} e ${totalImpresso > 1 ? 'estão' : 'está'} em circulação, provavelmente coladas em caixas. Excluir o item não desfaz isso — as caixas ficam com um QR que aponta para um lote inexistente.\n\n`
+      : '';
+    if (!confirm(avisoEtiquetas + 'Excluir este item do recebimento? O saldo de estoque será recalculado.')) return;
     const { error } = await supabase.from('recebimento_itens').delete().eq('id', r.id);
     if (error) { alert('Erro ao excluir: ' + error.message); return; }
     await removerAnexosRecebimento([r.inspecao?.foto_url, r.inspecao?.documento_sanitario_url]);
@@ -544,6 +631,57 @@ function Conteudo({ setFicha }) {
       ],
       assinaturas: ['Responsável pelo recebimento', 'Aprovação da qualidade'],
     });
+  }
+
+  // Deriva o tipo de impressão do histórico em vez de um botão fixo por tipo:
+  // com dois botões fixos, "Imprimir etiquetas" gravava tipo='original' sem
+  // motivo mesmo em reimpressões repetidas, contornando a exigência de
+  // motivo que a RPC só cobra quando p_tipo = 'reimpressao'. Mesmo padrão de
+  // app/producoes/completa/page.js (`impressoes.some(...)`).
+  function jaImprimiu(item) {
+    return impressoes.some(i => i.source_id === item.id);
+  }
+
+  // O QR é resolvido ANTES de abrir o modal: window.print() é síncrono e não
+  // espera promessa nenhuma, e etiqueta de recebimento sem QR não serve ao
+  // rastreio — por isso, se o QR falhar, o modal nem abre.
+  async function abrirEtiquetas(item, grupo, tipo = 'original') {
+    // O lote é numerado por empresa (LT-AAMMDD-###), sem garantia de
+    // unicidade global — a mesma sequência pode existir ao mesmo tempo em
+    // duas empresas do grupo. O QR carrega o prefixo da empresa no caminho
+    // para não ficar ambíguo; sem prefixo cadastrado, a etiqueta sairia com
+    // um QR que pode apontar para o lote errado — pior que não imprimir.
+    if (!empresaAtual?.prefixo_codigo) {
+      alert('Esta empresa não tem prefixo de código cadastrado. Cadastre o prefixo antes de imprimir '
+        + 'etiquetas de recebimento — sem ele o QR pode ficar ambíguo entre empresas.');
+      return;
+    }
+    try {
+      const tamanhoQr = medidasImpressao('recebimento').qrTamanho_mm;
+      const svg = await qrSvg(
+        urlRastreio(empresaAtual.prefixo_codigo, item.lote, process.env.NEXT_PUBLIC_SITE_URL),
+        tamanhoQr,
+      );
+      setEtiquetaItem({
+        tipo,
+        item,
+        dados: {
+          modelo: 'recebimento',
+          lote: item.lote,
+          materiaPrima: item.materias_primas?.nome || '—',
+          recebidoEm: grupo.cabecalho.data,
+          fornecedor: grupo.cabecalho.fornecedores?.nome || '—',
+          notaFiscal: grupo.cabecalho.nota_fiscal || '—',
+          qrSvg: svg,
+          copias: Number(item.volumes) || 1,
+          // Fixo, independente de quantas cópias esta impressão vai sair —
+          // é o denominador de "vol. N/total" (ver EtiquetaPrint.js).
+          volumesTotal: Number(item.volumes) || 1,
+        },
+      });
+    } catch (e) {
+      alert('Não foi possível gerar o QR do lote: ' + e.message);
+    }
   }
 
   if (loading) return <p className="muted">Carregando…</p>;
@@ -729,6 +867,14 @@ function Conteudo({ setFicha }) {
           {mpSelecionada && (
             <>
               <div><label>Peso conferido</label><input type="number" step="0.001" value={itemForm.quantidade} onChange={e => setItemForm({ ...itemForm, quantidade: e.target.value })} /></div>
+              <div>
+                <label>Volumes (caixas) *</label>
+                <input
+                  type="number" min="1" max={VOLUMES_MAX} step="1" value={itemForm.volumes}
+                  placeholder="quantas caixas chegaram — obrigatório"
+                  onChange={e => setItemForm({ ...itemForm, volumes: e.target.value })}
+                />
+              </div>
               <div><label>Peso na nota fiscal</label><input type="number" step="0.001" value={itemForm.peso_nota_kg} onChange={e => setItemForm({ ...itemForm, peso_nota_kg: e.target.value })} /></div>
               <div>
                 <label>Custo unitário (R$)</label>
@@ -825,6 +971,13 @@ function Conteudo({ setFicha }) {
 
       <div className="panel">
         <h3>Recebimentos ({grupos.length})</h3>
+        {erroImpressoes && (
+          <div className="banner">
+            Não foi possível carregar o histórico de impressão de etiquetas desta empresa.
+            A impressão de etiquetas de recebimento foi desabilitada nesta tela até a próxima
+            atualização, para não gravar uma reimpressão como se fosse a primeira. Recarregue a página.
+          </div>
+        )}
         <div className="table-wrap">
           <table>
             <thead>
@@ -856,7 +1009,7 @@ function Conteudo({ setFicha }) {
                           <div className="table-wrap">
                             <table>
                               <thead>
-                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
+                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Volumes</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
                               </thead>
                               <tbody>
                                 {g.itens.map(it => {
@@ -877,6 +1030,7 @@ function Conteudo({ setFicha }) {
                                         {fmtMoney(it.custo_unitario)}
                                         {acimaAlvo && <div><span className="tag warn">Acima do alvo</span></div>}
                                       </td>
+                                      <td className="num">{it.volumes ?? '—'}</td>
                                       <td className="muted">{it.depositos ? `${it.depositos.nome} — ${it.depositos.unidades?.nome}` : '—'}</td>
                                       <td>{fmtDate(it.validade)}</td>
                                       <td>
@@ -887,6 +1041,18 @@ function Conteudo({ setFicha }) {
                                         <div className="row-actions">
                                           {it.inspecao?.foto_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.foto_url)}>Ver foto</button>}
                                           {it.inspecao?.documento_sanitario_url && <button className="btn secondary small" onClick={() => verAnexo(it.inspecao.documento_sanitario_url)}>Ver documento</button>}
+                                          <button
+                                            className="btn secondary small"
+                                            disabled={!it.volumes || erroImpressoes}
+                                            title={
+                                              erroImpressoes
+                                                ? 'Não foi possível conferir o histórico de impressão desta empresa — impressão desabilitada para não gravar uma reimpressão como se fosse a primeira. Recarregue a página.'
+                                                : !it.volumes ? 'Informe os volumes do item para imprimir as etiquetas' : undefined
+                                            }
+                                            onClick={() => abrirEtiquetas(it, g, jaImprimiu(it) ? 'reimpressao' : 'original')}
+                                          >
+                                            {jaImprimiu(it) ? 'Reimprimir etiquetas' : 'Imprimir etiquetas'}
+                                          </button>
                                           <button className="btn danger small" onClick={() => excluirItem(it)}>Excluir</button>
                                         </div>
                                       </td>
@@ -909,6 +1075,20 @@ function Conteudo({ setFicha }) {
           </table>
         </div>
       </div>
+
+      {etiquetaItem && (
+        <ModalEtiquetas
+          producao={{ id: etiquetaItem.item.id, modelo: 'recebimento' }}
+          dados={etiquetaItem.dados}
+          modelo="recebimento"
+          titulo={etiquetaItem.tipo === 'reimpressao' ? 'Reimprimir etiquetas do volume' : 'Etiquetas do volume'}
+          tipo={etiquetaItem.tipo}
+          sourceType="recebimento_item"
+          empresaNome={empresaAtual?.nome}
+          setEtiqueta={setEtiqueta}
+          onFechar={() => { setEtiquetaItem(null); carregar(); }}
+        />
+      )}
     </>
   );
 }

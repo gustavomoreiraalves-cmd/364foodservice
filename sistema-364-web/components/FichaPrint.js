@@ -81,8 +81,16 @@ export default function FichaPrint({ ficha }) {
   );
 }
 
-// Abre a impressão logo depois de renderizar a ficha selecionada
+// Abre a impressão logo depois de renderizar a ficha selecionada. O estado é
+// zerado quando a caixa de diálogo fecha — mesmo raciocínio do lado gêmeo em
+// EtiquetaPrint.imprimirEtiquetas: uma ficha esquecida no estado contaminaria
+// a impressão seguinte de etiquetas na mesma tela (conteúdo A4 espremido nas
+// páginas de 108×32mm). Listener registrado antes de `window.print()` porque
+// a chamada é bloqueante em alguns navegadores.
 export function imprimirFicha(setFicha, ficha) {
   setFicha(ficha);
-  setTimeout(() => window.print(), 150);
+  setTimeout(() => {
+    window.addEventListener('afterprint', () => setFicha(null), { once: true });
+    window.print();
+  }, 150);
 }

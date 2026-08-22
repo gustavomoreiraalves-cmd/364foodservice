@@ -45,11 +45,22 @@ export function diasEntre(a, b) {
 }
 
 // Gera os próximos `quantidade` números de lote no padrão LT-AAMMDD-###,
-// contando recebimentos + produções já lançados no mesmo dia NA MESMA EMPRESA.
+// a partir do MAIOR SUFIXO já usado no dia NA MESMA EMPRESA (recebimentos +
+// produções) — não da contagem de linhas.
 //
-// A contagem é lida UMA vez e incrementada em memória. Chamar proximoLote em
-// laço geraria lotes repetidos, porque cada chamada lê o mesmo saldo do banco
-// antes de qualquer insert — e lote repetido quebra a rastreabilidade.
+// Por que não contar linhas: `recebimento_itens.lote` tem
+// unique(empresa_id, lote) (atualização 28), e excluir um item do meio do
+// dia é fluxo normal (ver excluirItem em app/recebimentos/page.js). Se
+// LT-260821-001/002/003 existem e o operador exclui o 002, a contagem cai
+// para 2 e o próximo lançamento geraria "-003" de novo — que já existe, a
+// constraint recusa, e o rollback da transação devolve a contagem ao mesmo
+// valor: repetir o lançamento falha de novo, em loop. Derivar do maior
+// sufixo não tem esse problema: com 001 e 003 sobrando, o próximo é 004,
+// buraco no meio ou não.
+//
+// O estado é lido UMA vez e incrementado em memória. Chamar proximoLote em
+// laço geraria lotes repetidos, porque cada chamada lê o mesmo estado do
+// banco antes de qualquer insert — e lote repetido quebra a rastreabilidade.
 //
 // `cliente` existe para os testes injetarem uma fachada do PostgREST.
 export async function proximosLotes(dataStr, empresaId, quantidade, cliente = supabase) {
@@ -59,8 +70,14 @@ export async function proximosLotes(dataStr, empresaId, quantidade, cliente = su
     cliente.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
     cliente.from('producoes').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
   ]);
-  const n = (r1.data?.length || 0) + (r2.data?.length || 0);
-  return Array.from({ length: quantidade }, (_, i) => prefixo + String(n + 1 + i).padStart(3, '0'));
+  const lotes = [...(r1.data || []), ...(r2.data || [])];
+  // Sufixo não numérico (dado sujo, ou lote de outro padrão) é ignorado em
+  // vez de derrubar a conta — não conta como "maior" nem quebra o parsing.
+  const maiorSufixo = lotes.reduce((max, l) => {
+    const sufixo = String(l.lote || '').slice(prefixo.length);
+    return /^\d+$/.test(sufixo) ? Math.max(max, Number(sufixo)) : max;
+  }, 0);
+  return Array.from({ length: quantidade }, (_, i) => prefixo + String(maiorSufixo + 1 + i).padStart(3, '0'));
 }
 
 // Um único lote — mesmo número que o primeiro do lote plural.
