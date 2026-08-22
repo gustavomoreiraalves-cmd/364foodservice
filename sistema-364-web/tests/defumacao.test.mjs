@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STATUS_DEFUMACAO, rendimento, condicaoRendimento,
-  saldoLote, pesosValidos, proximaFicha, rendimentoDaFicha,
+  saldoLote, pesosValidos, proximaFicha, prefixoFicha, rendimentoDaFicha,
 } from '../lib/defumacao.js';
 
 test('STATUS_DEFUMACAO: os três status da ficha', () => {
@@ -38,9 +38,9 @@ test('condicaoRendimento: sem dado', () => {
 test('saldoLote: recebido menos o que já foi defumado', () => {
   const item = { id: 'a', quantidade: 180 };
   const jaDefumados = [
-    { recebimento_item_id: 'a', peso_bruto_kg: 50 },
-    { recebimento_item_id: 'a', peso_bruto_kg: 30 },
-    { recebimento_item_id: 'b', peso_bruto_kg: 90 },
+    { recebimento_item_id: 'a', peso_bruto_kg: 50, defumacoes: { status: 'rascunho' } },
+    { recebimento_item_id: 'a', peso_bruto_kg: 30, defumacoes: { status: 'finalizada' } },
+    { recebimento_item_id: 'b', peso_bruto_kg: 90, defumacoes: { status: 'rascunho' } },
   ];
   assert.equal(saldoLote(item, jaDefumados), 100);
 });
@@ -51,7 +51,36 @@ test('saldoLote: lote intocado devolve o recebido inteiro', () => {
 
 test('saldoLote: nunca devolve negativo', () => {
   const item = { id: 'a', quantidade: 10 };
-  assert.equal(saldoLote(item, [{ recebimento_item_id: 'a', peso_bruto_kg: 25 }]), 0);
+  assert.equal(saldoLote(item, [{ recebimento_item_id: 'a', peso_bruto_kg: 25, defumacoes: { status: 'rascunho' } }]), 0);
+});
+
+// Critical 1 da revisão de branch: ficha cancelada não pode consumir saldo
+// do lote para sempre. O peso de uma ficha lançada por engano e cancelada
+// (com motivo) precisa voltar a ficar disponível para o operador refazer a
+// ficha — os itens continuam gravados (a imutabilidade proíbe apagá-los),
+// mas não descontam mais.
+test('saldoLote: item de ficha cancelada não desconta do saldo', () => {
+  const item = { id: 'a', quantidade: 180 };
+  const jaDefumados = [
+    { recebimento_item_id: 'a', peso_bruto_kg: 180, defumacoes: { status: 'cancelada' } },
+  ];
+  assert.equal(saldoLote(item, jaDefumados), 180);
+});
+
+test('saldoLote: mistura itens de ficha cancelada, rascunho e finalizada — só os dois últimos descontam', () => {
+  const item = { id: 'a', quantidade: 180 };
+  const jaDefumados = [
+    { recebimento_item_id: 'a', peso_bruto_kg: 180, defumacoes: { status: 'cancelada' } }, // lançamento errado, cancelado
+    { recebimento_item_id: 'a', peso_bruto_kg: 60, defumacoes: { status: 'rascunho' } },   // refeito
+    { recebimento_item_id: 'a', peso_bruto_kg: 40, defumacoes: { status: 'finalizada' } },
+  ];
+  assert.equal(saldoLote(item, jaDefumados), 80);
+});
+
+test('saldoLote: item sem status de ficha (join ausente) não desconta por padrão', () => {
+  const item = { id: 'a', quantidade: 180 };
+  const jaDefumados = [{ recebimento_item_id: 'a', peso_bruto_kg: 50 }];
+  assert.equal(saldoLote(item, jaDefumados), 180);
 });
 
 test('pesosValidos: peso defumado maior que o bruto é erro', () => {
@@ -106,6 +135,10 @@ test('rendimentoDaFicha: ficha inteira pesada soma bruto e final de todos os ite
     { peso_bruto_kg: 80, peso_final_kg: 40 },
   ];
   assert.equal(rendimentoDaFicha(itens), 85 / 180);
+});
+
+test('prefixoFicha: monta DEF-AAMMDD- a partir da data', () => {
+  assert.equal(prefixoFicha('2026-08-22'), 'DEF-260822-');
 });
 
 test('proximaFicha: primeira ficha do dia', () => {

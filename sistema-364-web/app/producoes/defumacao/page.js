@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { hoje, fmtDate } from '../../../lib/format';
-import { rendimento, condicaoRendimento, proximaFicha } from '../../../lib/defumacao';
+import { condicaoRendimento, proximaFicha, prefixoFicha, rendimentoDaFicha } from '../../../lib/defumacao';
 import AppShell from '../../../components/AppShell';
 import ProducaoTabs from '../../../components/ProducaoTabs';
 import { useEmpresaAtual } from '../../../lib/empresa';
@@ -69,18 +69,26 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
-  // Número da ficha vem do maior sufixo já usado NO DIA DE HOJE, nesta
-  // empresa — nunca da contagem, que repete número assim que uma ficha some
-  // (ver comentário de proximaFicha em lib/defumacao.js). Por isso a
-  // consulta é refeita a cada tentativa: se duas pessoas clicam "Nova
-  // ficha" ao mesmo tempo, a segunda tentativa já enxerga a ficha que a
+  // Número da ficha vem do maior sufixo já usado dentre as fichas cujo LOTE
+  // começa com o prefixo de hoje (DEF-AAMMDD-), nunca da contagem — que
+  // repete número assim que uma ficha some — nem da coluna `data` da ficha
+  // (ver comentário de prefixoFicha em lib/defumacao.js). `data` é editável
+  // em rascunho e é comum o lançamento acontecer no dia seguinte à
+  // defumação: filtrar por `.eq('data', dataHoje)` faz uma ficha editada
+  // sair do filtro do dia em que nasceu, `proximaFicha` repete o número dela
+  // (a mesma DEF-AAMMDD-001), e todo insert seguinte — inclusive as
+  // tentativas de retry abaixo — bate na constraint de unicidade e falha com
+  // uma mensagem de colisão que não é a colisão de verdade. Filtrando pelo
+  // prefixo do LOTE em vez da `data`, a numeração fica desacoplada do campo
+  // editável. A consulta é refeita a cada tentativa: se duas pessoas clicam
+  // "Nova ficha" ao mesmo tempo, a segunda tentativa já enxerga a ficha que a
   // primeira acabou de gravar.
-  async function buscarFichasDoDia(eid, dataHoje) {
+  async function buscarFichasDoPrefixo(eid, prefixo) {
     const { data, error } = await supabase
       .from('defumacoes')
       .select('lote')
       .eq('empresa_id', eid)
-      .eq('data', dataHoje);
+      .like('lote', `${prefixo}%`);
     if (error) throw error;
     return data || [];
   }
@@ -91,11 +99,12 @@ function Conteudo() {
     setErroCriar('');
     const eid = empresaAtual.id;
     const dataHoje = hoje();
+    const prefixo = prefixoFicha(dataHoje);
     const MAX_TENTATIVAS = 3;
     try {
       for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
-        const fichasDoDia = await buscarFichasDoDia(eid, dataHoje);
-        const numero = proximaFicha(dataHoje, fichasDoDia);
+        const fichasDoPrefixo = await buscarFichasDoPrefixo(eid, prefixo);
+        const numero = proximaFicha(dataHoje, fichasDoPrefixo);
         const { data, error } = await supabase
           .from('defumacoes')
           .insert([{ lote: numero, data: dataHoje, status: 'rascunho', empresa_id: eid }])
@@ -158,9 +167,15 @@ function Conteudo() {
             <tbody>
               {lista.length ? lista.map(f => {
                 const itens = f.defumacao_itens || [];
-                const somaBruto = itens.reduce((s, i) => s + (Number(i.peso_bruto_kg) || 0), 0);
-                const somaFinal = itens.reduce((s, i) => s + (Number(i.peso_final_kg) || 0), 0);
-                const r = rendimento(somaBruto, somaFinal);
+                // Mesma conta que a ficha usa (rendimentoDaFicha, em
+                // lib/defumacao.js): só pareia bruto e final dos itens já
+                // pesados. Somar o bruto de TODOS os itens contra o final só
+                // dos pesados (o que esta lista fazia antes) inflava o
+                // denominador sem contrapartida no numerador — numa ficha
+                // com um item pesado e outro ainda não, a lista mostrava um
+                // rendimento bem menor do que a ficha mostrava no mesmo
+                // instante.
+                const r = rendimentoDaFicha(itens);
                 const cond = condicaoRendimento(r);
                 return (
                   <tr key={f.id} onClick={() => router.push(`/producoes/defumacao/${f.id}`)} style={{ cursor: 'pointer' }}>

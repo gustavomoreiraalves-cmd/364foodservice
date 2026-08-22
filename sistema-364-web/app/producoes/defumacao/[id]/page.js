@@ -110,7 +110,8 @@ function Conteudo({ setFichaImpressao }) {
 
   const [funcionarios, setFuncionarios] = useState([]);
   const [lotesDisponiveis, setLotesDisponiveis] = useState([]); // recebimento_itens da empresa, com joins
-  const [itensJaDefumados, setItensJaDefumados] = useState([]); // TODOS os defumacao_itens da empresa
+  const [itensJaDefumados, setItensJaDefumados] = useState([]); // defumacao_itens da empresa, janela recente — só para o saldo do lote
+  const [itensDaFicha, setItensDaFicha] = useState([]); // defumacao_itens desta ficha, sem recorte de período
 
   const [novoItem, setNovoItem] = useState(ITEM_VAZIO);
   const [erroItem, setErroItem] = useState('');
@@ -121,6 +122,10 @@ function Conteudo({ setFichaImpressao }) {
   const [finalizando, setFinalizando] = useState(false);
   const [salvandoFinalizar, setSalvandoFinalizar] = useState(false);
   const [erroFinalizar, setErroFinalizar] = useState('');
+  // Marcado só quando algum item ainda não tem peso_final_kg — exige que o
+  // operador confirme que sabe da consequência antes de habilitar o botão.
+  // Ver comentário em finalizar().
+  const [confirmaSemPesoFinal, setConfirmaSemPesoFinal] = useState(false);
 
   const [cancelando, setCancelando] = useState(false);
   const [motivoCancelamento, setMotivoCancelamento] = useState('');
@@ -149,29 +154,62 @@ function Conteudo({ setFichaImpressao }) {
     // cancelando" pelo usuário logado (useAuth), no mesmo padrão de
     // app/producoes/nova/page.js — cancelada_por_id é quem clica em Cancelar
     // ficha, não o responsável pela defumação.
-    const [r1, r2, r3, r4] = await Promise.all([
+    // Janela usada para recortar as duas consultas "da empresa inteira"
+    // abaixo (lotes recebidos e itens de defumação de todas as fichas). O
+    // Supabase corta em 1000 linhas (max rows) sem sinalizar erro — sem
+    // `order`, o que sobra do corte é arbitrário; sem recorte de período, o
+    // corte silencioso acontece mais cedo. Recortar para os últimos 6 meses
+    // empurra o corte de 1000 linhas para um horizonte que a operação não
+    // deveria alcançar, e o `order` garante que, se alcançar, o que fica é
+    // sempre o mais recente. FEFO (priorizar o lote mais antigo) fica de
+    // fora desta correção — ver revisão final.
+    const desde = new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10);
+
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('defumacoes')
         .select('*, responsavel:funcionarios!defumacoes_responsavel_id_fkey(nome), cancelada_por:funcionarios!defumacoes_cancelada_por_id_fkey(nome)')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
-      // Lotes de matéria-prima recebidos por esta empresa. A condição sanitária
-      // mora em inspecoes_qualidade (não existe mais status_recebimento em
-      // recebimento_itens) — por isso o join, filtrado depois com
-      // inspecaoAprovada.
+      // Lotes de matéria-prima recebidos por esta empresa nos últimos 6
+      // meses. A condição sanitária mora em inspecoes_qualidade (não existe
+      // mais status_recebimento em recebimento_itens) — por isso o join,
+      // filtrado depois com inspecaoAprovada. `recebimentos!inner` (em vez
+      // de `recebimentos(...)`) é o que permite filtrar/ordenar pela data do
+      // recebimento embutido.
       supabase.from('recebimento_itens')
-        .select('id, lote, quantidade, materia_prima_id, materias_primas(nome, unidade), recebimentos(data), inspecoes_qualidade(status)')
-        .eq('empresa_id', eid),
-      // Todos os itens de defumação da empresa — não só desta ficha — porque
-      // saldoLote precisa descontar o que já foi lançado em qualquer ficha,
-      // inclusive esta.
+        .select('id, lote, quantidade, materia_prima_id, materias_primas(nome, unidade), recebimentos!inner(data), inspecoes_qualidade(status)')
+        .eq('empresa_id', eid)
+        .gte('recebimentos.data', desde)
+        .order('data', { foreignTable: 'recebimentos', ascending: false })
+        .limit(1000),
+      // Itens de defumação de TODA a empresa nos últimos 6 meses — não só
+      // desta ficha — porque saldoLote precisa descontar o que já foi
+      // lançado em qualquer ficha, inclusive esta. `defumacoes!inner(status,
+      // data)` traz o status da ficha pai: saldoLote só desconta itens de
+      // ficha em rascunho ou finalizada, nunca de ficha cancelada (Critical 1
+      // da revisão final — cancelar uma ficha lançada por engano não pode
+      // prender o peso para sempre).
+      supabase.from('defumacao_itens')
+        .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote), defumacoes!inner(status, data)')
+        .eq('empresa_id', eid)
+        .gte('defumacoes.data', desde)
+        .order('data', { foreignTable: 'defumacoes', ascending: false })
+        .limit(1000),
+      // Itens desta ficha específica, sem recorte de período: uma ficha
+      // finalizada há mais de 6 meses continua tendo que mostrar os itens
+      // dela quando o operador abre a tela — o recorte acima é só para a
+      // conta de saldo do lote, que soma itens de fichas diferentes e pode
+      // esbarrar no teto de 1000 linhas; uma ficha isolada nunca chega perto
+      // disso.
       supabase.from('defumacao_itens')
         .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote)')
-        .eq('empresa_id', eid),
+        .eq('empresa_id', eid).eq('defumacao_id', id)
+        .order('id'),
     ]);
 
     // Falha de carga precisa aparecer como falha, não como "ficha não
     // encontrada" — achado real na Fase 1.
-    const falha = [r1, r2, r3, r4].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -191,13 +229,13 @@ function Conteudo({ setFichaImpressao }) {
     setFuncionarios(r2.data || []);
     setLotesDisponiveis(r3.data || []);
     setItensJaDefumados(r4.data || []);
+    setItensDaFicha(r5.data || []);
     setLoading(false);
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id, id]);
 
   const somenteLeitura = !ficha || ficha.status !== 'rascunho';
-  const itensDaFicha = itensJaDefumados.filter(i => i.defumacao_id === id);
 
   // Best-effort, silencioso: usado depois de uma gravação de campo falhar,
   // para saber se a ficha mudou de status por baixo (outra aba finalizou ou
@@ -324,7 +362,13 @@ function Conteudo({ setFichaImpressao }) {
       setErroItem(mensagemErro('Não foi possível gravar o item.', error));
       return;
     }
-    setItensJaDefumados(prev => [...prev, data]);
+    // adicionarItem só roda com !somenteLeitura, ou seja, ficha em rascunho —
+    // por isso é seguro carimbar `defumacoes: { status: 'rascunho' }' aqui em
+    // vez de recarregar a ficha inteira: itensJaDefumados (a lista da
+    // empresa toda, usada por saldoLote) precisa do status da ficha pai para
+    // não contar itens de ficha cancelada (Critical 1).
+    setItensJaDefumados(prev => [...prev, { ...data, defumacoes: { status: 'rascunho' } }]);
+    setItensDaFicha(prev => [...prev, data]);
     setNovoItem(ITEM_VAZIO);
   }
 
@@ -342,6 +386,7 @@ function Conteudo({ setFichaImpressao }) {
       return;
     }
     setItensJaDefumados(prev => prev.filter(i => i.id !== itemId));
+    setItensDaFicha(prev => prev.filter(i => i.id !== itemId));
   }
 
   // Quem finaliza/cancela é o usuário logado — não necessariamente o
@@ -358,6 +403,10 @@ function Conteudo({ setFichaImpressao }) {
   // inteiro do update.
   async function finalizar() {
     if (!ficha || !empresaAtual || ficha.status !== 'rascunho') return;
+    // Guarda de tela espelhando o aviso do painel de confirmação — o botão
+    // já fica desabilitado sem a caixa marcada, isto é o cinto e suspensório
+    // contra clique disparado por outro caminho (ex.: Enter no formulário).
+    if (itensSemPesoFinal.length > 0 && !confirmaSemPesoFinal) return;
     setSalvandoFinalizar(true);
     setErroFinalizar('');
     const { data, error } = await supabase.from('defumacoes')
@@ -382,6 +431,7 @@ function Conteudo({ setFichaImpressao }) {
     }
     setFinalizando(false);
     setErroFinalizar('');
+    setConfirmaSemPesoFinal(false);
     await carregar();
   }
 
@@ -483,7 +533,11 @@ function Conteudo({ setFichaImpressao }) {
           ];
         }),
       },
-      totais: `Peso bruto total: ${fmtKg(somaBruto)} kg · Peso defumado total: ${fmtKg(somaFinal)} kg · Rendimento da ficha: ${rFicha === null ? '—' : `${(rFicha * 100).toFixed(1)}%`}`,
+      // A nota do rendimento é a mesma que estava na ficha de papel (v2,
+      // página 2) — a ficha impressa precisa continuar servindo como
+      // registro sanitário autoexplicativo, sem depender de quem lê saber a
+      // convenção da tela.
+      totais: `Peso bruto total: ${fmtKg(somaBruto)} kg · Peso defumado total: ${fmtKg(somaFinal)} kg · Rendimento da ficha: ${rFicha === null ? '—' : `${(rFicha * 100).toFixed(1)}%`} · Rendimento = peso defumado ÷ peso bruto; o sistema alerta abaixo de 40%.`,
       assinaturas: ['Responsável pela defumação', 'Conferido por'],
     });
   }
@@ -500,6 +554,21 @@ function Conteudo({ setFichaImpressao }) {
   const somaFinal = itensDaFicha.reduce((s, i) => s + (Number(i.peso_final_kg) || 0), 0);
   const rFicha = rendimentoDaFicha(itensDaFicha);
   const condFicha = condicaoRendimento(rFicha);
+
+  // Quantas matérias-primas DISTINTAS entraram na ficha — não o número de
+  // itens. Duas linhas do mesmo item de recebimento (ou lotes diferentes da
+  // mesma matéria-prima) contam como uma matéria-prima só no resumo de
+  // finalização.
+  const qtdMateriasPrimasLancadas = new Set(itensDaFicha.map(i => i.materia_prima_id)).size;
+
+  // O fluxo documentado é pesar o bruto na entrada e o defumado só horas
+  // depois (ver comentário de rendimentoDaFicha em lib/defumacao.js).
+  // Finalizar no meio trava os itens pela imutabilidade da migração 29 — o
+  // peso_final_kg desses itens nunca mais pode ser preenchido, e o
+  // rendimento da ficha fica "—" para sempre. Important 5 da revisão final:
+  // exigir confirmação explícita nesse caso, em vez de deixar finalizar
+  // silenciosamente.
+  const itensSemPesoFinal = itensDaFicha.filter(i => i.peso_final_kg === null || i.peso_final_kg === undefined || i.peso_final_kg === '');
 
   if (loading) return <p className="muted">Carregando…</p>;
 
@@ -533,7 +602,7 @@ function Conteudo({ setFichaImpressao }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {ficha.status === 'rascunho' && itensDaFicha.length > 0 && !finalizando && (
-              <button className="btn small" onClick={() => setFinalizando(true)}>Finalizar ficha</button>
+              <button className="btn small" onClick={() => { setConfirmaSemPesoFinal(false); setFinalizando(true); }}>Finalizar ficha</button>
             )}
             {ficha.status !== 'cancelada' && !cancelando && (
               <button className="btn danger small" onClick={() => setCancelando(true)}>Cancelar ficha</button>
@@ -560,7 +629,7 @@ function Conteudo({ setFichaImpressao }) {
             {erroFinalizar && <div className="banner bad">{erroFinalizar}</div>}
             <p><b>Confirmar finalização da ficha {ficha.lote}?</b></p>
             <ul style={{ fontSize: 12.5, lineHeight: 1.8 }}>
-              <li>{itensDaFicha.length} matéria(s)-prima(s) lançada(s)</li>
+              <li>{qtdMateriasPrimasLancadas} matéria(s)-prima(s) lançada(s)</li>
               <li>Peso bruto total: <b>{fmtKg(somaBruto)} kg</b></li>
               <li>Peso defumado total: <b>{fmtKg(somaFinal)} kg</b></li>
               <li>Rendimento da ficha: <RendimentoTexto r={rFicha} /></li>
@@ -568,11 +637,27 @@ function Conteudo({ setFichaImpressao }) {
             <p className="muted" style={{ fontSize: 12 }}>
               Depois de finalizada, o cabeçalho e os itens ficam travados. Para corrigir, cancele com motivo e refaça.
             </p>
+            {itensSemPesoFinal.length > 0 && (
+              <div className="banner" style={{ marginTop: 10 }}>
+                <p style={{ margin: 0 }}>
+                  <b>{itensSemPesoFinal.length}</b> {itensSemPesoFinal.length === 1 ? 'item ainda não tem' : 'itens ainda não têm'} peso defumado
+                  informado. Depois de finalizar, o item trava e o peso defumado {itensSemPesoFinal.length === 1 ? 'dele' : 'deles'} <b>não poderá mais ser informado</b> — o
+                  rendimento desse(s) item(ns) fica &quot;—&quot; para sempre.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, fontWeight: 400 }}>
+                  <input type="checkbox" checked={confirmaSemPesoFinal}
+                    onChange={e => setConfirmaSemPesoFinal(e.target.checked)}
+                    style={{ marginTop: 2 }} />
+                  <span>Estou ciente e quero finalizar mesmo assim.</span>
+                </label>
+              </div>
+            )}
             <div className="row-actions">
-              <button className="btn" onClick={finalizar} disabled={salvandoFinalizar}>
+              <button className="btn" onClick={finalizar}
+                disabled={salvandoFinalizar || (itensSemPesoFinal.length > 0 && !confirmaSemPesoFinal)}>
                 {salvandoFinalizar ? 'Finalizando…' : 'Confirmar finalização'}
               </button>
-              <button className="btn secondary" onClick={() => { setFinalizando(false); setErroFinalizar(''); }}>Voltar</button>
+              <button className="btn secondary" onClick={() => { setFinalizando(false); setErroFinalizar(''); setConfirmaSemPesoFinal(false); }}>Voltar</button>
             </div>
           </div>
         )}
@@ -651,7 +736,10 @@ function Conteudo({ setFichaImpressao }) {
           </div>
           <div>
             <label>Observações</label>
-            <input type="text" disabled={somenteLeitura} value={cabecalho.obs}
+            {/* A ficha de papel (v2, página 2) tem três linhas de
+                observações — um <input> de uma linha esconde o que não
+                coube no primeiro trecho digitado. */}
+            <textarea rows={3} disabled={somenteLeitura} value={cabecalho.obs}
               onChange={e => setCabecalho({ ...cabecalho, obs: e.target.value })}
               onBlur={() => salvarCampo('obs')} />
             {erroCampo.obs && <p className="erro" style={{ fontSize: 11, marginTop: 4 }}>{erroCampo.obs}</p>}

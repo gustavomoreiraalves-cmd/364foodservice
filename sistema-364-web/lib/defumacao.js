@@ -33,10 +33,24 @@ export function condicaoRendimento(r) {
 //
 // O saldo NÃO sai de stock_balances: a tabela existe em produção mas nenhum
 // código escreve nela, então a lista de lotes sairia vazia.
+//
+// Só descontam do saldo itens de ficha em rascunho ou finalizada. Itens de
+// ficha cancelada continuam gravados — a imutabilidade da migração 29 proíbe
+// apagá-los —, mas o peso que eles lançaram nunca chegou a sair do lote de
+// verdade. Sem este filtro, cancelar uma ficha lançada por engano prendia o
+// peso para sempre: ao tentar refazer, o lote aparecia "sem saldo
+// disponível" mesmo sem nenhum consumo real. `itensJaDefumados` precisa
+// trazer o status da ficha pai em `i.defumacoes.status` (join
+// `defumacoes!inner(status)` na consulta) — item sem esse dado é tratado
+// como não descontável, nunca como descontável por padrão.
 export function saldoLote(recebimentoItem, itensJaDefumados) {
   const recebido = num(recebimentoItem?.quantidade) || 0;
   const usado = (itensJaDefumados || [])
     .filter(i => i.recebimento_item_id === recebimentoItem?.id)
+    .filter(i => {
+      const status = i.defumacoes?.status;
+      return status === 'rascunho' || status === 'finalizada';
+    })
     .reduce((s, i) => s + (num(i.peso_bruto_kg) || 0), 0);
   return Math.max(0, recebido - usado);
 }
@@ -89,10 +103,24 @@ export function pesosValidos({ peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_f
   return { ok: true };
 }
 
-// Número da ficha: DEF-AAMMDD-###. Deriva do maior sufixo já usado no dia,
-// nunca da contagem de fichas — contagem repete número assim que uma some.
+// Prefixo do número da ficha, sem o sufixo — DEF-AAMMDD-. Usado tanto para
+// gerar o próximo número (proximaFicha) quanto para buscar as fichas "do
+// dia" pelo próprio prefixo gravado em `lote`, não pela coluna `data`: `data`
+// é editável a qualquer momento em rascunho (o lançamento costuma acontecer
+// no dia seguinte à defumação de verdade) e o número da ficha nunca é
+// renumerado quando ela muda. Filtrar por `data` faria uma ficha editada sair
+// do filtro do dia em que nasceu, `proximaFicha` repetiria o número dela, e
+// todo insert seguinte bateria na constraint de unicidade — ver
+// app/producoes/defumacao/page.js.
+export function prefixoFicha(dataStr) {
+  return `DEF-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
+}
+
+// Número da ficha: DEF-AAMMDD-###. Deriva do maior sufixo já usado dentre as
+// fichas com este prefixo, nunca da contagem de fichas — contagem repete
+// número assim que uma some.
 export function proximaFicha(dataStr, fichasExistentes) {
-  const prefixo = `DEF-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
+  const prefixo = prefixoFicha(dataStr);
   const maior = (fichasExistentes || []).reduce((max, f) => {
     const lote = String(f?.lote || '');
     if (!lote.startsWith(prefixo)) return max;

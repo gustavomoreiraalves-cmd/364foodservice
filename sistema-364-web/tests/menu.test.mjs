@@ -25,7 +25,7 @@ test('menuVisivel: usuário só com producoes vê o grupo Produção e o Dashboa
   assert.deepEqual(ids(visivel), ['dashboard', 'producao']);
   const labels = visivel.find(e => e.id === 'producao').itens.map(i => i.label);
   assert.deepEqual(labels, [
-    'Visão Geral', 'Defumação', 'Produção Interna',
+    'Visão Geral', 'Defumação', 'Produção Completa', 'Produção Interna',
     'Relatório de Validades', 'Histórico de Produção',
   ]);
   assert.ok(!labels.includes('Recebimento'));

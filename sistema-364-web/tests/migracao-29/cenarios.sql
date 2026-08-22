@@ -128,7 +128,16 @@ begin
     raise exception 'FALHA 6g: item de ficha finalizada foi apagado direto (sem apagar o cabeçalho)';
   exception when check_violation then null; end;
 
-  raise notice 'OK 6: ficha finalizada é imutável — cabeçalho, status e itens';
+  -- Menor da revisão final, corrigido junto com o Important 7: empresa_id
+  -- entrou na mesma lista de campos travados que lote/obs/data/horários —
+  -- sem isso dava para mover a ficha de empresa pelo banco depois de
+  -- finalizada.
+  begin
+    update defumacoes set empresa_id = '99999999-9999-9999-9999-999999999999' where id = v_ficha;
+    raise exception 'FALHA 6h: empresa da ficha finalizada mudou';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 6: ficha finalizada é imutável — cabeçalho, status, itens e empresa';
 end $$;
 
 -- Cenário 7: cancelar exige motivo, cancelada é terminal, e a data do
@@ -164,17 +173,39 @@ begin
     update defumacoes set status = 'rascunho' where id = v_ficha;
     raise exception 'FALHA 7c: ficha cancelada voltou para rascunho';
   exception when check_violation then null; end;
-  raise notice 'OK 7: cancelamento exige motivo, é terminal, e cancelada_em vem do banco';
+
+  -- Menor da revisão final, corrigido junto com o Important 7: uma vez
+  -- cancelada, o motivo do cancelamento é tão parte do registro sanitário
+  -- quanto o resto do cabeçalho — sem esta trava dava para reescrever o
+  -- motivo de uma ficha já cancelada por cima do que ficou impresso.
+  begin
+    update defumacoes set cancelada_motivo = 'motivo reescrito depois' where id = v_ficha;
+    raise exception 'FALHA 7d: motivo de ficha já cancelada foi reescrito';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 7: cancelamento exige motivo, é terminal, cancelada_em vem do banco, e o motivo não é reescrevível';
 end $$;
 
--- Cenário 8: apagar a ficha em cascata não é bloqueado pelo trigger do item.
+-- Cenário 8: apagar o cabeçalho de uma ficha em RASCUNHO continua
+-- funcionando, e a cascata para os itens não é bloqueada pelo trigger do
+-- item.
 --
--- Este cenário só é discriminante porque a trigger compara com `is distinct
--- from` (ver comentário na migração): se o `if not found` que detecta a
--- cascata fosse removido, `v_status` ficaria nulo e a comparação `is distinct
--- from 'rascunho'` daria verdadeiro, disparando a exceção e derrubando este
--- delete. Com o antigo `<>`, a mesma remoção passaria batido (`null <> texto`
--- é nulo, não verdadeiro) e este cenário continuaria "OK" mesmo quebrado.
+-- Até a revisão final este cenário usava uma ficha FINALIZADA — mas a
+-- correção do Important 6 (trg_defumacoes_bloquear_delete, mais abaixo)
+-- passou a bloquear justamente o delete de ficha fora de rascunho, que era o
+-- caso que este cenário exercitava. Trocado para rascunho: continua provando
+-- que a cascata do `on delete cascade` para os itens funciona (é o único
+-- caminho de delete que ainda precisa funcionar), sem colidir com a trava
+-- nova. O cenário 12 cobre o caso que este cobria antes (finalizada não
+-- apaga).
+--
+-- Este cenário só é discriminante porque a trigger do ITEM compara com `is
+-- distinct from` (ver comentário na migração): se o `if not found` que
+-- detecta a cascata fosse removido, `v_status` ficaria nulo e a comparação
+-- `is distinct from 'rascunho'` daria verdadeiro, disparando a exceção e
+-- derrubando este delete. Com o antigo `<>`, a mesma remoção passaria batido
+-- (`null <> texto` é nulo, não verdadeiro) e este cenário continuaria "OK"
+-- mesmo quebrado.
 do $$
 declare v_ficha uuid;
 begin
@@ -182,9 +213,8 @@ begin
     returning id into v_ficha;
   insert into defumacao_itens (defumacao_id, materia_prima_id, peso_bruto_kg, empresa_id)
     values (v_ficha, '33333333-3333-3333-3333-333333333333', 10, '11111111-1111-1111-1111-111111111111');
-  update defumacoes set status = 'finalizada' where id = v_ficha;
   delete from defumacoes where id = v_ficha;
-  raise notice 'OK 8: delete em cascata passa';
+  raise notice 'OK 8: delete em cascata de ficha em rascunho passa';
 end $$;
 
 -- Cenário 9: ficha não nasce finalizada pulando a checagem de item — a regra
@@ -198,6 +228,92 @@ begin
     raise exception 'FALHA 9: ficha nasceu finalizada sem item lançado';
   exception when check_violation then null; end;
   raise notice 'OK 9: ficha não nasce finalizada sem item';
+end $$;
+
+-- Cenário 10: isolamento multiempresa dos itens de defumação (Important 7 da
+-- revisão final). Sem a validação, um item gravado com empresa errada fica
+-- invisível para a tela da empresa dona (o filtro `.eq('empresa_id', eid)`
+-- nunca alcança ele) e não desconta do saldo do lote — o mesmo lote pode ser
+-- lançado duas vezes, uma por empresa.
+do $$
+declare
+  v_ficha uuid;
+  v_lote_outra_empresa uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  v_recebimento_outra_empresa uuid := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+begin
+  insert into defumacoes (lote, empresa_id) values ('DEF-260822-501', '11111111-1111-1111-1111-111111111111')
+    returning id into v_ficha;
+
+  -- Caso a: item com empresa_id diferente da ficha pai.
+  begin
+    insert into defumacao_itens (defumacao_id, materia_prima_id, peso_bruto_kg, empresa_id)
+      values (v_ficha, '33333333-3333-3333-3333-333333333333', 10, '99999999-9999-9999-9999-999999999999');
+    raise exception 'FALHA 10a: item com empresa diferente da ficha pai foi aceito';
+  exception when check_violation then null; end;
+
+  -- Caso b: item da empresa certa da ficha, mas apontando para um lote
+  -- (recebimento_item_id) de OUTRA empresa.
+  insert into recebimentos (id, empresa_id) values (v_recebimento_outra_empresa, '99999999-9999-9999-9999-999999999999');
+  insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+    values (v_lote_outra_empresa, v_recebimento_outra_empresa, '33333333-3333-3333-3333-333333333333', 'LT-OUTRAEMPRESA', 50, 10, '99999999-9999-9999-9999-999999999999');
+  begin
+    insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id, peso_bruto_kg, empresa_id)
+      values (v_ficha, '33333333-3333-3333-3333-333333333333', v_lote_outra_empresa, 10, '11111111-1111-1111-1111-111111111111');
+    raise exception 'FALHA 10b: item apontando para lote de outra empresa foi aceito';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 10: isolamento multiempresa dos itens de defumação';
+end $$;
+
+-- Cenário 11: as asserções positivas que faltavam (Important 9 da revisão
+-- final). Sem elas, se a guarda de algum dos triggers acima inverter
+-- (rascunho passando a ser bloqueado e o resto liberado), todos os cenários
+-- de bloqueio continuam verdes e a tela para de funcionar sem que a suíte
+-- acuse nada — só um cenário que prova que a operação normal continua
+-- passando pega esse tipo de inversão.
+do $$
+declare v_ficha uuid; v_item uuid;
+begin
+  insert into defumacoes (lote, empresa_id) values ('DEF-260822-502', '11111111-1111-1111-1111-111111111111')
+    returning id into v_ficha;
+  insert into defumacao_itens (defumacao_id, materia_prima_id, peso_bruto_kg, empresa_id)
+    values (v_ficha, '33333333-3333-3333-3333-333333333333', 10, '11111111-1111-1111-1111-111111111111')
+    returning id into v_item;
+
+  -- salvarCampo (app/producoes/defumacao/[id]/page.js) grava campo de
+  -- cabeçalho em rascunho, campo a campo — precisa continuar funcionando.
+  update defumacoes set temperatura_c = 88 where id = v_ficha;
+
+  -- removerItem (mesma tela) apaga item de ficha em rascunho, direto — não
+  -- em cascata do cabeçalho — precisa continuar funcionando.
+  delete from defumacao_itens where id = v_item;
+
+  raise notice 'OK 11: cabeçalho e item de ficha em rascunho continuam editáveis/apagáveis';
+end $$;
+
+-- Cenário 12: apagar o CABEÇALHO de uma ficha finalizada (ou cancelada), não
+-- em cascata de item, é bloqueado — Important 6 da revisão final. Antes
+-- desta correção a imutabilidade cobria update de cabeçalho e de itens, mas
+-- nada cobria o DELETE do cabeçalho: apagar uma ficha finalizada passava e
+-- levava os itens junto em cascata — o oposto do que um módulo cujo
+-- argumento inteiro é imutabilidade de registro sanitário deveria permitir
+-- (o cenário 8, acima, cobria exatamente esse caminho como "OK" até esta
+-- correção).
+do $$
+declare v_ficha uuid;
+begin
+  insert into defumacoes (lote, empresa_id) values ('DEF-260822-503', '11111111-1111-1111-1111-111111111111')
+    returning id into v_ficha;
+  insert into defumacao_itens (defumacao_id, materia_prima_id, peso_bruto_kg, empresa_id)
+    values (v_ficha, '33333333-3333-3333-3333-333333333333', 10, '11111111-1111-1111-1111-111111111111');
+  update defumacoes set status = 'finalizada' where id = v_ficha;
+
+  begin
+    delete from defumacoes where id = v_ficha;
+    raise exception 'FALHA 12: ficha finalizada foi apagada';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 12: ficha finalizada não pode ser apagada';
 end $$;
 
 commit;

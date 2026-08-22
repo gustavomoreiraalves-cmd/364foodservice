@@ -105,9 +105,11 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_ficha uuid;
   v_status text;
+  v_ficha_empresa uuid;
+  v_lote_empresa uuid;
 begin
   v_ficha := coalesce(new.defumacao_id, old.defumacao_id);
-  select status into v_status from public.defumacoes where id = v_ficha;
+  select status, empresa_id into v_status, v_ficha_empresa from public.defumacoes where id = v_ficha;
   -- Ficha já apagada: é a cascata do `on delete cascade`, deixa passar.
   if not found then
     return coalesce(new, old);
@@ -116,6 +118,29 @@ begin
     raise exception 'A ficha de defumação está % — os itens não podem ser alterados. Cancele com motivo e refaça.', v_status
       using errcode = 'check_violation';
   end if;
+
+  -- Isolamento multiempresa dos itens (Important 7 da revisão final): nada
+  -- amarrava `defumacao_itens.empresa_id` ao da ficha pai, nem exigia que
+  -- `recebimento_item_id` apontasse para lote da mesma empresa. Um item
+  -- gravado com empresa errada ficava invisível para a tela da empresa dona
+  -- (o filtro `.eq('empresa_id', eid)` nunca alcança ele) e não descontava
+  -- do saldo do lote — o mesmo lote podia ser lançado duas vezes, uma por
+  -- empresa. Só entra no `insert`/`update`: no `delete`, `new` não existe.
+  if tg_op in ('INSERT', 'UPDATE') then
+    if new.empresa_id is distinct from v_ficha_empresa then
+      raise exception 'O item de defumação precisa ser da mesma empresa da ficha.'
+        using errcode = 'check_violation';
+    end if;
+
+    if new.recebimento_item_id is not null then
+      select empresa_id into v_lote_empresa from public.recebimento_itens where id = new.recebimento_item_id;
+      if v_lote_empresa is distinct from new.empresa_id then
+        raise exception 'O lote de matéria-prima informado é de outra empresa.'
+          using errcode = 'check_violation';
+      end if;
+    end if;
+  end if;
+
   return coalesce(new, old);
 end $$;
 
@@ -157,7 +182,9 @@ begin
 
     -- `lote` é o número da ficha impressa e a base do rastro: não pode mudar
     -- depois que a ficha sai de rascunho, no mesmo nível dos campos de
-    -- processo.
+    -- processo. `empresa_id` entra na mesma lista pelo mesmo motivo do
+    -- Important 7 nos itens: sem a trava, dava para mover a ficha de empresa
+    -- pelo banco depois de finalizada ou cancelada.
     if old.status <> 'rascunho'
        and (new.lote is distinct from old.lote
             or new.obs is distinct from old.obs
@@ -165,8 +192,23 @@ begin
             or new.hora_inicio is distinct from old.hora_inicio
             or new.hora_fim is distinct from old.hora_fim
             or new.temperatura_c is distinct from old.temperatura_c
-            or new.responsavel_id is distinct from old.responsavel_id) then
+            or new.responsavel_id is distinct from old.responsavel_id
+            or new.empresa_id is distinct from old.empresa_id) then
       raise exception 'A ficha de defumação está % — o cabeçalho não pode ser alterado.', old.status
+        using errcode = 'check_violation';
+    end if;
+
+    -- Motivo, data e quem cancelou só podem ser GRAVADOS na transição para
+    -- `cancelada` (de rascunho ou de finalizada — por isso este bloco não
+    -- entra na lista acima, que dispararia e impediria a própria transição).
+    -- Uma vez cancelada, porém, são tão parte do registro sanitário quanto o
+    -- resto do cabeçalho: sem esta trava, dava para reescrever o motivo de
+    -- uma ficha já cancelada por cima do que ficou arquivado/impresso.
+    if old.status = 'cancelada'
+       and (new.cancelada_motivo is distinct from old.cancelada_motivo
+            or new.cancelada_em is distinct from old.cancelada_em
+            or new.cancelada_por_id is distinct from old.cancelada_por_id) then
+      raise exception 'A ficha de defumação já está cancelada — motivo e data do cancelamento não podem ser alterados.'
         using errcode = 'check_violation';
     end if;
   end if;
@@ -199,6 +241,27 @@ create trigger trg_defumacoes_cabecalho
   before insert or update on public.defumacoes
   for each row execute function public.fn_defumacao_cabecalho();
 
+-- A imutabilidade acima cobre update de cabeçalho e de itens, mas nada
+-- cobria o DELETE do próprio cabeçalho: apagar uma ficha finalizada (ou
+-- cancelada) passava direto e levava os itens junto em cascata — o oposto do
+-- que um módulo cujo argumento inteiro é imutabilidade de registro sanitário
+-- deveria permitir. Ficha em rascunho continua apagável (o cenário 8 prova
+-- que a cascata para os itens dela funciona).
+create or replace function public.fn_defumacoes_bloquear_delete() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if old.status <> 'rascunho' then
+    raise exception 'A ficha de defumação está % — não pode ser apagada. Cancele com motivo em vez de apagar.', old.status
+      using errcode = 'check_violation';
+  end if;
+  return old;
+end $$;
+
+drop trigger if exists trg_defumacoes_bloquear_delete on public.defumacoes;
+create trigger trg_defumacoes_bloquear_delete
+  before delete on public.defumacoes
+  for each row execute function public.fn_defumacoes_bloquear_delete();
+
 commit;
 
 -- ---------- ROLLBACK ----------
@@ -209,8 +272,10 @@ commit;
 --
 -- drop trigger if exists trg_defumacao_itens_bloquear_edicao on public.defumacao_itens;
 -- drop trigger if exists trg_defumacoes_cabecalho on public.defumacoes;
+-- drop trigger if exists trg_defumacoes_bloquear_delete on public.defumacoes;
 -- drop function if exists public.fn_defumacao_bloquear_edicao();
 -- drop function if exists public.fn_defumacao_cabecalho();
+-- drop function if exists public.fn_defumacoes_bloquear_delete();
 --
 -- alter table public.defumacao_itens drop constraint if exists defumacao_itens_pesos_coerentes;
 -- drop index if exists public.defumacao_itens_recebimento_item_idx;

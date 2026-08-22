@@ -32,11 +32,11 @@ psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
 # Os cenários rodam como dono do banco, onde RLS não se aplica, então eles não
 # conseguem provar que as travas resistem a um usuário `authenticated`. O que dá
-# para conferir aqui é que as duas funções continuam `security definer`: como
+# para conferir aqui é que as três funções continuam `security definer`: como
 # `invoker`, a policy de `defumacoes`/`defumacao_itens` (atualização 06) podia
 # esconder a ficha pai de quem escreve e fazer o trigger liberar a escrita.
-definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_defumacao_bloquear_edicao','fn_defumacao_cabecalho') and prosecdef;")
-[ "$definer" = "2" ] || { echo "as duas funções de trigger precisam ser security definer (achou $definer)"; exit 1; }
+definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_defumacao_bloquear_edicao','fn_defumacao_cabecalho','fn_defumacoes_bloquear_delete') and prosecdef;")
+[ "$definer" = "3" ] || { echo "as três funções de trigger precisam ser security definer (achou $definer)"; exit 1; }
 echo "OK: triggers em security definer"
 
 # O rollback vive comentado no fim da migração; extrai e aplica para provar que
@@ -53,10 +53,10 @@ sobraram=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.col
 constraint_lote=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_constraint where conname = 'defumacoes_lote_unico_por_empresa';")
 [ "$constraint_lote" = "0" ] || { echo "rollback não removeu a constraint unique(empresa_id, lote)"; exit 1; }
 
-triggers=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_trigger where tgname in ('trg_defumacao_itens_bloquear_edicao','trg_defumacoes_cabecalho');")
+triggers=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_trigger where tgname in ('trg_defumacao_itens_bloquear_edicao','trg_defumacoes_cabecalho','trg_defumacoes_bloquear_delete');")
 [ "$triggers" = "0" ] || { echo "rollback não removeu os triggers (achou $triggers)"; exit 1; }
 
-funcoes=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_defumacao_bloquear_edicao','fn_defumacao_cabecalho');")
+funcoes=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_defumacao_bloquear_edicao','fn_defumacao_cabecalho','fn_defumacoes_bloquear_delete');")
 [ "$funcoes" = "0" ] || { echo "rollback não removeu as funções (achou $funcoes)"; exit 1; }
 
 comentario_lote=$(psql -tAq -d "$BANCO" -c "select coalesce(col_description('defumacoes'::regclass, (select attnum from pg_attribute where attrelid = 'defumacoes'::regclass and attname = 'lote')), '');")
