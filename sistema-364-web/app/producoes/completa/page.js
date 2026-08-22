@@ -16,7 +16,7 @@ export default function ProducaoCompletaPage() {
   const [etiqueta, setEtiqueta] = useState(null);
   return (
     <>
-      <AppShell modulo="producoes" titulo="Defumação" desc="Fluxo rastreável da Food Services: matéria-prima, lotes, custo e estoque">
+      <AppShell modulo="producoes" titulo="Produção Completa" desc="Fluxo rastreável da Food Services: matéria-prima, lotes, custo e estoque">
         <ProducaoTabs />
         <Conteudo setFicha={setFicha} setEtiqueta={setEtiqueta} />
       </AppShell>
