@@ -9,7 +9,8 @@
 --   • `defumacao_itens.recebimento_item_id` — o lote de matéria-prima que
 --     entrou. É o elo entre a Fase 1 (recebimento) e a Fase 3 (embalagem).
 --   • `defumacoes.status` — a ficha nasce em rascunho e é finalizada pelo
---     responsável; depois disso não muda mais.
+--     responsável; depois disso não muda mais (exceto para cancelada, com
+--     motivo).
 --
 -- `defumacoes.lote` passa a ser o NÚMERO DA FICHA (DEF-AAMMDD-###), não o lote
 -- rastreável: uma ficha pode conter vários lotes, um por item. O lote
@@ -22,6 +23,15 @@
 -- Antes de aplicar, confira que não há número de ficha repetido na mesma
 -- empresa, senão a constraint de unicidade falha:
 --   select empresa_id, lote, count(*) from defumacoes group by 1,2 having count(*) > 1;
+-- E que nenhum item já lançado viola o check de pesos coerentes, senão a
+-- constraint nova falha ao ser criada:
+--   select id from defumacao_itens
+--     where coalesce(peso_bruto_kg, 1) <= 0
+--        or coalesce(perda_limpeza_kg, 0) < 0
+--        or coalesce(sobra_kg, 0) < 0
+--        or coalesce(peso_final_kg, 0) < 0
+--        or (peso_bruto_kg is not null and peso_final_kg is not null and peso_final_kg > peso_bruto_kg);
+-- Ambas as consultas precisam devolver zero linhas.
 
 begin;
 
@@ -77,8 +87,21 @@ alter table public.defumacao_itens add constraint defumacao_itens_pesos_coerente
 -- Mesmo padrão da atualização 27 (pedidos): ficha finalizada não muda mais;
 -- correção exige cancelar com motivo e refazer.
 
+-- `security definer` não é conforto: como `invoker`, o `select status from
+-- defumacoes` abaixo roda sujeito à policy `empresa_scoped_access` (atualização
+-- 06). Um usuário de outra empresa não enxerga a ficha pai, o `not found` dá
+-- verdadeiro, o trigger acha que é cascata de delete e libera a escrita — e a
+-- FK `defumacao_id` não restringe por empresa. Como definer, a leitura enxerga
+-- a ficha de verdade e a trava vale para todo mundo. A detecção de cascata
+-- continua correta: naquele caso a linha sumiu mesmo.
+--
+-- A comparação usa `is distinct from` (não `<>`) de propósito: em SQL, `null
+-- <> 'rascunho'` é `null`, não `true`, então um `<>` já deixaria a cascata
+-- passar sozinho, sem depender do `if not found`. Com `is distinct from`, o
+-- `if not found` deixa de ser redundante — é ele quem garante que a cascata
+-- passa; sem ele, `v_status` ficaria nulo e a exceção dispararia.
 create or replace function public.fn_defumacao_bloquear_edicao() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   v_ficha uuid;
   v_status text;
@@ -89,7 +112,7 @@ begin
   if not found then
     return coalesce(new, old);
   end if;
-  if v_status <> 'rascunho' then
+  if v_status is distinct from 'rascunho' then
     raise exception 'A ficha de defumação está % — os itens não podem ser alterados. Cancele com motivo e refaça.', v_status
       using errcode = 'check_violation';
   end if;
@@ -101,27 +124,54 @@ create trigger trg_defumacao_itens_bloquear_edicao
   before insert or update or delete on public.defumacao_itens
   for each row execute function public.fn_defumacao_bloquear_edicao();
 
+-- `security definer` pelo mesmo motivo: a checagem de "ficha sem item" lê
+-- `defumacao_itens`, e como invoker a policy da tabela podia esconder as
+-- linhas de quem escreve e deixar a trava passar.
+--
+-- Roda em `before insert or update` (não só `update`): sem cobrir o insert, um
+-- `insert into defumacoes (..., status) values (..., 'finalizada')` nasceria
+-- finalizado sem passar pela regra "ficha sem item não finaliza" — a regra só
+-- existe no ramo de update no cabeçalho, e ela é aplicada aqui embaixo, fora
+-- do bloco exclusivo de update, exatamente para valer nos dois casos.
 create or replace function public.fn_defumacao_cabecalho() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 begin
-  new.updated_at := clock_timestamp();
+  if tg_op = 'UPDATE' then
+    new.updated_at := clock_timestamp();
 
-  if old.status = 'cancelada' and new.status is distinct from 'cancelada' then
-    raise exception 'Ficha cancelada não volta para %.', new.status
-      using errcode = 'check_violation';
+    if old.status = 'cancelada' and new.status is distinct from 'cancelada' then
+      raise exception 'Ficha cancelada não volta para %.', new.status
+        using errcode = 'check_violation';
+    end if;
+
+    -- De finalizada só se sai para cancelada (com motivo, via constraint
+    -- `defumacoes_cancelamento_motivo`). Sem esta trava, `update defumacoes
+    -- set status = 'rascunho'` numa ficha finalizada reabria ficha e itens
+    -- por baixo da imutabilidade inteira.
+    if old.status = 'finalizada'
+       and new.status is distinct from 'finalizada'
+       and new.status <> 'cancelada' then
+      raise exception 'A ficha de defumação está finalizada — só pode virar cancelada, com motivo.'
+        using errcode = 'check_violation';
+    end if;
+
+    -- `lote` é o número da ficha impressa e a base do rastro: não pode mudar
+    -- depois que a ficha sai de rascunho, no mesmo nível dos campos de
+    -- processo.
+    if old.status <> 'rascunho'
+       and (new.lote is distinct from old.lote
+            or new.obs is distinct from old.obs
+            or new.data is distinct from old.data
+            or new.hora_inicio is distinct from old.hora_inicio
+            or new.hora_fim is distinct from old.hora_fim
+            or new.temperatura_c is distinct from old.temperatura_c
+            or new.responsavel_id is distinct from old.responsavel_id) then
+      raise exception 'A ficha de defumação está % — o cabeçalho não pode ser alterado.', old.status
+        using errcode = 'check_violation';
+    end if;
   end if;
 
-  if old.status <> 'rascunho'
-     and (new.data is distinct from old.data
-          or new.hora_inicio is distinct from old.hora_inicio
-          or new.hora_fim is distinct from old.hora_fim
-          or new.temperatura_c is distinct from old.temperatura_c
-          or new.responsavel_id is distinct from old.responsavel_id) then
-    raise exception 'A ficha de defumação está % — o cabeçalho não pode ser alterado.', old.status
-      using errcode = 'check_violation';
-  end if;
-
-  if old.status = 'rascunho' and new.status = 'finalizada'
+  if new.status = 'finalizada'
      and not exists (select 1 from public.defumacao_itens where defumacao_id = new.id) then
     raise exception 'Ficha sem nenhuma matéria-prima lançada não pode ser finalizada.'
       using errcode = 'check_violation';
@@ -132,7 +182,7 @@ end $$;
 
 drop trigger if exists trg_defumacoes_cabecalho on public.defumacoes;
 create trigger trg_defumacoes_cabecalho
-  before update on public.defumacoes
+  before insert or update on public.defumacoes
   for each row execute function public.fn_defumacao_cabecalho();
 
 commit;
@@ -155,6 +205,11 @@ commit;
 -- alter table public.defumacoes drop constraint if exists defumacoes_lote_unico_por_empresa;
 -- alter table public.defumacoes drop constraint if exists defumacoes_cancelamento_motivo;
 -- alter table public.defumacoes drop constraint if exists defumacoes_status_valido;
+--
+-- -- `lote` é coluna anterior a esta migração; só o comentário que ela ganhou
+-- -- volta a nulo, a coluna em si fica.
+-- comment on column public.defumacoes.lote is null;
+--
 -- alter table public.defumacoes
 --   drop column if exists status,
 --   drop column if exists cancelada_motivo,

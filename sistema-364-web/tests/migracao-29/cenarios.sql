@@ -73,7 +73,17 @@ begin
   raise notice 'OK 5: número de ficha único por empresa';
 end $$;
 
--- Cenário 6: ficha finalizada é imutável — cabeçalho e itens.
+-- Cenário 6: ficha finalizada é imutável — cabeçalho (inclusive o próprio
+-- número da ficha e a observação), o status em si (não volta para rascunho) e
+-- os itens (alterar, inserir e apagar direto, sem ser cascata do cabeçalho).
+--
+-- Cada asserção usa `exception when check_violation` — não `when others`
+-- casando um pedaço da mensagem: as triggers desta migração sempre marcam
+-- `errcode = 'check_violation'`, e a mensagem do próprio `raise exception
+-- 'FALHA ...'` abaixo contém as mesmas palavras ("finalizada", "cancelada")
+-- que a trava usa. Um `when others` com `sqlerrm not like '%finalizada%'`
+-- engoliria o FALHA da asserção junto com o erro de verdade e daria falso
+-- verde se a trava sumisse.
 do $$
 declare v_ficha uuid; v_item uuid;
 begin
@@ -84,27 +94,41 @@ begin
 
   begin
     update defumacoes set temperatura_c = 100 where id = v_ficha;
-    raise exception 'FALHA 6a: cabeçalho de ficha finalizada mudou';
-  exception when others then
-    if sqlerrm not like '%finalizada%' then raise; end if;
-  end;
+    raise exception 'FALHA 6a: temperatura de ficha finalizada mudou';
+  exception when check_violation then null; end;
+
+  begin
+    update defumacoes set lote = 'DEF-260822-002' where id = v_ficha;
+    raise exception 'FALHA 6b: número da ficha finalizada mudou';
+  exception when check_violation then null; end;
+
+  begin
+    update defumacoes set obs = 'reaproveitado' where id = v_ficha;
+    raise exception 'FALHA 6c: observação de ficha finalizada mudou';
+  exception when check_violation then null; end;
+
+  begin
+    update defumacoes set status = 'rascunho' where id = v_ficha;
+    raise exception 'FALHA 6d: ficha finalizada voltou para rascunho';
+  exception when check_violation then null; end;
 
   begin
     update defumacao_itens set peso_final_kg = 90 where id = v_item;
-    raise exception 'FALHA 6b: item de ficha finalizada mudou';
-  exception when others then
-    if sqlerrm not like '%finalizada%' then raise; end if;
-  end;
+    raise exception 'FALHA 6e: item de ficha finalizada mudou';
+  exception when check_violation then null; end;
 
   begin
     insert into defumacao_itens (defumacao_id, materia_prima_id, peso_bruto_kg, empresa_id)
       values (v_ficha, '33333333-3333-3333-3333-333333333333', 10, '11111111-1111-1111-1111-111111111111');
-    raise exception 'FALHA 6c: item novo entrou em ficha finalizada';
-  exception when others then
-    if sqlerrm not like '%finalizada%' then raise; end if;
-  end;
+    raise exception 'FALHA 6f: item novo entrou em ficha finalizada';
+  exception when check_violation then null; end;
 
-  raise notice 'OK 6: ficha finalizada é imutável';
+  begin
+    delete from defumacao_itens where id = v_item;
+    raise exception 'FALHA 6g: item de ficha finalizada foi apagado direto (sem apagar o cabeçalho)';
+  exception when check_violation then null; end;
+
+  raise notice 'OK 6: ficha finalizada é imutável — cabeçalho, status e itens';
 end $$;
 
 -- Cenário 7: cancelar exige motivo, e cancelada é terminal.
@@ -125,13 +149,18 @@ begin
   begin
     update defumacoes set status = 'rascunho' where id = v_ficha;
     raise exception 'FALHA 7b: ficha cancelada voltou para rascunho';
-  exception when others then
-    if sqlerrm not like '%cancelada%' then raise; end if;
-  end;
+  exception when check_violation then null; end;
   raise notice 'OK 7: cancelamento exige motivo e é terminal';
 end $$;
 
 -- Cenário 8: apagar a ficha em cascata não é bloqueado pelo trigger do item.
+--
+-- Este cenário só é discriminante porque a trigger compara com `is distinct
+-- from` (ver comentário na migração): se o `if not found` que detecta a
+-- cascata fosse removido, `v_status` ficaria nulo e a comparação `is distinct
+-- from 'rascunho'` daria verdadeiro, disparando a exceção e derrubando este
+-- delete. Com o antigo `<>`, a mesma remoção passaria batido (`null <> texto`
+-- é nulo, não verdadeiro) e este cenário continuaria "OK" mesmo quebrado.
 do $$
 declare v_ficha uuid;
 begin
@@ -142,6 +171,19 @@ begin
   update defumacoes set status = 'finalizada' where id = v_ficha;
   delete from defumacoes where id = v_ficha;
   raise notice 'OK 8: delete em cascata passa';
+end $$;
+
+-- Cenário 9: ficha não nasce finalizada pulando a checagem de item — a regra
+-- "ficha sem matéria-prima não finaliza" vale tanto no insert quanto no
+-- update do cabeçalho.
+do $$
+begin
+  begin
+    insert into defumacoes (lote, status, empresa_id)
+      values ('DEF-260822-999', 'finalizada', '11111111-1111-1111-1111-111111111111');
+    raise exception 'FALHA 9: ficha nasceu finalizada sem item lançado';
+  exception when check_violation then null; end;
+  raise notice 'OK 9: ficha não nasce finalizada sem item';
 end $$;
 
 commit;
