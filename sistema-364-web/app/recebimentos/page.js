@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useRef, Fragment } from 'react';
 import { supabase } from '../../lib/supabase';
-import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes } from '../../lib/format';
+import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes, mensagemAoGravarItemRecebido } from '../../lib/format';
 import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebimento } from '../../lib/storage';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
@@ -342,7 +342,7 @@ function Conteudo({ setFicha }) {
         }]).select('id').single();
 
         if (errItem) {
-          alert(`Erro ao salvar o item ${i + 1} (${it._mp.nome}): ` + errItem.message);
+          alert(mensagemAoGravarItemRecebido(errItem, `${i + 1} (${it._mp.nome})`));
           for (const done of inseridos) await supabase.from('recebimento_itens').delete().eq('id', done.id);
           await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
           return;

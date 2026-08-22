@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 // módulo e exige as variáveis de ambiente.
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'http://localhost:54321';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
-const { proximosLotes, proximoLote } = await import('../lib/format.js');
+const { proximosLotes, proximoLote, mensagemAoGravarItemRecebido } = await import('../lib/format.js');
 
 // Cliente de fachada no formato do PostgREST: from().select().eq().like()
 // devolve { data }. Registra cada tabela consultada para provar quantas
@@ -72,4 +72,42 @@ test('proximosLotes: passa de 999 sem truncar o número', async () => {
 test('proximoLote: continua entregando um único lote, igual ao primeiro do plural', async () => {
   const cliente = clienteFake({ recebimentos: lotes(4) });
   assert.equal(await proximoLote('2026-08-20', 'empresa-1', cliente), 'LT-260820-005');
+});
+
+// --- mensagem de erro ao gravar item de recebimento (atualização 28) ---
+
+test('mensagemAoGravarItemRecebido: lote repetido vira instrução em português', () => {
+  const msg = mensagemAoGravarItemRecebido(
+    { code: '23505', message: 'duplicate key value violates unique constraint "recebimento_itens_empresa_lote_unico"' },
+    '2 (Cupim)'
+  );
+  assert.match(msg, /número de lote gerado já está em uso/);
+  assert.match(msg, /Nada foi salvo/);
+  assert.match(msg, /o item 2 \(Cupim\)/);
+});
+
+test('mensagemAoGravarItemRecebido: o erro cru vai junto, para diagnóstico', () => {
+  const cru = 'duplicate key value violates unique constraint "recebimento_itens_empresa_lote_unico"';
+  const msg = mensagemAoGravarItemRecebido({ code: '23505', message: cru }, '1 (Costela)');
+  assert.ok(msg.includes(cru), 'a mensagem original do Postgres precisa continuar visível');
+});
+
+test('mensagemAoGravarItemRecebido: reconhece a constraint mesmo sem o code', () => {
+  // O PostgREST nem sempre devolve `code`; a citação do nome da constraint na
+  // mensagem é a outra pista, e sozinha basta.
+  const msg = mensagemAoGravarItemRecebido(
+    { message: 'duplicate key value violates unique constraint "recebimento_itens_empresa_lote_unico"' },
+    '1 (Costela)'
+  );
+  assert.match(msg, /número de lote gerado já está em uso/);
+});
+
+test('mensagemAoGravarItemRecebido: outro erro passa como veio', () => {
+  const msg = mensagemAoGravarItemRecebido({ code: '23502', message: 'null value in column "quantidade"' }, '3 (Panceta)');
+  assert.equal(msg, 'Erro ao salvar o item 3 (Panceta): null value in column "quantidade"');
+});
+
+test('mensagemAoGravarItemRecebido: sem descrição não escreve "o item undefined"', () => {
+  const msg = mensagemAoGravarItemRecebido({ code: '23502', message: 'falhou' });
+  assert.equal(msg, 'Erro ao salvar o item: falhou');
 });
