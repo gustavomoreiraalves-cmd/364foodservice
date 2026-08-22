@@ -69,6 +69,12 @@ export function parseNFe(xml) {
     somaItens: arredMoeda(itens.reduce((s, i) => s + i.valorTotal, 0)),
     emitente: {
       cnpj: digitos(emit.CNPJ),
+      // Produtor rural e MEI emitem por CPF. Antes disso o emitente da nota ficava
+      // sem documento nenhum, e o fornecedor nunca era reconhecido duas vezes.
+      cpf: digitos(emit.CPF),
+      // O documento do emitente, seja ele CNPJ ou CPF. É por este campo que se
+      // procura o fornecedor cadastrado e o de-para de produtos.
+      documento: digitos(emit.CNPJ) || digitos(emit.CPF),
       nome: String(emit.xNome ?? ''),
       fantasia: emit.xFant ? String(emit.xFant) : null,
       telefone: emit.enderEmit?.fone ? String(emit.enderEmit.fone) : null,

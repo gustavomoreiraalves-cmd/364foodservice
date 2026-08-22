@@ -97,7 +97,9 @@ export async function POST(request) {
     empresa_id: empresaId,
     chave: nota.chave,
     modelo: nota.modelo,
-    cnpj_emitente: nota.emitente.cnpj,
+    // O documento do emitente, CNPJ ou CPF: nota de produtor rural gravava vazio
+    // aqui, e o de-para de produtos ficava sem chave para casar.
+    cnpj_emitente: nota.emitente.documento,
     nome_emitente: nota.emitente.nome,
     numero: nota.numero,
     serie: nota.serie,
