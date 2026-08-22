@@ -381,11 +381,16 @@ function Conteudo({ setFichaImpressao }) {
       return;
     }
     setFinalizando(false);
+    setErroFinalizar('');
     await carregar();
   }
 
   async function cancelar() {
-    if (!motivoCancelamento.trim() || !empresaAtual) return;
+    // Mesma trava de finalizar(): sem ela, uma corrida onde outra aba já
+    // cancelou a ficha passaria por todas as travas do banco (o `update`
+    // continua válido, só troca motivo/por_id/data de um cancelamento que já
+    // aconteceu) e sobrescreveria o cancelamento original em silêncio.
+    if (!ficha || !empresaAtual || !motivoCancelamento.trim() || ficha.status === 'cancelada') return;
     setSalvandoCancelar(true);
     setErroCancelar('');
     // `cancelada_em` não vai daqui: quem carimba é o trigger
@@ -413,26 +418,56 @@ function Conteudo({ setFichaImpressao }) {
     }
     setCancelando(false);
     setMotivoCancelamento('');
+    setErroCancelar('');
     await carregar();
+  }
+
+  // O responsável gravado pode ter sido desativado depois — mesmo fallback
+  // do <select> do cabeçalho (funcionarios só traz ativo=true).
+  function nomeResponsavel(fid) {
+    if (!fid) return '—';
+    const ativo = funcionarios.find(f => f.id === fid);
+    if (ativo) return ativo.nome;
+    if (fid === ficha.responsavel_id) return ficha.responsavel?.nome || 'Responsável desativado';
+    return '—';
   }
 
   // Só monta FichaPrint nesta tela — nenhuma EtiquetaPrint aqui (ver
   // comentário em DefumacaoFichaPage). Traz lote, matéria-prima e os quatro
   // pesos de cada item, mais o rendimento por item — o que a ficha de papel
   // trazia.
+  //
+  // O cabeçalho impresso vem de `cabecalho` (o estado do formulário), não de
+  // `ficha`: `ficha` só é atualizado inteiro em carregar() e por
+  // relerStatusFicha() — que só relê `status` — enquanto a gravação campo a
+  // campo por blur (salvarCampo) atualiza `cabecalho`/`cabecalhoSalvo`. Numa
+  // ficha em rascunho recém-preenchida no celular e impressa antes de
+  // finalizar, `ficha.temperatura_c`/`ficha.responsavel_id`/`ficha.obs`
+  // ainda estariam vazios do jeito que a ficha nasceu — a ficha impressa
+  // saía errada. `cabecalho` é sempre o que está na tela.
   function imprimir() {
+    const campos = [
+      { rot: 'Data', valor: fmtDate(cabecalho.data) },
+      { rot: 'Início', valor: cabecalho.hora_inicio || '—' },
+      { rot: 'Fim', valor: cabecalho.hora_fim || '—' },
+      { rot: 'Temperatura', valor: cabecalho.temperatura_c ? `${cabecalho.temperatura_c} °C` : '—' },
+      { rot: 'Responsável', valor: nomeResponsavel(cabecalho.responsavel_id) },
+      { rot: 'Status', valor: STATUS_LABELS[ficha.status] || ficha.status },
+      { rot: 'Observações', valor: cabecalho.obs },
+    ];
+    // Ficha cancelada impressa precisa levar o porquê — papel arquivado sem
+    // motivo, data e quem cancelou não serve de registro.
+    if (ficha.status === 'cancelada') {
+      campos.push(
+        { rot: 'Cancelada em', valor: fmtDateTime(ficha.cancelada_em) },
+        { rot: 'Cancelada por', valor: ficha.cancelada_por?.nome || '—' },
+        { rot: 'Motivo do cancelamento', valor: ficha.cancelada_motivo },
+      );
+    }
     imprimirFicha(setFichaImpressao, {
       titulo: 'Ficha de Defumação',
       numero: ficha.lote,
-      campos: [
-        { rot: 'Data', valor: fmtDate(ficha.data) },
-        { rot: 'Início', valor: cabecalho.hora_inicio || '—' },
-        { rot: 'Fim', valor: cabecalho.hora_fim || '—' },
-        { rot: 'Temperatura', valor: ficha.temperatura_c != null ? `${ficha.temperatura_c} °C` : '—' },
-        { rot: 'Responsável', valor: ficha.responsavel?.nome },
-        { rot: 'Status', valor: STATUS_LABELS[ficha.status] || ficha.status },
-        { rot: 'Observações', valor: ficha.obs },
-      ],
+      campos,
       itens: {
         headers: ['Lote', 'Matéria-prima', 'Peso bruto', 'Perda', 'Sobra', 'Peso defumado', 'Rendimento'],
         rows: itensDaFicha.map(it => {

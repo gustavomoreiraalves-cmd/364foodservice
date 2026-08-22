@@ -139,14 +139,6 @@ begin
   if tg_op = 'UPDATE' then
     new.updated_at := clock_timestamp();
 
-    -- A data do cancelamento vem do relógio do banco, não do navegador —
-    -- mesmo raciocínio de `cancelado_em` na atualização 27 (pedidos): o
-    -- cliente mandaria `new Date().toISOString()`, que é o relógio da
-    -- máquina do operador e pode estar em qualquer hora.
-    if new.status = 'cancelada' and old.status is distinct from 'cancelada' then
-      new.cancelada_em := clock_timestamp();
-    end if;
-
     if old.status = 'cancelada' and new.status is distinct from 'cancelada' then
       raise exception 'Ficha cancelada não volta para %.', new.status
         using errcode = 'check_violation';
@@ -177,6 +169,20 @@ begin
       raise exception 'A ficha de defumação está % — o cabeçalho não pode ser alterado.', old.status
         using errcode = 'check_violation';
     end if;
+  end if;
+
+  -- A data do cancelamento vem do relógio do banco, não do navegador — mesmo
+  -- raciocínio de `cancelado_em` na atualização 27 (pedidos): o cliente
+  -- mandaria `new Date().toISOString()`, que é o relógio da máquina do
+  -- operador e pode estar em qualquer hora.
+  --
+  -- Fora do bloco exclusivo de update, pelo mesmo motivo da checagem de item
+  -- logo abaixo: um `insert into defumacoes (..., status) values (...,
+  -- 'cancelada')` é caminho alcançável (o cenário 9 já cobre insert direto
+  -- com status arbitrário) e também precisa nascer com a data carimbada pelo
+  -- banco, não em branco.
+  if new.status = 'cancelada' and (tg_op = 'INSERT' or old.status is distinct from 'cancelada') then
+    new.cancelada_em := clock_timestamp();
   end if;
 
   if new.status = 'finalizada'

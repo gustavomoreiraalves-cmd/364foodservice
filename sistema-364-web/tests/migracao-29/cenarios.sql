@@ -131,9 +131,18 @@ begin
   raise notice 'OK 6: ficha finalizada é imutável — cabeçalho, status e itens';
 end $$;
 
--- Cenário 7: cancelar exige motivo, e cancelada é terminal.
+-- Cenário 7: cancelar exige motivo, cancelada é terminal, e a data do
+-- cancelamento vem do relógio do banco — não do que o cliente mandar.
+--
+-- Manda um valor absurdo (ano de 2001) em `cancelada_em` de propósito: é o
+-- teste discriminante de verdade. Um cenário que simplesmente omitisse
+-- `cancelada_em` e conferisse "not null" continuaria verde mesmo se o
+-- carimbo do trigger sumisse — bastaria o cliente (a tela, hoje; um script
+-- amanhã) mandar QUALQUER valor não nulo. Só forçando um valor claramente
+-- errado e provando que ele foi substituído é que a asserção prova que quem
+-- manda na data é o `clock_timestamp()` do trigger, não o payload.
 do $$
-declare v_ficha uuid;
+declare v_ficha uuid; v_cancelada_em timestamptz;
 begin
   select id into v_ficha from defumacoes where lote = 'DEF-260822-001'
     and empresa_id = '11111111-1111-1111-1111-111111111111';
@@ -143,14 +152,19 @@ begin
   exception when check_violation then null; end;
 
   update defumacoes set status = 'cancelada', cancelada_motivo = 'Erro de digitação no peso',
-    cancelada_em = now(), cancelada_por_id = '22222222-2222-2222-2222-222222222222'
+    cancelada_em = '2001-01-01 00:00:00+00', cancelada_por_id = '22222222-2222-2222-2222-222222222222'
     where id = v_ficha;
+
+  select cancelada_em into v_cancelada_em from defumacoes where id = v_ficha;
+  if v_cancelada_em is null or v_cancelada_em < now() - interval '1 minute' then
+    raise exception 'FALHA 7b: cancelada_em não foi carimbada pelo relógio do banco (achou %)', v_cancelada_em;
+  end if;
 
   begin
     update defumacoes set status = 'rascunho' where id = v_ficha;
-    raise exception 'FALHA 7b: ficha cancelada voltou para rascunho';
+    raise exception 'FALHA 7c: ficha cancelada voltou para rascunho';
   exception when check_violation then null; end;
-  raise notice 'OK 7: cancelamento exige motivo e é terminal';
+  raise notice 'OK 7: cancelamento exige motivo, é terminal, e cancelada_em vem do banco';
 end $$;
 
 -- Cenário 8: apagar a ficha em cascata não é bloqueado pelo trigger do item.
