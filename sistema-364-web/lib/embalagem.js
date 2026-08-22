@@ -22,13 +22,23 @@ export function proximaFichaEmbalagem(dataStr, fichas) {
 // defumação FINALIZADAS menos o que já foi embalado em fichas que não estão
 // canceladas. Rascunho de defumação não conta como disponível — o peso ainda
 // pode mudar; ficha de embalagem cancelada devolve o peso ao lote.
+//
+// Os dois lados desta conta erram para lados opostos de propósito. Do lado
+// defumado, item sem `defumacoes.status` (join ausente, dado incompleto) NÃO
+// conta como disponível — errar para "menos saldo" é o lado seguro, o pior
+// que acontece é a tela mostrar zero onde havia peso de verdade. Do lado
+// embalado é o oposto: só `'cancelada'` livra o peso do desconto — item sem
+// `embalagens.status` (join ausente) É descontado, porque a leitura contrária
+// (falta de status = não desconta) devolveria ao saldo peso que já foi
+// embalado de verdade, e o operador embalaria de novo em cima do que já
+// existe, sem nenhuma constraint de banco para travar — esse saldo só existe
+// aqui em JS.
 export function saldoDefumado(loteId, itensDefumados, itensEmbalados) {
   const defumado = (itensDefumados || [])
     .filter(i => i.recebimento_item_id === loteId && i.defumacoes?.status === 'finalizada')
     .reduce((s, i) => s + (num(i.peso_final_kg) || 0), 0);
   const embalado = (itensEmbalados || [])
-    .filter(i => i.recebimento_item_id === loteId
-      && i.embalagens?.status && i.embalagens.status !== 'cancelada')
+    .filter(i => i.recebimento_item_id === loteId && i.embalagens?.status !== 'cancelada')
     .reduce((s, i) => s + (num(i.peso_total_kg) || 0), 0);
   return Math.max(0, defumado - embalado);
 }
@@ -40,8 +50,18 @@ export function validadeDoItem(dataEmbalagem, regra) {
   if (!regra || !regra.permitido) return null;
   const valor = num(regra.validade_valor);
   if (!valor || valor <= 0) return null;
-  const dias = regra.validade_unidade === 'horas' ? Math.ceil(valor / 24) : valor;
   const d = new Date(`${dataEmbalagem}T12:00:00`);
+  // Data de embalagem vazia ou inválida (a tela começa com o campo em
+  // branco nas fichas em rascunho) não pode virar 'NaN-NaN-NaN' — sem data
+  // válida não há validade para calcular, então devolve null como qualquer
+  // outro caso "sem dado o suficiente".
+  if (isNaN(d)) return null;
+  // Horas viram dias arredondando para BAIXO, nunca para cima: o prazo
+  // impresso na etiqueta não pode passar do prazo que a regra permite. Uma
+  // regra de 12 horas não pode virar "1 dia" de validade — quando o
+  // arredondamento zera, a validade fica na própria data da embalagem (zero
+  // dias de folga), que é o comportamento conservador.
+  const dias = regra.validade_unidade === 'horas' ? Math.floor(valor / 24) : valor;
   d.setDate(d.getDate() + dias);
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;

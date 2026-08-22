@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// lib/financeiro.js importa lib/format.js, que importa lib/supabase.js.
-// Basta um par de valores de fachada antes do import.
+// lib/financeiro.js importa lib/format.js, mas só usa `hoje`, que é pura.
+// lib/format.js já não importa lib/supabase.js no topo do módulo — só sob
+// demanda, dentro das funções que batem no banco. As variáveis abaixo ficam
+// por precaução.
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'http://localhost:54321';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
 const { parcelasDoRecebimento, ORIGEM_PARCELAS, AVISO_PARCELAS } = await import('../lib/nfe/parcelas.js');

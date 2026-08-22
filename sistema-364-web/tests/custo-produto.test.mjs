@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// lib/format.js importa lib/supabase.js, que chama createClient no topo do
-// módulo e exige as variáveis de ambiente. parseCustoUnitario é uma função
-// pura, então basta um par de valores de fachada antes do import dinâmico.
+// lib/format.js só importa lib/supabase.js sob demanda, dentro das funções
+// que batem no banco — não mais no topo do módulo. parseCustoUnitario é
+// pura e nem chega a tocar nisso; as variáveis abaixo ficam por precaução.
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'http://localhost:54321';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
 const { parseCustoUnitario } = await import('../lib/format.js');

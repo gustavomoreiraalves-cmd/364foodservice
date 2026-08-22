@@ -90,7 +90,10 @@ export function diasEntre(a, b) {
 // `cliente` existe para os testes injetarem uma fachada do PostgREST.
 export async function proximosLotes(dataStr, empresaId, quantidade, cliente) {
   if (!(quantidade > 0)) return [];
-  const db = cliente || await clientePadrao();
+  // `=== undefined`, não um `||` genérico: preserva a semântica do antigo
+  // default `cliente = supabase` — um `null` passado por engano precisa
+  // estourar, não cair em silêncio no cliente de produção.
+  const db = cliente === undefined ? await clientePadrao() : cliente;
   const prefixo = `LT-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
   const [r1, r2] = await Promise.all([
     db.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),

@@ -66,14 +66,29 @@ test('saldoDefumado: lote sem defumação nenhuma', () => {
   assert.equal(saldoDefumado('lote-z', defumados, []), 0);
 });
 
+test('saldoDefumado: item embalado sem o join de embalagens ainda desconta', () => {
+  // Sem `embalagens.status` (join ausente, dado incompleto), o item NÃO pode
+  // ser tratado como "não desconta" — devolveria ao saldo peso que já foi
+  // embalado de verdade, e não há constraint de banco que impeça embalar de
+  // novo em cima disso. Só 'cancelada' livra o peso do desconto.
+  const embalados = [{ recebimento_item_id: 'lote-a', peso_total_kg: 30 }];
+  assert.equal(saldoDefumado('lote-a', defumados, embalados), 51);
+});
+
 test('validadeDoItem: dias somam à data da embalagem', () => {
   const regra = { permitido: true, validade_valor: 120, validade_unidade: 'dias' };
   assert.equal(validadeDoItem('2026-08-22', regra), '2026-12-20');
 });
 
-test('validadeDoItem: horas arredondam para o dia', () => {
-  const regra = { permitido: true, validade_valor: 48, validade_unidade: 'horas' };
-  assert.equal(validadeDoItem('2026-08-22', regra), '2026-08-24');
+test('validadeDoItem: horas arredondam para BAIXO, nunca para cima', () => {
+  const regra48 = { permitido: true, validade_valor: 48, validade_unidade: 'horas' };
+  assert.equal(validadeDoItem('2026-08-22', regra48), '2026-08-24');
+
+  // 12 horas não pode virar "1 dia" de validade — arredondar para cima
+  // daria mais prazo do que a regra permite. Math.floor(12/24) = 0, então a
+  // validade fica na própria data da embalagem.
+  const regra12 = { permitido: true, validade_valor: 12, validade_unidade: 'horas' };
+  assert.equal(validadeDoItem('2026-08-22', regra12), '2026-08-22');
 });
 
 test('validadeDoItem: sem regra, sem validade', () => {
@@ -81,10 +96,26 @@ test('validadeDoItem: sem regra, sem validade', () => {
   assert.equal(validadeDoItem('2026-08-22', { permitido: false, validade_valor: 30, validade_unidade: 'dias' }), null);
 });
 
+test('validadeDoItem: validade_valor zero também é sem validade', () => {
+  const regra = { permitido: true, validade_valor: 0, validade_unidade: 'dias' };
+  assert.equal(validadeDoItem('2026-08-22', regra), null);
+});
+
+test('validadeDoItem: data de embalagem inválida não vira "NaN-NaN-NaN"', () => {
+  const regra = { permitido: true, validade_valor: 30, validade_unidade: 'dias' };
+  assert.equal(validadeDoItem('', regra), null);
+});
+
 test('itemEmbalagemValido: quantidade precisa ser inteira e positiva', () => {
   assert.equal(itemEmbalagemValido({ quantidade: 0, peso_total_kg: 10 }).ok, false);
   assert.equal(itemEmbalagemValido({ quantidade: 2.5, peso_total_kg: 10 }).ok, false);
   assert.equal(itemEmbalagemValido({ quantidade: 50, peso_total_kg: 25 }).ok, true);
+});
+
+test('itemEmbalagemValido: mensagem do erro de quantidade fala em quantidade', () => {
+  const r = itemEmbalagemValido({ quantidade: 2.5, peso_total_kg: 10 });
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /quantidade/i);
 });
 
 test('itemEmbalagemValido: peso precisa ser positivo', () => {
