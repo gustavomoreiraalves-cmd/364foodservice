@@ -21,17 +21,30 @@ function Conteudo() {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [pedidos, estoqueMP, recebimentos, produtos, clientes] = await Promise.all([
+      const [pedidos, estoqueMP, itensRecebidos, produtos, clientes] = await Promise.all([
         supabase.from('pedidos').select('*, clientes(nome), pedido_itens(quantidade, preco_unitario)').eq('empresa_id', eid).order('created_at', { ascending: false }),
         supabase.from('vw_estoque_materia_prima').select('*').eq('empresa_id', eid),
-        supabase.from('recebimentos').select('*, materias_primas(nome, unidade), fornecedores(nome)').eq('empresa_id', eid).order('created_at', { ascending: false }),
+        // Matéria-prima, quantidade, lote e validade moram em `recebimento_itens`
+        // desde a atualização 10 — `recebimentos` é só o cabeçalho da nota.
+        // Pedir esses campos ao cabeçalho devolvia 400 ("Could not find a
+        // relationship between 'recebimentos' and 'materias_primas'"), o erro
+        // sumia no `|| []` e o painel dizia "Nenhum registro ainda" com nota
+        // lançada no banco.
+        supabase.from('recebimento_itens')
+          .select('id, lote, quantidade, validade, materia_prima_id, materias_primas(nome, unidade), recebimentos(data, fornecedores(nome))')
+          .eq('empresa_id', eid).order('created_at', { ascending: false }),
         supabase.from('produtos').select('id').eq('empresa_id', eid),
         supabase.from('clientes').select('id').eq('empresa_id', eid),
       ]);
       setDados({
         pedidos: pedidos.data || [],
         estoqueMP: estoqueMP.data || [],
-        recebimentos: recebimentos.data || [],
+        itensRecebidos: itensRecebidos.data || [],
+        // Guardar o erro é o que separa "empresa sem movimento" de "a consulta
+        // falhou": sem isso as duas situações mostram a mesma lista vazia, e a
+        // segunda passa despercebida por semanas.
+        erroPedidos: pedidos.error?.message || null,
+        erroRecebimentos: itensRecebidos.error?.message || null,
         nProdutos: produtos.data?.length || 0,
         nClientes: clientes.data?.length || 0,
       });
@@ -50,7 +63,7 @@ function Conteudo() {
   const pedidosPendentes = dados.pedidos.filter(p => p.status === 'Pendente').length;
   const mpZeradas = dados.estoqueMP.filter(m => Number(m.saldo) <= 0).length;
   const saldoPorMP = Object.fromEntries(dados.estoqueMP.map(m => [m.materia_prima_id, Number(m.saldo)]));
-  const vencendo = dados.recebimentos.filter(r => {
+  const vencendo = dados.itensRecebidos.filter(r => {
     if (!r.validade) return false;
     const d = diasEntre(hoje(), r.validade);
     return d >= 0 && d <= 7 && (saldoPorMP[r.materia_prima_id] || 0) > 0;
@@ -67,7 +80,7 @@ function Conteudo() {
         <div className="kpi"><div className="label">Receita do mês</div><div className="value">{fmtMoney(receitaMes)}</div></div>
         <div className="kpi"><div className="label">Pedidos pendentes</div><div className="value">{pedidosPendentes}</div></div>
         <div className={`kpi ${mpZeradas ? 'warn' : ''}`}><div className="label">Matérias-primas zeradas</div><div className={`value ${mpZeradas ? 'warn' : ''}`}>{mpZeradas}</div></div>
-        <div className={`kpi ${vencendo ? 'warn' : ''}`}><div className="label">Lotes vencendo em 7 dias</div><div className={`value ${vencendo ? 'warn' : ''}`}>{vencendo}</div></div>
+        <div className={`kpi ${vencendo ? 'warn' : ''}`}><div className="label">Lotes vencendo em 7 dias</div><div className={`value ${vencendo ? 'warn' : ''}`}>{dados.erroRecebimentos ? '—' : vencendo}</div></div>
         <div className="kpi"><div className="label">Produtos cadastrados</div><div className="value">{dados.nProdutos}</div></div>
         <div className="kpi"><div className="label">Clientes ativos</div><div className="value">{dados.nClientes}</div></div>
       </div>
@@ -75,16 +88,18 @@ function Conteudo() {
       <div className="grid2">
         <div className="panel">
           <h3>Últimos recebimentos</h3>
-          {dados.recebimentos.length ? (
+          {dados.erroRecebimentos ? (
+            <p className="muted" style={{ fontSize: 12.5 }}>Não foi possível carregar os recebimentos: {dados.erroRecebimentos}</p>
+          ) : dados.itensRecebidos.length ? (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Data</th><th>Matéria-prima</th><th>Fornecedor</th><th>Qtd</th><th>Lote</th></tr></thead>
                 <tbody>
-                  {dados.recebimentos.slice(0, 6).map(r => (
+                  {dados.itensRecebidos.slice(0, 6).map(r => (
                     <tr key={r.id}>
-                      <td>{fmtDate(r.data)}</td>
+                      <td>{fmtDate(r.recebimentos?.data)}</td>
                       <td>{r.materias_primas?.nome || '—'}</td>
-                      <td>{r.fornecedores?.nome || '—'}</td>
+                      <td>{r.recebimentos?.fornecedores?.nome || '—'}</td>
                       <td className="num">{Number(r.quantidade)} {r.materias_primas?.unidade || ''}</td>
                       <td className="muted">{r.lote}</td>
                     </tr>
@@ -96,7 +111,9 @@ function Conteudo() {
         </div>
         <div className="panel">
           <h3>Últimos pedidos de venda</h3>
-          {dados.pedidos.length ? (
+          {dados.erroPedidos ? (
+            <p className="muted" style={{ fontSize: 12.5 }}>Não foi possível carregar os pedidos: {dados.erroPedidos}</p>
+          ) : dados.pedidos.length ? (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Data</th><th>Cliente</th><th>Total</th><th>Status</th></tr></thead>
