@@ -86,6 +86,32 @@ export async function proximoLote(dataStr, empresaId, cliente = supabase) {
   return lote;
 }
 
+// A atualização 28 pôs `unique (empresa_id, lote)` em `recebimento_itens`.
+// Como `proximosLotes` numera contando linhas, dois operadores lançando no
+// mesmo dia leem a mesma contagem e pedem o mesmo número — antes da constraint
+// isso gravava dois lotes iguais em silêncio (e dois QR iguais); agora o
+// segundo insert é recusado, o que é o comportamento certo, mas o Postgres
+// avisa em inglês citando o nome da constraint.
+//
+// A tela desfaz o que já tinha gravado antes de mostrar esta mensagem, então
+// "nada foi salvo" é literal, e tentar de novo funciona: a contagem é relida e
+// o próximo número sai livre.
+// `descricaoItem` é o que a tela já usava para localizar a linha na lista —
+// posição e nome, ex.: `1 (Cupim)`.
+export function mensagemAoGravarItemRecebido(erro, descricaoItem) {
+  const mensagem = erro?.message || '';
+  const loteRepetido = erro?.code === '23505'
+    || /recebimento_itens_empresa_lote_unico/.test(mensagem);
+  const alvo = descricaoItem ? `o item ${descricaoItem}` : 'o item';
+  if (loteRepetido) {
+    return `Não foi possível salvar ${alvo}: o número de lote gerado já está em uso nesta `
+      + 'empresa — normalmente porque outro lançamento foi gravado enquanto este estava '
+      + 'aberto. Nada foi salvo; lance de novo, que o número é recalculado.'
+      + (mensagem ? '\n\nErro original: ' + mensagem : '');
+  }
+  return `Erro ao salvar ${alvo}: ` + mensagem;
+}
+
 // Gera o próximo código de produto usando o prefixo da empresa (ex: 0364-XXX
 // para o Food Service, STK-XXX para o Steakhouse), contando só os produtos
 // dessa empresa com esse prefixo.

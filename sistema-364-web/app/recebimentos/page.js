@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useState, useRef, Fragment } from 'react';
 import { supabase } from '../../lib/supabase';
-import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes } from '../../lib/format';
+import { fmtMoney, fmtDate, hoje, diasEntre, proximosLotes, mensagemAoGravarItemRecebido } from '../../lib/format';
 import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebimento } from '../../lib/storage';
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import ImportarNota from '../../components/ImportarNota';
 import EtiquetaPrint from '../../components/EtiquetaPrint';
 import ModalEtiquetas from '../../components/ModalEtiquetas';
+import NovoFornecedorRapido from '../../components/NovoFornecedorRapido';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
@@ -107,6 +108,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
   const [itemDaNotaEmConferencia, setItemDaNotaEmConferencia] = useState(null); // item carregado no formulário
+  const [fornecedorPendente, setFornecedorPendente] = useState(null); // sugestão do emitente, com o pop-up aberto
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -126,8 +128,22 @@ function Conteudo({ setFicha, setEtiqueta }) {
         `)
         .eq('empresa_id', empresaAtual.id)
         .order('created_at', { ascending: false }),
-      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
-      supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaAtual.id).order('nome'),
+      // Nem matéria-prima nem fornecedor são filtrados por `ativo` aqui: a consulta
+      // traz tudo e o filtro fica onde as <option> são montadas, com a escotilha que
+      // preserva o valor já escolhido. Filtrar na consulta esconde o registro também
+      // de onde ele precisa aparecer — uma matéria-prima desativada sumia de `mps`,
+      // o de-para aprendido da NF-e importada era zerado sem aviso nenhum, e o
+      // upsert de `fornecedor_produto_mapa` gravava o remapeamento errado por cima
+      // do certo, de forma permanente.
+      //
+      // select('*') em vez de lista de colunas: se `ativo` ainda não existir
+      // (migração 26 pendente), uma projeção que citasse a coluna pelo nome
+      // devolveria erro 42703 do PostgREST e vazaria a tela inteira. Com '*' a
+      // coluna some do objeto quando não existe, `ativo` vira undefined e
+      // `ativo !== false` continua mostrando o registro — sem quebrar nada. O custo
+      // aceito é trazer colunas que a tela não usa.
+      supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('depositos').select('id, nome, unidades(nome)').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
     ]);
@@ -203,11 +219,21 @@ function Conteudo({ setFicha, setEtiqueta }) {
       fatorConversao: i.fatorConversao || 1,
     })));
 
+    // Emitente que não casou com nenhum cadastro abre o cadastro rápido já
+    // preenchido com os dados da nota. Antes disso o lançamento parava aqui: era
+    // preciso sair da tela, cadastrar em Fornecedores e importar o XML de novo.
     if (!dados.fornecedor && dados.fornecedorSugerido) {
-      alert(`Não encontrei nenhum fornecedor com o CNPJ ${dados.fornecedorSugerido.cnpj} `
-        + `(${dados.fornecedorSugerido.nome}). Selecione o fornecedor no campo abaixo — `
-        + 'se ele ainda não estiver cadastrado, cadastre em Fornecedores.');
+      setFornecedorPendente(dados.fornecedorSugerido);
     }
+  }
+
+  // O cadastro rápido devolve a linha recém-criada. Ela entra na lista local, em
+  // ordem de nome, e vira o fornecedor do recebimento em andamento. Recarregar a
+  // tela inteira aqui apagaria os itens já conferidos no meio do lançamento.
+  function fornecedorCadastrado(novo) {
+    setFornecedores(atual => [...atual, novo].sort((x, y) => String(x.nome).localeCompare(String(y.nome), 'pt-BR')));
+    setHeader(h => ({ ...h, fornecedor_id: novo.id }));
+    setFornecedorPendente(null);
   }
 
   // A fila de conferência e o formulário guardam a mesma linha da nota em formatos
@@ -248,6 +274,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
     setNotaImportada(null);
     setItensDaNota([]);
     setItemDaNotaEmConferencia(null);
+    setFornecedorPendente(null);
     setItens(lista => lista.filter(i => !i._nfe));
     if (itemDaNotaEmConferencia) setItemForm(ITEM_VAZIO());
     // O cabeçalho volta ao estado de recebimento digitado à mão. Sem isto, a data,
@@ -405,7 +432,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
         }]).select('id').single();
 
         if (errItem) {
-          alert(`Erro ao salvar o item ${i + 1} (${it._mp.nome}): ` + errItem.message);
+          alert(mensagemAoGravarItemRecebido(errItem, `${i + 1} (${it._mp.nome})`));
           for (const done of inseridos) await supabase.from('recebimento_itens').delete().eq('id', done.id);
           await supabase.from('recebimentos').delete().eq('id', cabecalho.id);
           return;
@@ -659,13 +686,14 @@ function Conteudo({ setFicha, setEtiqueta }) {
 
   if (loading) return <p className="muted">Carregando…</p>;
 
-  if (!mps.length || !fornecedores.length) {
-    return (
-      <div className="banner info">
-        Cadastre ao menos um <b>fornecedor</b> e uma <b>matéria-prima</b> (aba Produtos) antes de lançar um recebimento.
-      </div>
-    );
-  }
+  // As duas listas de seleção do lançamento novo, montadas uma vez: o guard logo
+  // abaixo e os <select> correspondentes têm que enxergar exatamente a mesma
+  // coisa. Decidir o guard por `mps.length`/`fornecedores.length` — que desde a
+  // correção do de-para da NF-e contam também os inativos — abria o formulário
+  // com um campo obrigatório sem nenhuma opção, que é o beco sem saída.
+  const mpsSelecionaveis = mps.filter(m => m.ativo !== false || m.id === itemForm.materia_prima_id);
+  const fornecedoresSelecionaveis = fornecedores.filter(f => f.ativo !== false || f.id === header.fornecedor_id);
+  const podeLancar = mpsSelecionaveis.length > 0 && fornecedoresSelecionaveis.length > 0;
 
   const grupos = [];
   const grupoPorId = {};
@@ -681,6 +709,29 @@ function Conteudo({ setFicha, setEtiqueta }) {
 
   return (
     <>
+      {fornecedorPendente && (
+        <NovoFornecedorRapido
+          sugestao={fornecedorPendente}
+          empresaId={empresaAtual?.id}
+          aoCadastrar={fornecedorCadastrado}
+          aoCancelar={() => setFornecedorPendente(null)}
+        />
+      )}
+
+      {/* Sem lista de seleção não dá para lançar, mas bloquear o lançamento não
+          pode esconder o histórico: inativo some da seleção, nunca do histórico.
+          Por isso o banner substitui só este painel — a lista de recebimentos
+          continua logo abaixo, em qualquer situação. */}
+      {!podeLancar ? (
+      <div className="banner info">
+        Para lançar um recebimento novo é preciso ter ao menos um <b>fornecedor</b> e uma{' '}
+        <b>matéria-prima</b> ativos.{' '}
+        {!fornecedores.length || !mps.length
+          ? 'Cadastre o que estiver faltando nas abas Fornecedores e Matérias-primas.'
+          : 'Há cadastros, mas os que faltam aqui estão todos desativados — reative em Fornecedores ou em Matérias-primas.'}
+        {' '}Os recebimentos já registrados continuam na lista abaixo.
+      </div>
+      ) : (
       <div className="panel">
         <h3>Novo recebimento de mercadoria</h3>
 
@@ -700,6 +751,22 @@ function Conteudo({ setFicha, setEtiqueta }) {
           </p>
         )}
 
+        {/* Fechar o pop-up sem cadastrar não pode deixar o lançamento sem rumo: o
+            aviso fica de pé enquanto não houver fornecedor escolhido, e reabre o
+            cadastro rápido com os mesmos dados da nota. */}
+        {notaImportada?.fornecedorSugerido && !header.fornecedor_id && !fornecedorPendente && (
+          <div className="banner" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              O emitente <b>{notaImportada.fornecedorSugerido.nome}</b> ainda não está cadastrado.
+              Cadastre-o aqui mesmo ou escolha outro fornecedor no campo abaixo.
+            </span>
+            <button className="btn small" type="button"
+              onClick={() => setFornecedorPendente(notaImportada.fornecedorSugerido)}>
+              Cadastrar fornecedor da nota
+            </button>
+          </div>
+        )}
+
         {itensDaNota.length > 0 && (
           <div className="card" style={{ marginBottom: 16 }}>
             <strong>Itens da nota a conferir ({itensDaNota.length})</strong>
@@ -715,7 +782,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
                   onChange={e => setItensDaNota(lista => lista.map(i =>
                     i.indice === item.indice ? { ...i, materiaPrimaId: e.target.value } : i))}>
                   <option value="">Matéria-prima…</option>
-                  {mps.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                  {mps
+                    .filter(m => m.ativo !== false || m.id === item.materiaPrimaId)
+                    .map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
                 </select>
                 <label>
                   {item.unidadeNota} → kg
@@ -737,7 +806,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           <div><label>Fornecedor</label>
             <select required value={header.fornecedor_id} onChange={e => setHeader({ ...header, fornecedor_id: e.target.value })}>
               <option value="">Selecione…</option>
-              {fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {fornecedoresSelecionaveis.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div><label>Nota fiscal (nº)</label><input value={header.nota_fiscal} onChange={e => setHeader({ ...header, nota_fiscal: e.target.value })} /></div>
@@ -791,7 +860,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           <div><label>Matéria-prima</label>
             <select value={itemForm.materia_prima_id} onChange={e => trocarMateriaPrima(e.target.value)}>
               <option value="">Selecione…</option>
-              {mps.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+              {mpsSelecionaveis.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
             </select>
             {mpSelecionada && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 4 }}>Regra: {REGRA_LABEL[regra]}</span>}
           </div>
@@ -898,6 +967,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           quarentena ou rejeitados ficam registrados, mas fora do saldo disponível.
         </p>
       </div>
+      )}
 
       <div className="panel">
         <h3>Recebimentos ({grupos.length})</h3>

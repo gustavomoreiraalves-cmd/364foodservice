@@ -14,7 +14,7 @@
 
 - Textos de interface em português, com acentuação correta.
 - Toda tabela continua com RLS no padrão do projeto; esta entrega não altera policy nenhuma.
-- Migrações SQL entram em `supabase/` com o próximo número livre. Hoje o maior é `atualizacao_23_fornecedor_cnpj_normalizado.sql`, então esta é a **24**.
+- Migrações SQL entram em `supabase/` com o próximo número livre. *(Foi escrita como 24 e renumerada para **26** no merge com a main, junto com as dos outros branches em voo. O arquivo entregue é `atualizacao_26_cadastros_ativo.sql`.)*
 - O código do produto (`0364-XXX`) nunca é editável: é a chave impressa em etiqueta.
 - Editar um cadastro não altera lançamento já feito — recebimento, pedido e produção guardam os próprios valores no momento em que foram gravados.
 - Inativo **some da lista de seleção, nunca do histórico**. O filtro vai onde as `<option>` são montadas, nunca na consulta ao banco.
@@ -65,7 +65,7 @@ Criar `supabase/atualizacao_26_cadastros_ativo.sql`:
 
 ```sql
 -- =========================================================
--- 364 — ATUALIZAÇÃO 24: SITUAÇÃO NOS CADASTROS
+-- 364 — ATUALIZAÇÃO 26: SITUAÇÃO NOS CADASTROS
 -- Clientes, fornecedores e produtos ganham `ativo`, para que um cadastro que
 -- já tem movimento possa sair das listas de seleção sem ser apagado.
 --
@@ -558,7 +558,12 @@ Dentro de `Conteudo`, remover `const [formMP, setFormMP] = useState(MP_VAZIA);` 
         categoria: f.categoria || null,
         unidade: f.unidade,
         custo_unitario: Number(f.custo_unitario),
-        preco_alvo_kg: f.preco_alvo_kg ? Number(f.preco_alvo_kg) : null,
+        // Distinguir "campo vazio" (null) de "zero digitado" (0): um input
+        // type=number em branco devolve '', então teste de falsy apagaria um
+        // preço-alvo zerado a cada edição da linha.
+        preco_alvo_kg: f.preco_alvo_kg === '' || f.preco_alvo_kg === null || f.preco_alvo_kg === undefined
+          ? null
+          : Number(f.preco_alvo_kg),
       }),
     });
 
@@ -695,7 +700,11 @@ Renomear `addProduto` para `salvarProduto` e fazer o insert virar update quando 
       unidade: formProd.unidade,
       custo_unitario: custo,
       preco_venda: Number(formProd.preco_venda),
-      validade_dias: Number(formProd.validade_dias) || 90,
+      // Mesma razão do preço-alvo na Task 5: um input type=number em branco
+      // devolve '', então teste de falsy apagaria um prazo zerado a cada edição.
+      validade_dias: formProd.validade_dias === '' || formProd.validade_dias === null || formProd.validade_dias === undefined
+        ? 90
+        : Number(formProd.validade_dias),
       producao_interna: !!formProd.producao_interna,
     };
 
@@ -819,17 +828,26 @@ Em cada arquivo, ache o `<select>` que lista a entidade e filtre na hora de mont
         .map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>)}
 ```
 
-Onde aplicar:
+Onde aplicar — **tabela corrigida durante a execução**. A versão original foi escrita a
+partir de um `grep` e errava em quatro pontos, todos levantados pelo implementador antes
+de editar qualquer coisa:
 
-| arquivo | entidade | consulta que já existe (não mexer) |
+| arquivo | entidade | observação |
 | --- | --- | --- |
-| `app/pedidos/page.js` | clientes | linha com `from('clientes').select('id, nome')` |
-| `app/pedidos/page.js` | produtos | linha com `from('produtos').select('*')` |
-| `app/producoes/nova/page.js` | produtos | linha com `from('produtos').select('id, codigo, nome, unidade, modelo_etiqueta')` |
-| `app/producoes/completa/page.js` | produtos | linha com `from('produtos').select('*')` |
-| `app/producoes/completa/page.js` | matérias-primas | linha com `from('materias_primas').select('*')` |
-| `app/financeiro/contas-a-pagar/page.js` | fornecedores | linha com `from('fornecedores').select('id, nome')` |
-| `app/produtos/page.js` | matérias-primas na ficha técnica | linha com `from('materias_primas').select('*')` |
+| `components/PedidoForm.js` | clientes e produtos | os dois selects de pedido moram aqui, não em `app/pedidos/page.js`; o componente é usado pela listagem e pelo detalhe |
+| `app/producoes/nova/page.js` | produtos | manter o `.eq('producao_interna', true)`, que é filtro de domínio anterior a esta entrega |
+| `app/producoes/completa/page.js` | produtos | **só produto** — esta tela não tem select de matéria-prima; `mps` ali alimenta `.find()` e cálculo agregado |
+| `app/financeiro/contas-a-pagar/page.js` | fornecedores | **só o select de lançamento novo**; o de filtro do histórico lista todos, inclusive inativos |
+| `app/produtos/page.js` | matérias-primas na ficha técnica | o default do item (`mps[0]`) também precisa sair da lista filtrada, senão uma matéria-prima inativa vem pré-selecionada |
+| `app/recebimentos/page.js` | fornecedores | faltava na tabela original; só a consulta de **matéria-prima** desta tela é que está fora de escopo |
+
+**A consulta precisa trazer a coluna `ativo`, e a forma segura é `select('*')`.** Onde a
+projeção era estreita (`select('id, nome')`), listar `ativo` explicitamente **quebra a
+tela** enquanto a migração não roda: o PostgREST devolve erro `42703` para coluna
+inexistente, não `undefined`, e telas que não checam `error` ficam vazias em silêncio.
+`select('*')` traz a coluna quando ela existe e não reclama quando não existe, que é a
+tolerância que o resto do plano assume. Isso não contradiz a regra de não filtrar na
+consulta: o proibido é `.eq('ativo', true)`, que esconde o registro de todo lugar.
 
 - [ ] **Step 2: Conferir que nenhuma tela histórica perdeu nome**
 

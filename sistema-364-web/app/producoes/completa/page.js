@@ -176,7 +176,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
           <div><label>Produto</label>
             <select required value={form.produto_id} onChange={e => setForm({ ...form, produto_id: e.target.value })}>
               <option value="">Selecione…</option>
-              {produtos.map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>)}
+              {produtos
+                .filter(p => p.ativo !== false || p.id === form.produto_id)
+                .map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>)}
             </select>
           </div>
           <div><label>Quantidade produzida</label><input type="number" step="0.001" required value={form.quantidade} onChange={e => setForm({ ...form, quantidade: e.target.value })} /></div>

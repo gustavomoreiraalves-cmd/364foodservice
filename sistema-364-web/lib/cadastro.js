@@ -21,6 +21,28 @@ export function camposDoFormulario(registro, formVazio) {
   return saida;
 }
 
+// O botão Desativar é o único lugar onde o estado pré-migração fica visível para
+// o operador: sem a atualização 26 o PostgREST devolve PGRST204 ("Could not find
+// the 'ativo' column of 'clientes' in the schema cache") ou 42703, em inglês e
+// sem dizer o que fazer. Aqui isso vira uma instrução em português; qualquer
+// outro erro continua aparecendo como veio, que é o que ajuda a diagnosticar.
+//
+// A detecção por mensagem é larga de propósito — qualquer erro que cite `ativo`
+// entra no ramo da migração. Por isso o texto original vai junto mesmo quando o
+// padrão casa: num falso positivo a frase erra o palpite, mas a única pista do
+// que de fato aconteceu continua na tela.
+export function mensagemAoAlternarAtivo(erro) {
+  const codigo = erro?.code || '';
+  const mensagem = erro?.message || '';
+  const colunaAusente = codigo === 'PGRST204' || codigo === '42703' || /\bativo\b/i.test(mensagem);
+  if (colunaAusente) {
+    return 'Não foi possível mudar a situação: provavelmente a atualização 26 ainda não foi '
+      + 'aplicada neste banco, então a coluna "ativo" não existe. Fale com o administrador '
+      + 'do sistema.' + (mensagem ? '\n\nErro original: ' + mensagem : '');
+  }
+  return 'Não foi possível mudar a situação: ' + mensagem;
+}
+
 // Comportamento comum das telas de cadastro: o mesmo formulário do topo serve
 // para criar e para editar, e `editando` é o que decide entre insert e update.
 //
@@ -67,7 +89,7 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
   async function alternarAtivo(registro) {
     const { error } = await supabase.from(tabela)
       .update({ ativo: !(registro.ativo !== false) }).eq('id', registro.id);
-    if (error) { alert('Não foi possível mudar a situação: ' + error.message); return; }
+    if (error) { alert(mensagemAoAlternarAtivo(error)); return; }
     await aoTerminar();
   }
 
