@@ -70,3 +70,31 @@ test('parseNFe: chave fora de 44 dígitos falha', () => {
   const ruim = xml.replace('NFe35260812345678000199550010000012341000012348', 'NFe123');
   assert.throws(() => parseNFe(ruim), /Chave de acesso inválida/);
 });
+
+test('parseNFe: emitente com CNPJ preenche documento com o CNPJ', () => {
+  const { emitente } = parseNFe(xml);
+  assert.equal(emitente.cnpj, '12345678000199');
+  assert.equal(emitente.cpf, '');
+  assert.equal(emitente.documento, '12345678000199');
+});
+
+test('parseNFe: emitente produtor rural (CPF) preenche documento com o CPF', () => {
+  const porCpf = xml.replace('<CNPJ>12345678000199</CNPJ>', '<CPF>11122233344</CPF>');
+  const { emitente } = parseNFe(porCpf);
+  assert.equal(emitente.cnpj, '');
+  assert.equal(emitente.cpf, '11122233344');
+  // É este campo que casa o fornecedor e o de-para; sem ele a nota de produtor
+  // rural gravava emitente vazio e nunca reconhecia o mesmo fornecedor duas vezes.
+  assert.equal(emitente.documento, '11122233344');
+});
+
+test('parseNFe: emitente sem CNPJ nem CPF vem com documento vazio, não quebra', () => {
+  const semDocumento = xml.replace('<CNPJ>12345678000199</CNPJ>', '');
+  const { emitente } = parseNFe(semDocumento);
+  assert.equal(emitente.documento, '');
+  assert.equal(emitente.nome, 'Frigorifico Exemplo LTDA');
+});
+
+test('parseNFe: UF do emitente vem junto para o cadastro rápido de fornecedor', () => {
+  assert.equal(parseNFe(xml).emitente.uf, 'SP');
+});

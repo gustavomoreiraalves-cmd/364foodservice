@@ -6,6 +6,7 @@ import { uploadArquivoRecebimento, signedUrlRecebimento, removerAnexosRecebiment
 import AppShell from '../../components/AppShell';
 import FichaPrint, { imprimirFicha } from '../../components/FichaPrint';
 import ImportarNota from '../../components/ImportarNota';
+import NovoFornecedorRapido from '../../components/NovoFornecedorRapido';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 import { STATUS_QUALIDADE, STATUS_QUALIDADE_LABEL as STATUS_LABEL, STATUS_QUALIDADE_APROVADO } from '../../lib/qualidade';
@@ -65,6 +66,7 @@ function Conteudo({ setFicha }) {
   const [notaImportada, setNotaImportada] = useState(null); // corpo de /preparar
   const [itensDaNota, setItensDaNota] = useState([]); // todos os itens da nota, aguardando conferência
   const [itemDaNotaEmConferencia, setItemDaNotaEmConferencia] = useState(null); // item carregado no formulário
+  const [fornecedorPendente, setFornecedorPendente] = useState(null); // sugestão do emitente, com o pop-up aberto
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -153,11 +155,21 @@ function Conteudo({ setFicha }) {
       fatorConversao: i.fatorConversao || 1,
     })));
 
+    // Emitente que não casou com nenhum cadastro abre o cadastro rápido já
+    // preenchido com os dados da nota. Antes disso o lançamento parava aqui: era
+    // preciso sair da tela, cadastrar em Fornecedores e importar o XML de novo.
     if (!dados.fornecedor && dados.fornecedorSugerido) {
-      alert(`Não encontrei nenhum fornecedor com o CNPJ ${dados.fornecedorSugerido.cnpj} `
-        + `(${dados.fornecedorSugerido.nome}). Selecione o fornecedor no campo abaixo — `
-        + 'se ele ainda não estiver cadastrado, cadastre em Fornecedores.');
+      setFornecedorPendente(dados.fornecedorSugerido);
     }
+  }
+
+  // O cadastro rápido devolve a linha recém-criada. Ela entra na lista local, em
+  // ordem de nome, e vira o fornecedor do recebimento em andamento. Recarregar a
+  // tela inteira aqui apagaria os itens já conferidos no meio do lançamento.
+  function fornecedorCadastrado(novo) {
+    setFornecedores(atual => [...atual, novo].sort((x, y) => String(x.nome).localeCompare(String(y.nome), 'pt-BR')));
+    setHeader(h => ({ ...h, fornecedor_id: novo.id }));
+    setFornecedorPendente(null);
   }
 
   // A fila de conferência e o formulário guardam a mesma linha da nota em formatos
@@ -198,6 +210,7 @@ function Conteudo({ setFicha }) {
     setNotaImportada(null);
     setItensDaNota([]);
     setItemDaNotaEmConferencia(null);
+    setFornecedorPendente(null);
     setItens(lista => lista.filter(i => !i._nfe));
     if (itemDaNotaEmConferencia) setItemForm(ITEM_VAZIO());
     // O cabeçalho volta ao estado de recebimento digitado à mão. Sem isto, a data,
@@ -558,6 +571,15 @@ function Conteudo({ setFicha }) {
 
   return (
     <>
+      {fornecedorPendente && (
+        <NovoFornecedorRapido
+          sugestao={fornecedorPendente}
+          empresaId={empresaAtual?.id}
+          aoCadastrar={fornecedorCadastrado}
+          aoCancelar={() => setFornecedorPendente(null)}
+        />
+      )}
+
       {/* Sem lista de seleção não dá para lançar, mas bloquear o lançamento não
           pode esconder o histórico: inativo some da seleção, nunca do histórico.
           Por isso o banner substitui só este painel — a lista de recebimentos
@@ -589,6 +611,22 @@ function Conteudo({ setFicha }) {
               Descartar nota importada
             </button>
           </p>
+        )}
+
+        {/* Fechar o pop-up sem cadastrar não pode deixar o lançamento sem rumo: o
+            aviso fica de pé enquanto não houver fornecedor escolhido, e reabre o
+            cadastro rápido com os mesmos dados da nota. */}
+        {notaImportada?.fornecedorSugerido && !header.fornecedor_id && !fornecedorPendente && (
+          <div className="banner" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              O emitente <b>{notaImportada.fornecedorSugerido.nome}</b> ainda não está cadastrado.
+              Cadastre-o aqui mesmo ou escolha outro fornecedor no campo abaixo.
+            </span>
+            <button className="btn small" type="button"
+              onClick={() => setFornecedorPendente(notaImportada.fornecedorSugerido)}>
+              Cadastrar fornecedor da nota
+            </button>
+          </div>
         )}
 
         {itensDaNota.length > 0 && (

@@ -4,14 +4,11 @@ import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
+import { CATEGORIAS_FORNECEDOR, soDigitos, fornecedorParaGravar } from '../../lib/fornecedores';
 
+// As mesmas regras valem no cadastro rápido que abre no recebimento quando o XML
+// traz um emitente desconhecido; por isso elas moram em lib/fornecedores.js.
 const FORM_VAZIO = { nome: '', cnpj: '', categoria: 'Carnes', contato: '', telefone: '', email: '' };
-const CATEGORIAS = ['Carnes', 'Temperos', 'Embalagens', 'Equipamentos', 'Serviços', 'Outros'];
-
-// O CNPJ é gravado só com dígitos: é assim que ele vem no XML da NF-e, e é por
-// igualdade exata que a importação encontra o fornecedor da nota. Fornecedor
-// cadastrado como 12.345.678/0001-99 nunca casava com a nota.
-const soDigitos = v => String(v || '').replace(/\D/g, '');
 
 export default function FornecedoresPage() {
   return (
@@ -43,9 +40,7 @@ function Conteudo() {
       formVazio: FORM_VAZIO,
       empresaId: empresaAtual?.id,
       aoTerminar: carregar,
-      // CNPJ em branco vai como null: a coluna é opcional e string vazia não
-      // passa no check de "só dígitos" da migração 23.
-      paraGravar: f => ({ ...f, cnpj: soDigitos(f.cnpj) || null }),
+      paraGravar: fornecedorParaGravar,
     });
 
   const emEdicao = editando ? lista.find(f => f.id === editando) : null;
@@ -63,7 +58,7 @@ function Conteudo() {
           </div>
           <div><label>Categoria</label>
             <select value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })}>
-              {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
+              {CATEGORIAS_FORNECEDOR.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
           <div><label>Contato</label><input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} /></div>

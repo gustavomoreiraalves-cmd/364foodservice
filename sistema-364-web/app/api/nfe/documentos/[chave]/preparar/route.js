@@ -47,8 +47,14 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'Não consegui ler o XML guardado desta nota: ' + e.message }, { status: 500 });
   }
 
-  // `fornecedores.cnpj` é normalizado para só dígitos pela migração 22 — o CNPJ do
-  // emitente já vem só com dígitos do parser, então a comparação é direta.
+  // O documento do emitente é CNPJ ou, em nota de produtor rural, CPF. Emitente sem
+  // documento nenhum não tem por onde casar: procurar por string vazia varreria os
+  // cadastros e o de-para antigos que ficaram com a chave em branco, e casaria a
+  // nota com fornecedor de outro emitente.
+  const documentoEmitente = nota.emitente.documento;
+
+  // `fornecedores.cnpj` é normalizado para só dígitos pela migração 22 — o documento
+  // do emitente já vem só com dígitos do parser, então a comparação é direta.
   //
   // Sem `.maybeSingle()` de propósito: dois cadastros com o mesmo CNPJ (o que a
   // busca quebrada de antes produzia, e que a migração 22 ainda não rodou para
@@ -57,12 +63,16 @@ export async function GET(request, { params }) {
   // para "casei com um deles", nunca para importação bloqueada. `limit(1)` com
   // ordem fixa mantém a escolha estável entre uma importação e outra.
   const [resFornecedor, resMapa, resRecebimento] = await Promise.all([
-    sb.from('fornecedores').select('id, nome, cnpj')
-      .eq('empresa_id', empresaId).eq('cnpj', nota.emitente.cnpj)
-      .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(1),
-    sb.from('fornecedor_produto_mapa')
-      .select('codigo_produto, materia_prima_id, unidade_nf, fator_conversao')
-      .eq('empresa_id', empresaId).eq('cnpj_emitente', nota.emitente.cnpj),
+    documentoEmitente
+      ? sb.from('fornecedores').select('id, nome, cnpj')
+        .eq('empresa_id', empresaId).eq('cnpj', documentoEmitente)
+        .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(1)
+      : { data: [], error: null },
+    documentoEmitente
+      ? sb.from('fornecedor_produto_mapa')
+        .select('codigo_produto, materia_prima_id, unidade_nf, fator_conversao')
+        .eq('empresa_id', empresaId).eq('cnpj_emitente', documentoEmitente)
+      : { data: [], error: null },
     sb.from('recebimentos').select('id').eq('empresa_id', empresaId).eq('nfe_chave', chave).maybeSingle(),
   ]);
 
@@ -96,11 +106,15 @@ export async function GET(request, { params }) {
       emitente: nota.emitente,
     },
     fornecedor: fornecedor || null,
+    // Sem fornecedor casado, a tela abre o cadastro rápido já preenchido com o que
+    // a nota traz. Vem também quando o emitente não tem documento: o operador
+    // completa o CNPJ ou CPF à mão na hora de confirmar.
     fornecedorSugerido: fornecedor ? null : {
       nome: nota.emitente.nome,
-      cnpj: nota.emitente.cnpj,
+      documento: documentoEmitente,
       telefone: nota.emitente.telefone,
       email: nota.emitente.email,
+      uf: nota.emitente.uf,
     },
     itens: aplicarDePara(nota, mapa || []),
     duplicatas: nota.duplicatas,
