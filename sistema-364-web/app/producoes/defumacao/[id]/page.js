@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
 import { fmtDate } from '../../../../lib/format';
-import { rendimento, condicaoRendimento, saldoLote, pesosValidos } from '../../../../lib/defumacao';
+import { rendimento, condicaoRendimento, saldoLote, pesosValidos, rendimentoDaFicha } from '../../../../lib/defumacao';
 import { inspecaoAprovada } from '../../../../lib/qualidade';
 import AppShell from '../../../../components/AppShell';
 import ProducaoTabs from '../../../../components/ProducaoTabs';
@@ -51,6 +51,15 @@ function fmtKg(v) {
 // convenção do rendimento sem dado.
 function fmtKgOuTraco(v) {
   return v === null || v === undefined || v === '' ? '—' : `${fmtKg(v)} kg`;
+}
+
+// error.message chega cru do Supabase: em inglês numa falha de rede
+// ("Failed to fetch") ou como o texto interno de uma policy do RLS. Nenhum
+// dos dois é a primeira coisa que o operador precisa ler — a frase em
+// português vem na frente, o detalhe técnico fica em segundo plano, mas
+// continua visível para quem for investigar.
+function mensagemErro(prefixoPt, error) {
+  return `${prefixoPt} (detalhe técnico: ${error?.message || 'erro desconhecido'})`;
 }
 
 function RendimentoTexto({ r }) {
@@ -162,6 +171,19 @@ function Conteudo() {
   const somenteLeitura = !ficha || ficha.status !== 'rascunho';
   const itensDaFicha = itensJaDefumados.filter(i => i.defumacao_id === id);
 
+  // Best-effort, silencioso: usado depois de uma gravação de campo falhar,
+  // para saber se a ficha mudou de status por baixo (outra aba finalizou ou
+  // cancelou) sem recarregar a página inteira. Se esta consulta também
+  // falhar (a mesma oscilação de rede que derrubou a gravação), não
+  // sobrescreve o erro do campo com um segundo erro — o operador já está
+  // vendo o que precisa ver.
+  async function relerStatusFicha() {
+    if (!empresaAtual) return;
+    const { data } = await supabase.from('defumacoes')
+      .select('status').eq('id', id).eq('empresa_id', empresaAtual.id).maybeSingle();
+    if (data) setFicha(prev => (prev ? { ...prev, status: data.status } : prev));
+  }
+
   async function salvarCampo(campo) {
     if (!ficha || !empresaAtual || ficha.status !== 'rascunho') return;
     const valor = cabecalho[campo];
@@ -181,9 +203,12 @@ function Conteudo() {
     if (error) {
       // As travas da migração 29 levantam mensagem em português (ex.: ficha
       // finalizada por outra aba entre a carga e o blur) — mostra ela e
-      // recarrega o estado real em vez de insistir.
-      setErroCampo(prev => ({ ...prev, [campo]: error.message }));
-      carregar();
+      // relê só o status real, em vez de insistir. Não chama carregar(): se a
+      // rede caiu, a busca inteira falha de novo e vira banner de erro por
+      // cima da ficha inteira — tiraria o operador de dentro dela por uma
+      // oscilação de sinal na cozinha, por causa de UM campo.
+      setErroCampo(prev => ({ ...prev, [campo]: mensagemErro('Não foi possível salvar este campo.', error) }));
+      relerStatusFicha();
       return;
     }
     if (!data) {
@@ -217,6 +242,7 @@ function Conteudo() {
     e.preventDefault();
     if (!empresaAtual || salvandoItem || somenteLeitura) return;
     setErroItem('');
+    setErroRemover(''); // banner de remoção de uma ação anterior não fica preso na tela
 
     const lote = opcoesLote.find(l => l.id === novoItem.recebimento_item_id);
     if (!lote) {
@@ -231,6 +257,20 @@ function Conteudo() {
     const validacao = pesosValidos(novoItem);
     if (!validacao.ok) {
       setErroItem(validacao.erro);
+      return;
+    }
+
+    // O saldo só é a mesma grandeza que peso_bruto_kg quando a matéria-prima
+    // é medida em quilo: `recebimento_itens.quantidade` já sai gravada na
+    // unidade de estoque da matéria-prima (a nota converte na entrada — ver
+    // atualizacao_22_nfe_documentos.sql), não necessariamente quilo. Numa
+    // matéria-prima medida em outra unidade (un, cx…) o saldo não é
+    // comparável ao peso digitado aqui, e bloquear estaria comparando
+    // grandezas diferentes — ali o saldo já aparece como informação na
+    // própria opção do select (labelLote), sem trava.
+    const unidadeLote = String(lote.materias_primas?.unidade || '').trim().toLowerCase();
+    if (unidadeLote === 'kg' && Number(novoItem.peso_bruto_kg) > lote.saldo) {
+      setErroItem(`O peso bruto informado (${fmtKg(novoItem.peso_bruto_kg)} kg) passa do saldo do lote — restam ${fmtKg(lote.saldo)} kg.`);
       return;
     }
 
@@ -253,7 +293,7 @@ function Conteudo() {
 
     setSalvandoItem(false);
     if (error) {
-      setErroItem('Não foi possível gravar o item: ' + error.message);
+      setErroItem(mensagemErro('Não foi possível gravar o item.', error));
       return;
     }
     setItensJaDefumados(prev => [...prev, data]);
@@ -264,12 +304,13 @@ function Conteudo() {
     if (!empresaAtual || somenteLeitura) return;
     setRemovendoId(itemId);
     setErroRemover('');
+    setErroItem(''); // banner de gravação de item de uma ação anterior não fica preso na tela
     const { error } = await supabase.from('defumacao_itens')
       .delete()
       .eq('id', itemId).eq('empresa_id', empresaAtual.id);
     setRemovendoId('');
     if (error) {
-      setErroRemover('Não foi possível remover o item: ' + error.message);
+      setErroRemover(mensagemErro('Não foi possível remover o item.', error));
       return;
     }
     setItensJaDefumados(prev => prev.filter(i => i.id !== itemId));
@@ -278,9 +319,14 @@ function Conteudo() {
   const rAoVivo = rendimento(novoItem.peso_bruto_kg, novoItem.peso_final_kg);
   const condAoVivo = condicaoRendimento(rAoVivo);
 
+  // Os totais brutos/defumados somam TODOS os itens (informativo: quanto já
+  // entrou, quanto já saiu pesado) — mas o rendimento da ficha usa
+  // rendimentoDaFicha, que só pareia bruto e final dos itens já pesados.
+  // Somar bruto de item ainda não pesado contra o peso_final_kg || 0 desse
+  // mesmo item mentiria "rendimento baixo" numa ficha que só começou.
   const somaBruto = itensDaFicha.reduce((s, i) => s + (Number(i.peso_bruto_kg) || 0), 0);
   const somaFinal = itensDaFicha.reduce((s, i) => s + (Number(i.peso_final_kg) || 0), 0);
-  const rFicha = rendimento(somaBruto, somaFinal);
+  const rFicha = rendimentoDaFicha(itensDaFicha);
   const condFicha = condicaoRendimento(rFicha);
 
   if (loading) return <p className="muted">Carregando…</p>;
@@ -358,6 +404,13 @@ function Conteudo() {
               onChange={e => setCabecalho({ ...cabecalho, responsavel_id: e.target.value })}
               onBlur={() => salvarCampo('responsavel_id')}>
               <option value="">Selecione…</option>
+              {/* O responsável gravado pode ter sido desativado depois — a
+                  lista de funcionários só traz ativo=true (ver r2 em
+                  carregar()). Sem esta opção extra, uma ficha assim voltaria
+                  a mostrar "Selecione…", como se o campo estivesse vazio. */}
+              {cabecalho.responsavel_id && !funcionarios.some(f => f.id === cabecalho.responsavel_id) && (
+                <option value={cabecalho.responsavel_id}>{ficha.funcionarios?.nome || 'Responsável desativado'} (inativo)</option>
+              )}
               {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
             {erroCampo.responsavel_id && <p className="erro" style={{ fontSize: 11, marginTop: 4 }}>{erroCampo.responsavel_id}</p>}

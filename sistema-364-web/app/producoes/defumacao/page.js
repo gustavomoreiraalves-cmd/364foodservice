@@ -47,9 +47,14 @@ function Conteudo() {
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
+    // `funcionarios!defumacoes_responsavel_id_fkey`: desde a atualização 29,
+    // `defumacoes` tem duas FKs para `funcionarios` (responsavel_id e
+    // cancelada_por_id), então `funcionarios(nome)` sem qualificação devolve
+    // PGRST201 (ambíguo). O nome da constraint desambigua — mesmo padrão de
+    // app/pedidos/[id]/page.js para responsavel_id x cancelado_por_id.
     const { data, error } = await supabase
       .from('defumacoes')
-      .select('*, funcionarios(nome), defumacao_itens(peso_bruto_kg, peso_final_kg)')
+      .select('*, funcionarios!defumacoes_responsavel_id_fkey(nome), defumacao_itens(peso_bruto_kg, peso_final_kg)')
       .eq('empresa_id', eid)
       .order('data', { ascending: false });
 

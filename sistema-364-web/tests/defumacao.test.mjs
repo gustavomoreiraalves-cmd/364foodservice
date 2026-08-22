@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STATUS_DEFUMACAO, rendimento, condicaoRendimento,
-  saldoLote, pesosValidos, proximaFicha,
+  saldoLote, pesosValidos, proximaFicha, rendimentoDaFicha,
 } from '../lib/defumacao.js';
 
 test('STATUS_DEFUMACAO: os três status da ficha', () => {
@@ -81,6 +81,31 @@ test('pesosValidos: ficha completa e coerente passa', () => {
 
 test('pesosValidos: peso defumado ainda não informado passa (rascunho)', () => {
   assert.equal(pesosValidos({ peso_bruto_kg: 180 }).ok, true);
+});
+
+test('rendimentoDaFicha: nenhum item pesado ainda é sem dado, não zero', () => {
+  const itens = [{ peso_bruto_kg: 180, peso_final_kg: null }, { peso_bruto_kg: 50, peso_final_kg: '' }];
+  assert.equal(rendimentoDaFicha(itens), null);
+});
+
+test('rendimentoDaFicha: lista vazia é sem dado', () => {
+  assert.equal(rendimentoDaFicha([]), null);
+});
+
+test('rendimentoDaFicha: só entram os itens já pesados, bruto pareado com o final', () => {
+  const itens = [
+    { peso_bruto_kg: 100, peso_final_kg: 45 },  // pesado
+    { peso_bruto_kg: 80, peso_final_kg: null }, // ainda não pesado — fica de fora dos dois lados
+  ];
+  assert.equal(rendimentoDaFicha(itens), 0.45);
+});
+
+test('rendimentoDaFicha: ficha inteira pesada soma bruto e final de todos os itens', () => {
+  const itens = [
+    { peso_bruto_kg: 100, peso_final_kg: 45 },
+    { peso_bruto_kg: 80, peso_final_kg: 40 },
+  ];
+  assert.equal(rendimentoDaFicha(itens), 85 / 180);
 });
 
 test('proximaFicha: primeira ficha do dia', () => {

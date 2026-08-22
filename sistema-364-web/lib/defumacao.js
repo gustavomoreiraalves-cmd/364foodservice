@@ -41,6 +41,33 @@ export function saldoLote(recebimentoItem, itensJaDefumados) {
   return Math.max(0, recebido - usado);
 }
 
+// Rendimento da ficha inteira, não a média dos itens: soma bruto e final e
+// divide no fim.
+//
+// Só entram na conta os itens que já têm peso_final_kg — o fluxo normal é
+// pesar bruto no início da defumação e o defumado só horas depois
+// (pesosValidos aceita item sem peso final de propósito). Item ainda não
+// pesado não é "rendimento zero", é "ainda sem dado": se ele entrasse com
+// final=0, o rendimento da ficha desabava para perto de zero assim que o
+// primeiro item fosse lançado, mesmo que nenhum tivesse sido pesado no fim
+// ainda. Enquanto NENHUM item tiver peso final, a ficha não tem rendimento
+// ainda — devolve null (a tela mostra "—"), igual a `rendimento()` sem bruto.
+//
+// O bruto somado é só o dos itens que entraram na soma do final — não o
+// bruto de todos os itens da ficha. Misturar bruto de item ainda não pesado
+// com final só dos pesados infla o denominador sem contrapartida no
+// numerador e o percentual fica torto (parece pior do que é).
+export function rendimentoDaFicha(itens) {
+  const pesados = (itens || []).filter(i => {
+    const final = num(i.peso_final_kg);
+    return final !== null && !Number.isNaN(final);
+  });
+  if (!pesados.length) return null;
+  const bruto = pesados.reduce((s, i) => s + (num(i.peso_bruto_kg) || 0), 0);
+  const final = pesados.reduce((s, i) => s + (num(i.peso_final_kg) || 0), 0);
+  return rendimento(bruto, final);
+}
+
 export function pesosValidos({ peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg } = {}) {
   const bruto = num(peso_bruto_kg);
   const perda = num(perda_limpeza_kg) || 0;
