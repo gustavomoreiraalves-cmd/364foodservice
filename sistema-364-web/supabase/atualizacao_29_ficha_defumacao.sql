@@ -139,6 +139,14 @@ begin
   if tg_op = 'UPDATE' then
     new.updated_at := clock_timestamp();
 
+    -- A data do cancelamento vem do relógio do banco, não do navegador —
+    -- mesmo raciocínio de `cancelado_em` na atualização 27 (pedidos): o
+    -- cliente mandaria `new Date().toISOString()`, que é o relógio da
+    -- máquina do operador e pode estar em qualquer hora.
+    if new.status = 'cancelada' and old.status is distinct from 'cancelada' then
+      new.cancelada_em := clock_timestamp();
+    end if;
+
     if old.status = 'cancelada' and new.status is distinct from 'cancelada' then
       raise exception 'Ficha cancelada não volta para %.', new.status
         using errcode = 'check_violation';

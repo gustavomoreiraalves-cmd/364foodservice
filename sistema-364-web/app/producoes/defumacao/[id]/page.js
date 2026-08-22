@@ -3,10 +3,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
 import { fmtDate } from '../../../../lib/format';
+import { fmtDateTime } from '../../../../lib/producao';
 import { rendimento, condicaoRendimento, saldoLote, pesosValidos, rendimentoDaFicha } from '../../../../lib/defumacao';
 import { inspecaoAprovada } from '../../../../lib/qualidade';
+import { useAuth } from '../../../../lib/auth';
 import AppShell from '../../../../components/AppShell';
 import ProducaoTabs from '../../../../components/ProducaoTabs';
+import FichaPrint, { imprimirFicha } from '../../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../../lib/empresa';
 
 const STATUS_LABELS = {
@@ -72,18 +75,28 @@ function RendimentoTexto({ r }) {
 }
 
 export default function DefumacaoFichaPage() {
+  // A ficha impressa (FichaPrint) fica FORA de Conteudo, no mesmo nível do
+  // AppShell — mas ainda assim é a ÚNICA impressão montada nesta tela. Esta
+  // página não mexe com EtiquetaPrint (etiqueta é 108×32mm, ficha é A4); as
+  // duas convivendo montadas na mesma tela foi o defeito real da Fase 1 que
+  // fazia a ficha A4 sair espremida no tamanho da etiqueta.
+  const [fichaImpressao, setFichaImpressao] = useState(null);
   return (
-    <AppShell modulo="producoes" titulo="Ficha de Defumação" desc="Cabeçalho, itens e rendimento da ficha">
-      <ProducaoTabs />
-      <Conteudo />
-    </AppShell>
+    <>
+      <AppShell modulo="producoes" titulo="Ficha de Defumação" desc="Cabeçalho, itens e rendimento da ficha">
+        <ProducaoTabs />
+        <Conteudo setFichaImpressao={setFichaImpressao} />
+      </AppShell>
+      <FichaPrint ficha={fichaImpressao} />
+    </>
   );
 }
 
-function Conteudo() {
+function Conteudo({ setFichaImpressao }) {
   const { id } = useParams();
   const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
+  const { session } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [erroCarregar, setErroCarregar] = useState('');
@@ -105,6 +118,15 @@ function Conteudo() {
   const [removendoId, setRemovendoId] = useState('');
   const [erroRemover, setErroRemover] = useState('');
 
+  const [finalizando, setFinalizando] = useState(false);
+  const [salvandoFinalizar, setSalvandoFinalizar] = useState(false);
+  const [erroFinalizar, setErroFinalizar] = useState('');
+
+  const [cancelando, setCancelando] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState('');
+  const [salvandoCancelar, setSalvandoCancelar] = useState(false);
+  const [erroCancelar, setErroCancelar] = useState('');
+
   async function carregar() {
     if (!empresaAtual || !id) return;
     setLoading(true);
@@ -116,16 +138,22 @@ function Conteudo() {
     // empresa adivinhando o uuid da URL — ela some da consulta e devolve
     // "não encontrada", sem revelar que o id existe.
     //
-    // `funcionarios!defumacoes_responsavel_id_fkey`: desde a atualização 29,
-    // `defumacoes` tem duas FKs para `funcionarios` (responsavel_id e
-    // cancelada_por_id), então `funcionarios(nome)` sem qualificação devolveria
-    // PGRST201. O nome da constraint desambigua — mesmo padrão de
-    // app/pedidos/[id]/page.js para responsavel_id x cancelado_por_id.
+    // `funcionarios!defumacoes_responsavel_id_fkey` / `..._cancelada_por_id_fkey`:
+    // desde a atualização 29, `defumacoes` tem duas FKs para `funcionarios`
+    // (responsavel_id e cancelada_por_id), então `funcionarios(nome)` sem
+    // qualificação devolveria PGRST201. O nome da constraint desambigua —
+    // mesmo padrão de app/pedidos/[id]/page.js para responsavel_id x
+    // cancelado_por_id.
+    //
+    // `funcionarios.user_id` entra na lista (r2) para resolver "quem está
+    // cancelando" pelo usuário logado (useAuth), no mesmo padrão de
+    // app/producoes/nova/page.js — cancelada_por_id é quem clica em Cancelar
+    // ficha, não o responsável pela defumação.
     const [r1, r2, r3, r4] = await Promise.all([
       supabase.from('defumacoes')
-        .select('*, funcionarios!defumacoes_responsavel_id_fkey(nome)')
+        .select('*, responsavel:funcionarios!defumacoes_responsavel_id_fkey(nome), cancelada_por:funcionarios!defumacoes_cancelada_por_id_fkey(nome)')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
-      supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
+      supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       // Lotes de matéria-prima recebidos por esta empresa. A condição sanitária
       // mora em inspecoes_qualidade (não existe mais status_recebimento em
       // recebimento_itens) — por isso o join, filtrado depois com
@@ -316,6 +344,115 @@ function Conteudo() {
     setItensJaDefumados(prev => prev.filter(i => i.id !== itemId));
   }
 
+  // Quem finaliza/cancela é o usuário logado — não necessariamente o
+  // responsável pela defumação gravado no cabeçalho. Mesmo padrão de
+  // app/producoes/nova/page.js (meuFuncionario) e de app/pedidos/[id]/page.js
+  // (cancelado_por_id).
+  const meuFuncionario = funcionarios.find(f => f.user_id === session?.user?.id);
+
+  // Só envia os campos que mudam: reenviar o cabeçalho inteiro (data, hora,
+  // temperatura, responsável…) esbarraria nas travas de imutabilidade da
+  // migração 29 assim que a ficha sair de rascunho — o trigger recusa
+  // qualquer um desses campos "mudando" mesmo que o valor enviado seja igual
+  // ao que já está gravado, porque o `is distinct from` roda sobre o payload
+  // inteiro do update.
+  async function finalizar() {
+    if (!ficha || !empresaAtual || ficha.status !== 'rascunho') return;
+    setSalvandoFinalizar(true);
+    setErroFinalizar('');
+    const { data, error } = await supabase.from('defumacoes')
+      .update({ status: 'finalizada' })
+      .eq('id', id).eq('empresa_id', empresaAtual.id)
+      .select('id')
+      .maybeSingle();
+    setSalvandoFinalizar(false);
+    if (error) {
+      // A trava "ficha sem item não finaliza" e qualquer corrida com outra
+      // aba chegam aqui em português (fn_defumacao_cabecalho, migração 29).
+      // Mostra a mensagem e relê o status real em vez de insistir — a
+      // ficha pode ter sido finalizada ou cancelada por outra aba entre a
+      // carga e o clique.
+      setErroFinalizar(mensagemErro('Não foi possível finalizar a ficha.', error));
+      relerStatusFicha();
+      return;
+    }
+    if (!data) {
+      setErroFinalizar('Esta ficha não está mais disponível nesta empresa. Recarregue a página.');
+      return;
+    }
+    setFinalizando(false);
+    await carregar();
+  }
+
+  async function cancelar() {
+    if (!motivoCancelamento.trim() || !empresaAtual) return;
+    setSalvandoCancelar(true);
+    setErroCancelar('');
+    // `cancelada_em` não vai daqui: quem carimba é o trigger
+    // fn_defumacao_cabecalho, com o relógio do banco — o relógio do
+    // navegador pode estar em qualquer hora (mesmo raciocínio do
+    // cancelamento de pedido).
+    const { data, error } = await supabase.from('defumacoes')
+      .update({
+        status: 'cancelada',
+        cancelada_motivo: motivoCancelamento.trim(),
+        cancelada_por_id: meuFuncionario?.id || null,
+      })
+      .eq('id', id).eq('empresa_id', empresaAtual.id)
+      .select('id')
+      .maybeSingle();
+    setSalvandoCancelar(false);
+    if (error) {
+      setErroCancelar(mensagemErro('Não foi possível cancelar a ficha.', error));
+      relerStatusFicha();
+      return;
+    }
+    if (!data) {
+      setErroCancelar('Esta ficha não está mais disponível nesta empresa. Recarregue a página.');
+      return;
+    }
+    setCancelando(false);
+    setMotivoCancelamento('');
+    await carregar();
+  }
+
+  // Só monta FichaPrint nesta tela — nenhuma EtiquetaPrint aqui (ver
+  // comentário em DefumacaoFichaPage). Traz lote, matéria-prima e os quatro
+  // pesos de cada item, mais o rendimento por item — o que a ficha de papel
+  // trazia.
+  function imprimir() {
+    imprimirFicha(setFichaImpressao, {
+      titulo: 'Ficha de Defumação',
+      numero: ficha.lote,
+      campos: [
+        { rot: 'Data', valor: fmtDate(ficha.data) },
+        { rot: 'Início', valor: cabecalho.hora_inicio || '—' },
+        { rot: 'Fim', valor: cabecalho.hora_fim || '—' },
+        { rot: 'Temperatura', valor: ficha.temperatura_c != null ? `${ficha.temperatura_c} °C` : '—' },
+        { rot: 'Responsável', valor: ficha.responsavel?.nome },
+        { rot: 'Status', valor: STATUS_LABELS[ficha.status] || ficha.status },
+        { rot: 'Observações', valor: ficha.obs },
+      ],
+      itens: {
+        headers: ['Lote', 'Matéria-prima', 'Peso bruto', 'Perda', 'Sobra', 'Peso defumado', 'Rendimento'],
+        rows: itensDaFicha.map(it => {
+          const r = rendimento(it.peso_bruto_kg, it.peso_final_kg);
+          return [
+            it.recebimento_itens?.lote || '—',
+            it.materias_primas?.nome || '—',
+            `${fmtKg(it.peso_bruto_kg)} kg`,
+            fmtKgOuTraco(it.perda_limpeza_kg),
+            fmtKgOuTraco(it.sobra_kg),
+            fmtKgOuTraco(it.peso_final_kg),
+            r === null ? '—' : `${(r * 100).toFixed(1)}%`,
+          ];
+        }),
+      },
+      totais: `Peso bruto total: ${fmtKg(somaBruto)} kg · Peso defumado total: ${fmtKg(somaFinal)} kg · Rendimento da ficha: ${rFicha === null ? '—' : `${(rFicha * 100).toFixed(1)}%`}`,
+      assinaturas: ['Responsável pela defumação', 'Conferido por'],
+    });
+  }
+
   const rAoVivo = rendimento(novoItem.peso_bruto_kg, novoItem.peso_final_kg);
   const condAoVivo = condicaoRendimento(rAoVivo);
 
@@ -359,13 +496,75 @@ function Conteudo() {
               {STATUS_LABELS[ficha.status] || ficha.status}
             </span>
           </div>
-          {/* A Task 5 acrescenta finalizar, cancelar com motivo e imprimir aqui. */}
-          <button className="btn secondary small" onClick={() => router.push('/producoes/defumacao')}>Voltar</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {ficha.status === 'rascunho' && itensDaFicha.length > 0 && !finalizando && (
+              <button className="btn small" onClick={() => setFinalizando(true)}>Finalizar ficha</button>
+            )}
+            {ficha.status !== 'cancelada' && !cancelando && (
+              <button className="btn danger small" onClick={() => setCancelando(true)}>Cancelar ficha</button>
+            )}
+            <button className="btn secondary small" onClick={imprimir}>Imprimir ficha</button>
+            <button className="btn secondary small" onClick={() => router.push('/producoes/defumacao')}>Voltar</button>
+          </div>
         </div>
 
         {somenteLeitura && (
           <div className="banner info" style={{ marginTop: 14 }}>
             Esta ficha está {STATUS_LABELS[ficha.status]?.toLowerCase() || ficha.status} — cabeçalho e itens ficam em modo leitura.
+          </div>
+        )}
+
+        {ficha.status === 'rascunho' && itensDaFicha.length === 0 && (
+          <div className="banner info" style={{ marginTop: 14 }}>
+            Lance ao menos uma matéria-prima para poder finalizar a ficha.
+          </div>
+        )}
+
+        {finalizando && (
+          <div className="panel" style={{ marginTop: 14 }}>
+            {erroFinalizar && <div className="banner bad">{erroFinalizar}</div>}
+            <p><b>Confirmar finalização da ficha {ficha.lote}?</b></p>
+            <ul style={{ fontSize: 12.5, lineHeight: 1.8 }}>
+              <li>{itensDaFicha.length} matéria(s)-prima(s) lançada(s)</li>
+              <li>Peso bruto total: <b>{fmtKg(somaBruto)} kg</b></li>
+              <li>Peso defumado total: <b>{fmtKg(somaFinal)} kg</b></li>
+              <li>Rendimento da ficha: <RendimentoTexto r={rFicha} /></li>
+            </ul>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Depois de finalizada, o cabeçalho e os itens ficam travados. Para corrigir, cancele com motivo e refaça.
+            </p>
+            <div className="row-actions">
+              <button className="btn" onClick={finalizar} disabled={salvandoFinalizar}>
+                {salvandoFinalizar ? 'Finalizando…' : 'Confirmar finalização'}
+              </button>
+              <button className="btn secondary" onClick={() => { setFinalizando(false); setErroFinalizar(''); }}>Voltar</button>
+            </div>
+          </div>
+        )}
+
+        {ficha.status === 'cancelada' && (
+          <div className="banner bad" style={{ marginTop: 14 }}>
+            <b>Ficha cancelada</b> em {fmtDateTime(ficha.cancelada_em)}
+            {ficha.cancelada_por?.nome ? ` por ${ficha.cancelada_por.nome}` : ''} — {ficha.cancelada_motivo}
+          </div>
+        )}
+
+        {cancelando && (
+          <div className="panel" style={{ marginTop: 14 }}>
+            {erroCancelar && <div className="banner bad">{erroCancelar}</div>}
+            <label>Motivo do cancelamento</label>
+            <input type="text" value={motivoCancelamento} autoFocus
+              placeholder="Ex.: erro de lançamento, refazer a ficha"
+              onChange={e => setMotivoCancelamento(e.target.value)} />
+            <p className="muted" style={{ fontSize: 12 }}>
+              A ficha cancelada não volta para rascunho ou finalizada.
+            </p>
+            <div className="row-actions">
+              <button className="btn danger" onClick={cancelar} disabled={salvandoCancelar || !motivoCancelamento.trim()}>
+                {salvandoCancelar ? 'Cancelando…' : 'Confirmar cancelamento'}
+              </button>
+              <button className="btn secondary" onClick={() => { setCancelando(false); setMotivoCancelamento(''); setErroCancelar(''); }}>Voltar</button>
+            </div>
           </div>
         )}
 
@@ -409,7 +608,7 @@ function Conteudo() {
                   carregar()). Sem esta opção extra, uma ficha assim voltaria
                   a mostrar "Selecione…", como se o campo estivesse vazio. */}
               {cabecalho.responsavel_id && !funcionarios.some(f => f.id === cabecalho.responsavel_id) && (
-                <option value={cabecalho.responsavel_id}>{ficha.funcionarios?.nome || 'Responsável desativado'} (inativo)</option>
+                <option value={cabecalho.responsavel_id}>{ficha.responsavel?.nome || 'Responsável desativado'} (inativo)</option>
               )}
               {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>

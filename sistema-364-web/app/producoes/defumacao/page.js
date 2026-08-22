@@ -175,7 +175,12 @@ function Conteudo() {
                         {r === null ? '—' : `${(r * 100).toFixed(1)}%`}
                       </span>
                     </td>
-                    <td><span className={`tag ${STATUS_TAG[f.status] || ''}`}>{STATUS_LABELS[f.status] || f.status}</span></td>
+                    <td>
+                      <span className={`tag ${STATUS_TAG[f.status] || ''}`}
+                        title={f.status === 'cancelada' ? f.cancelada_motivo || undefined : undefined}>
+                        {STATUS_LABELS[f.status] || f.status}
+                      </span>
+                    </td>
                   </tr>
                 );
               }) : <tr className="empty-row"><td colSpan={8}>Nenhuma ficha de defumação lançada.</td></tr>}
