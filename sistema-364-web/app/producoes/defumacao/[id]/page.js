@@ -110,7 +110,7 @@ function Conteudo({ setFichaImpressao }) {
 
   const [funcionarios, setFuncionarios] = useState([]);
   const [lotesDisponiveis, setLotesDisponiveis] = useState([]); // recebimento_itens da empresa, com joins
-  const [itensJaDefumados, setItensJaDefumados] = useState([]); // defumacao_itens da empresa, janela recente — só para o saldo do lote
+  const [itensJaDefumados, setItensJaDefumados] = useState([]); // defumacao_itens dos lotes exibidos em lotesDisponiveis — só para o saldo do lote
   const [itensDaFicha, setItensDaFicha] = useState([]); // defumacao_itens desta ficha, sem recorte de período
 
   const [novoItem, setNovoItem] = useState(ITEM_VAZIO);
@@ -154,53 +154,51 @@ function Conteudo({ setFichaImpressao }) {
     // cancelando" pelo usuário logado (useAuth), no mesmo padrão de
     // app/producoes/nova/page.js — cancelada_por_id é quem clica em Cancelar
     // ficha, não o responsável pela defumação.
-    // Janela usada para recortar as duas consultas "da empresa inteira"
-    // abaixo (lotes recebidos e itens de defumação de todas as fichas). O
-    // Supabase corta em 1000 linhas (max rows) sem sinalizar erro — sem
-    // `order`, o que sobra do corte é arbitrário; sem recorte de período, o
-    // corte silencioso acontece mais cedo. Recortar para os últimos 6 meses
-    // empurra o corte de 1000 linhas para um horizonte que a operação não
-    // deveria alcançar, e o `order` garante que, se alcançar, o que fica é
-    // sempre o mais recente. FEFO (priorizar o lote mais antigo) fica de
-    // fora desta correção — ver revisão final.
-    const desde = new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10);
-
-    const [r1, r2, r3, r4, r5] = await Promise.all([
+    const [r1, r2, r3, r5] = await Promise.all([
       supabase.from('defumacoes')
         .select('*, responsavel:funcionarios!defumacoes_responsavel_id_fkey(nome), cancelada_por:funcionarios!defumacoes_cancelada_por_id_fkey(nome)')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
-      // Lotes de matéria-prima recebidos por esta empresa nos últimos 6
-      // meses. A condição sanitária mora em inspecoes_qualidade (não existe
-      // mais status_recebimento em recebimento_itens) — por isso o join,
-      // filtrado depois com inspecaoAprovada. `recebimentos!inner` (em vez
-      // de `recebimentos(...)`) é o que permite filtrar/ordenar pela data do
-      // recebimento embutido.
+      // Lotes de matéria-prima recebidos por esta empresa. A condição sanitária
+      // mora em inspecoes_qualidade (não existe mais status_recebimento em
+      // recebimento_itens) — por isso o join, filtrado depois com
+      // inspecaoAprovada.
+      //
+      // Sem recorte de período: um lote recebido há mais de 6 meses (matéria
+      // congelada, por exemplo) continua lançável. Uma versão anterior desta
+      // consulta cortava por `recebimentos.data` nos últimos 6 meses e o lote
+      // sumia do seletor sem nenhum aviso — restrição funcional nova que a
+      // correção do Important 8 introduziu por engano (achado da re-revisão).
+      //
+      // `order('recebimentos(data)')`, SEM `foreignTable`/`referencedTable`:
+      // é a única forma de ordenar as linhas de TOPO (recebimento_itens) por
+      // uma coluna de um embed to-one. Passar `{ foreignTable: 'recebimentos' }`
+      // (como esta consulta fazia antes da re-revisão) gera
+      // `recebimentos.order=data.desc`, que ordena as linhas EMBUTIDAS — aqui
+      // sempre uma só, por ser embed to-one — e por isso é no-op sobre a
+      // ordem do topo, que ficava indefinida mesmo com o `order` presente
+      // (outro achado da re-revisão). `limit(1000)` só documenta o teto que o
+      // Supabase já aplica por padrão (max rows); com o `order` de topo de
+      // verdade, se ele for alcançado o que sobra é sempre o lote recebido
+      // mais recentemente — não um corte arbitrário. FEFO (priorizar o lote
+      // mais antigo) fica de fora desta correção — ver revisão final.
       supabase.from('recebimento_itens')
-        .select('id, lote, quantidade, materia_prima_id, materias_primas(nome, unidade), recebimentos!inner(data), inspecoes_qualidade(status)')
+        .select('id, lote, quantidade, materia_prima_id, materias_primas(nome, unidade), recebimentos(data), inspecoes_qualidade(status)')
         .eq('empresa_id', eid)
-        .gte('recebimentos.data', desde)
-        .order('data', { foreignTable: 'recebimentos', ascending: false })
-        .limit(1000),
-      // Itens de defumação de TODA a empresa nos últimos 6 meses — não só
-      // desta ficha — porque saldoLote precisa descontar o que já foi
-      // lançado em qualquer ficha, inclusive esta. `defumacoes!inner(status,
-      // data)` traz o status da ficha pai: saldoLote só desconta itens de
-      // ficha em rascunho ou finalizada, nunca de ficha cancelada (Critical 1
-      // da revisão final — cancelar uma ficha lançada por engano não pode
-      // prender o peso para sempre).
-      supabase.from('defumacao_itens')
-        .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote), defumacoes!inner(status, data)')
-        .eq('empresa_id', eid)
-        .gte('defumacoes.data', desde)
-        .order('data', { foreignTable: 'defumacoes', ascending: false })
+        .order('recebimentos(data)', { ascending: false })
         .limit(1000),
       // Itens desta ficha específica, sem recorte de período: uma ficha
       // finalizada há mais de 6 meses continua tendo que mostrar os itens
-      // dela quando o operador abre a tela — o recorte acima é só para a
-      // conta de saldo do lote, que soma itens de fichas diferentes e pode
-      // esbarrar no teto de 1000 linhas; uma ficha isolada nunca chega perto
-      // disso.
+      // dela quando o operador abre a tela.
+      //
+      // `.order('id')`: `defumacao_itens` não tem coluna de data/hora própria
+      // — confirmado com uma consulta somente-leitura contra o schema real de
+      // produção (`select id,created_at` devolve "column
+      // defumacao_itens.created_at does not exist"). Ordenar por `id` (uuid)
+      // não é cronológico: é só determinístico — o item recém-adicionado pode
+      // não aparecer no fim da lista, e sim pular de posição no próximo
+      // carregar(). Comportamento sub-ótimo registrado aqui, não uma
+      // correção pendente desta onda.
       supabase.from('defumacao_itens')
         .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote)')
         .eq('empresa_id', eid).eq('defumacao_id', id)
@@ -209,15 +207,52 @@ function Conteudo({ setFichaImpressao }) {
 
     // Falha de carga precisa aparecer como falha, não como "ficha não
     // encontrada" — achado real na Fase 1.
-    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
-    if (falha) {
-      setErroCarregar(falha.error.message);
+    const falhaInicial = [r1, r2, r3, r5].find(r => r.error);
+    if (falhaInicial) {
+      setErroCarregar(falhaInicial.error.message);
       setLoading(false);
       return;
     }
 
     if (!r1.data) {
       setNaoEncontrada(true);
+      setLoading(false);
+      return;
+    }
+
+    // Itens de defumação para o SALDO dos lotes carregados acima (r3) — não
+    // toda a empresa, não recortado por período: busca só os itens que
+    // apontam para os lotes que a tela está mostrando
+    // (`.in('recebimento_item_id', ...)`), por isso depende de r3.
+    //
+    // Resolve os dois problemas do Important 8 de uma vez (achado da
+    // re-revisão): o corte deixa de ser um teto de linhas/período e passa a
+    // ser exatamente a quantidade de lotes exibidos — sempre pequeno, nunca
+    // perto do teto de 1000 do Supabase — e deixa de depender de
+    // `defumacoes.data`, que é editável em rascunho (a mesma mutabilidade que
+    // sustentou o Critical 2). A versão anterior recortava `defumacao_itens`
+    // pelos últimos 6 meses de `defumacoes.data`: uma ficha com a data
+    // digitada errada (ano anterior, o erro clássico) caía fora da janela,
+    // os itens dela paravam de descontar do saldo, e o lote passava a
+    // mostrar saldo MAIOR que o real — o oposto do que o Critical 1 corrigiu.
+    // Os itens da própria ficha aberta na tela também ficavam de fora de
+    // `itensJaDefumados` nesse cenário (uma ficha em rascunho com data antiga
+    // podia lançar acima do próprio saldo que ela mesma já tinha consumido);
+    // sem recorte de período, esse caso deixa de existir.
+    //
+    // `defumacoes!inner(status)` continua trazendo o status da ficha pai:
+    // saldoLote só desconta itens de ficha em rascunho ou finalizada, nunca
+    // de ficha cancelada (Critical 1).
+    const idsLotes = (r3.data || []).map(l => l.id);
+    const r4 = idsLotes.length
+      ? await supabase.from('defumacao_itens')
+          .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote), defumacoes!inner(status)')
+          .eq('empresa_id', eid)
+          .in('recebimento_item_id', idsLotes)
+      : { data: [], error: null };
+
+    if (r4.error) {
+      setErroCarregar(r4.error.message);
       setLoading(false);
       return;
     }
