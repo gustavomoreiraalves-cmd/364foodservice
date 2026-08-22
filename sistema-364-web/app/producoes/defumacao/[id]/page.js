@@ -32,6 +32,48 @@ const ITEM_VAZIO = {
   peso_final_kg: '',
 };
 
+// Cada uuid custa ~39 caracteres no query string do `.in(...)`; com uma
+// lista grande de lotes — e r3 (recebimento_itens) não tem mais recorte de
+// período (Important 8) —, um único GET estoura o limite de tamanho de URL
+// do gateway antes de chegar no PostgREST. É o mesmo bug de Fase 1 que
+// app/recebimentos/page.js já resolveu para etiqueta_impressoes
+// (BLOCO_IDS_IMPRESSOES/carregarImpressoesDosItens, lá); reaberto aqui pela
+// remoção do recorte de período em r3 — achado da segunda re-revisão. Busca
+// em blocos para não depender do tamanho da lista de lotes da empresa.
+const BLOCO_IDS_ITENS_DEFUMACAO = 100;
+
+// Busca defumacao_itens só dos lotes passados (para o cálculo de saldo), em
+// blocos de BLOCO_IDS_ITENS_DEFUMACAO ids, em paralelo.
+//
+// Cada bloco continua sujeito ao teto de linhas do Supabase (max rows,
+// 1000): NÃO é verdade que reduzir para os lotes exibidos elimina o risco —
+// o teto conta LINHAS de defumacao_itens devolvidas, não lotes filtrados, e
+// um único lote acumula itens de várias fichas ao longo do tempo. Por isso
+// cada bloco pede `order` (determinístico — sem ele, um corte no teto
+// devolveria um subconjunto arbitrário a cada carga) e `limit` explícito, e
+// a função devolve `estourouTeto` quando algum bloco bate nesse teto: nesse
+// caso `saldoLote` está descontando menos consumo do que devia (linhas
+// ficaram de fora) e o lote mostra saldo MAIOR que o real — o chamador
+// precisa avisar em vez de confiar no saldo calado.
+async function carregarItensDeDefumacaoDosLotes(empresaId, idsLotes) {
+  if (!idsLotes.length) return { data: [], error: null, estourouTeto: false };
+  const LIMITE_POR_BLOCO = 1000;
+  const blocos = [];
+  for (let i = 0; i < idsLotes.length; i += BLOCO_IDS_ITENS_DEFUMACAO) blocos.push(idsLotes.slice(i, i + BLOCO_IDS_ITENS_DEFUMACAO));
+  const respostas = await Promise.all(blocos.map(bloco =>
+    supabase.from('defumacao_itens')
+      .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote), defumacoes!inner(status)')
+      .eq('empresa_id', empresaId)
+      .in('recebimento_item_id', bloco)
+      .order('id')
+      .limit(LIMITE_POR_BLOCO)
+  ));
+  const comErro = respostas.find(r => r.error);
+  if (comErro) return { data: [], error: comErro.error, estourouTeto: false };
+  const estourouTeto = respostas.some(r => (r.data || []).length >= LIMITE_POR_BLOCO);
+  return { data: respostas.flatMap(r => r.data || []), error: null, estourouTeto };
+}
+
 function cabecalhoDaFicha(f) {
   return {
     data: f.data || '',
@@ -111,6 +153,10 @@ function Conteudo({ setFichaImpressao }) {
   const [funcionarios, setFuncionarios] = useState([]);
   const [lotesDisponiveis, setLotesDisponiveis] = useState([]); // recebimento_itens da empresa, com joins
   const [itensJaDefumados, setItensJaDefumados] = useState([]); // defumacao_itens dos lotes exibidos em lotesDisponiveis — só para o saldo do lote
+  // true quando algum bloco de carregarItensDeDefumacaoDosLotes bateu no teto
+  // de 1000 linhas do Supabase — nesse caso o saldo exibido pode estar
+  // descontando menos consumo do que devia (maior que o real).
+  const [saldoPossivelmenteIncompleto, setSaldoPossivelmenteIncompleto] = useState(false);
   const [itensDaFicha, setItensDaFicha] = useState([]); // defumacao_itens desta ficha, sem recorte de período
 
   const [novoItem, setNovoItem] = useState(ITEM_VAZIO);
@@ -137,6 +183,7 @@ function Conteudo({ setFichaImpressao }) {
     setLoading(true);
     setErroCarregar('');
     setNaoEncontrada(false);
+    setSaldoPossivelmenteIncompleto(false);
     const eid = empresaAtual.id;
 
     // O filtro por empresa_id na ficha é o que impede alcançar ficha de outra
@@ -222,40 +269,23 @@ function Conteudo({ setFichaImpressao }) {
 
     // Itens de defumação para o SALDO dos lotes carregados acima (r3) — não
     // toda a empresa, não recortado por período: busca só os itens que
-    // apontam para os lotes que a tela está mostrando
-    // (`.in('recebimento_item_id', ...)`), por isso depende de r3.
-    //
-    // Resolve os dois problemas do Important 8 de uma vez (achado da
-    // re-revisão): o corte deixa de ser um teto de linhas/período e passa a
-    // ser exatamente a quantidade de lotes exibidos — sempre pequeno, nunca
-    // perto do teto de 1000 do Supabase — e deixa de depender de
-    // `defumacoes.data`, que é editável em rascunho (a mesma mutabilidade que
-    // sustentou o Critical 2). A versão anterior recortava `defumacao_itens`
-    // pelos últimos 6 meses de `defumacoes.data`: uma ficha com a data
-    // digitada errada (ano anterior, o erro clássico) caía fora da janela,
-    // os itens dela paravam de descontar do saldo, e o lote passava a
-    // mostrar saldo MAIOR que o real — o oposto do que o Critical 1 corrigiu.
-    // Os itens da própria ficha aberta na tela também ficavam de fora de
-    // `itensJaDefumados` nesse cenário (uma ficha em rascunho com data antiga
-    // podia lançar acima do próprio saldo que ela mesma já tinha consumido);
-    // sem recorte de período, esse caso deixa de existir.
-    //
-    // `defumacoes!inner(status)` continua trazendo o status da ficha pai:
-    // saldoLote só desconta itens de ficha em rascunho ou finalizada, nunca
-    // de ficha cancelada (Critical 1).
+    // apontam para os lotes que a tela está mostrando, por isso depende de
+    // r3. Continua resolvendo a dependência de `defumacoes.data` (campo
+    // editável em rascunho) que sustentava o Critical 2 e o corte de r3 por
+    // período (Important 8 original) — mas o `.in(...)` precisa ir em
+    // blocos, não numa lista só: ver carregarItensDeDefumacaoDosLotes, acima
+    // (segunda re-revisão — o `.limit(1000)` sem recorte em r3 pode chegar a
+    // centenas de lotes, e um único `.in()` com todos os ids estoura o
+    // limite de URL do gateway antes de sair do navegador).
     const idsLotes = (r3.data || []).map(l => l.id);
-    const r4 = idsLotes.length
-      ? await supabase.from('defumacao_itens')
-          .select('id, defumacao_id, recebimento_item_id, materia_prima_id, peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, materias_primas(nome, unidade), recebimento_itens(lote), defumacoes!inner(status)')
-          .eq('empresa_id', eid)
-          .in('recebimento_item_id', idsLotes)
-      : { data: [], error: null };
+    const r4 = await carregarItensDeDefumacaoDosLotes(eid, idsLotes);
 
     if (r4.error) {
       setErroCarregar(r4.error.message);
       setLoading(false);
       return;
     }
+    setSaldoPossivelmenteIncompleto(r4.estourouTeto);
 
     setFicha(r1.data);
     const cab = cabecalhoDaFicha(r1.data);
@@ -785,6 +815,14 @@ function Conteudo({ setFichaImpressao }) {
 
       <div className="panel">
         <h3>Matérias-primas defumadas nesta ficha</h3>
+
+        {saldoPossivelmenteIncompleto && (
+          <div className="banner" style={{ marginTop: 10 }}>
+            O volume de lançamentos de defumação está grande demais para o cálculo de saldo
+            conferir tudo de uma vez — o saldo mostrado abaixo pode estar MAIOR do que o real
+            para algum lote. Fale com o suporte antes de confiar no saldo aqui.
+          </div>
+        )}
 
         {!somenteLeitura && (
           <form className="form-grid" onSubmit={adicionarItem}>
