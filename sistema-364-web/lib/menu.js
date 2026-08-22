@@ -16,7 +16,8 @@ export const MENU = [
     tipo: 'grupo', id: 'producao', label: 'Produção', ic: '▨', itens: [
       { label: 'Visão Geral', href: '/producoes', modulo: 'producoes', exato: true },
       { label: 'Recebimento', href: '/recebimentos', modulo: 'recebimentos' },
-      { label: 'Defumação', href: '/producoes/completa', modulo: 'producoes' },
+      { label: 'Defumação', href: '/producoes/defumacao', modulo: 'producoes' },
+      { label: 'Produção Completa', href: '/producoes/completa', modulo: 'producoes' },
       { label: 'Produção Interna', href: '/producoes/internas', modulo: 'producoes' },
       { label: 'Estoque', href: '/estoque', modulo: 'estoque' },
       { label: 'Relatório de Validades', href: '/producoes/validades', modulo: 'producoes' },
