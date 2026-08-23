@@ -43,6 +43,18 @@ export function mensagemAoAlternarAtivo(erro) {
   return 'Não foi possível mudar a situação: ' + mensagem;
 }
 
+// O PostgREST monta `?columns=` a partir das chaves do objeto enviado ao
+// insert, mesmo quando o valor da chave é `undefined` — ela sobrevive ao
+// JSON.stringify porque a lista de colunas é montada antes da serialização.
+// Por isso `{ ...dados, empresa_id: undefined }` não "some" a coluna: vira uma
+// coluna pedida que não existe em tabelas sem empresa_id (ex.: empregadores),
+// e o insert falha com erro de coluna ausente. Só inclui a chave quando há um
+// empresaId de fato — telas sem empresa (como Empresas/pessoa jurídica) passam
+// `empresaId: undefined` a propósito.
+export function linhaParaInserir(dados, empresaId) {
+  return empresaId === undefined ? dados : { ...dados, empresa_id: empresaId };
+}
+
 // Comportamento comum das telas de cadastro: o mesmo formulário do topo serve
 // para criar e para editar, e `editando` é o que decide entre insert e update.
 //
@@ -74,7 +86,7 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
       const dados = paraGravar ? paraGravar(form) : form;
       const { error } = editando
         ? await supabase.from(tabela).update(dados).eq('id', editando)
-        : await supabase.from(tabela).insert([{ ...dados, empresa_id: empresaId }]);
+        : await supabase.from(tabela).insert([linhaParaInserir(dados, empresaId)]);
       if (error) {
         alert((editando ? 'Erro ao salvar as alterações: ' : 'Erro ao salvar: ') + error.message);
         return;

@@ -10,6 +10,7 @@ export const MENU = [
       { label: 'Fornecedores', href: '/fornecedores', modulo: 'fornecedores' },
       { label: 'Produtos', href: '/produtos', modulo: 'produtos' },
       { label: 'Matéria-prima / Insumos', href: '/materias-primas', modulo: 'produtos' },
+      { label: 'Empresas (CNPJ)', href: '/empresas', modulo: 'admin' },
     ],
   },
   {
@@ -17,6 +18,7 @@ export const MENU = [
       { label: 'Visão Geral', href: '/producoes', modulo: 'producoes', exato: true },
       { label: 'Recebimento', href: '/recebimentos', modulo: 'recebimentos' },
       { label: 'Defumação', href: '/producoes/defumacao', modulo: 'producoes' },
+      { label: 'Embalagem', href: '/producoes/embalagem', modulo: 'producoes' },
       { label: 'Produção Completa', href: '/producoes/completa', modulo: 'producoes' },
       { label: 'Produção Interna', href: '/producoes/internas', modulo: 'producoes' },
       { label: 'Estoque', href: '/estoque', modulo: 'estoque' },

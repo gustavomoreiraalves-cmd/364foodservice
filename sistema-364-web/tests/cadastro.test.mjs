@@ -3,7 +3,7 @@ process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-const { camposDoFormulario, mensagemAoAlternarAtivo } = await import('../lib/cadastro.js');
+const { camposDoFormulario, mensagemAoAlternarAtivo, linhaParaInserir } = await import('../lib/cadastro.js');
 
 const FORM_VAZIO = { nome: '', categoria: 'Carnes', validade_dias: 90, producao_interna: false };
 
@@ -79,4 +79,26 @@ test('mensagemAoAlternarAtivo: erro sem message não vira "undefined" na tela', 
   const semTexto = mensagemAoAlternarAtivo({ code: 'PGRST204' });
   assert.match(semTexto, /atualização 26/);
   assert.doesNotMatch(semTexto, /Erro original/);
+});
+
+// Regressão: com empresaId === undefined, `{ ...dados, empresa_id: undefined }`
+// ainda manda a chave `empresa_id` para o PostgREST (que monta `?columns=` a
+// partir de Object.keys antes do JSON.stringify) — e tabelas sem essa coluna
+// (ex.: empregadores) recusam o insert. `linhaParaInserir` é o que a tela
+// Empresas usa para evitar isso.
+test('linhaParaInserir: empresaId undefined não inclui a chave empresa_id', () => {
+  const r = linhaParaInserir({ razao_social: 'Steak 364 Ltda' }, undefined);
+  assert.deepEqual(Object.keys(r).sort(), ['razao_social']);
+  assert.equal('empresa_id' in r, false);
+});
+
+test('linhaParaInserir: empresaId definido inclui empresa_id no objeto', () => {
+  const r = linhaParaInserir({ nome: 'Cliente X' }, 'e1');
+  assert.deepEqual(r, { nome: 'Cliente X', empresa_id: 'e1' });
+});
+
+test('linhaParaInserir: empresaId null é gravado como null (não confundido com undefined)', () => {
+  const r = linhaParaInserir({ nome: 'Cliente X' }, null);
+  assert.equal(r.empresa_id, null);
+  assert.equal('empresa_id' in r, true);
 });

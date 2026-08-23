@@ -5,6 +5,8 @@
 // conta que o defumador acompanha ao vivo: peso defumado dividido pelo peso
 // bruto que entrou.
 
+import { proximoNumeroFicha } from './format.js';
+
 export const STATUS_DEFUMACAO = ['rascunho', 'finalizada', 'cancelada'];
 
 const num = v => (v === null || v === undefined || v === '' ? null : Number(v));
@@ -118,15 +120,8 @@ export function prefixoFicha(dataStr) {
 
 // Número da ficha: DEF-AAMMDD-###. Deriva do maior sufixo já usado dentre as
 // fichas com este prefixo, nunca da contagem de fichas — contagem repete
-// número assim que uma some.
+// número assim que uma some. A conta em si mora em proximoNumeroFicha
+// (lib/format.js), compartilhada com a ficha de embalagem.
 export function proximaFicha(dataStr, fichasExistentes) {
-  const prefixo = prefixoFicha(dataStr);
-  const maior = (fichasExistentes || []).reduce((max, f) => {
-    const lote = String(f?.lote || '');
-    if (!lote.startsWith(prefixo)) return max;
-    const sufixo = lote.slice(prefixo.length);
-    if (!/^\d+$/.test(sufixo)) return max;
-    return Math.max(max, parseInt(sufixo, 10));
-  }, 0);
-  return prefixo + String(maior + 1).padStart(3, '0');
+  return proximoNumeroFicha(prefixoFicha(dataStr), fichasExistentes);
 }

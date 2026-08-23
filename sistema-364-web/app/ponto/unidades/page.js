@@ -6,7 +6,6 @@ import PontoTabs from '../../../components/PontoTabs';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { useIsAdmin, formatarCnpj } from '../../../lib/ponto';
 
-const EMPREGADOR_VAZIO = { razao_social: '', nome_fantasia: '', cnpj: '', inscricao_estadual: '', endereco: '', cidade: '', uf: '', cep: '', responsavel_legal: '' };
 const UNIDADE_VAZIA = { nome: '', codigo: '', tipo: 'operacao', empregador_id: '', endereco: '', cidade: '', uf: '', cep: '', latitude: '', longitude: '', responsavel: '' };
 const CENTRO_VAZIO = { codigo: '', nome: '' };
 
@@ -26,7 +25,6 @@ function Conteudo() {
   const [unidades, setUnidades] = useState([]);
   const [centros, setCentros] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [fEmp, setFEmp] = useState(EMPREGADOR_VAZIO);
   const [fUni, setFUni] = useState(UNIDADE_VAZIA);
   const [fCc, setFCc] = useState(CENTRO_VAZIO);
 
@@ -45,16 +43,6 @@ function Conteudo() {
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
-
-  async function addEmpregador(e) {
-    e.preventDefault();
-    const { data: grupos } = await supabase.from('grupos').select('id').limit(1);
-    const payload = { ...fEmp, cnpj: fEmp.cnpj.replace(/\D/g, ''), grupo_id: grupos?.[0]?.id };
-    const { error } = await supabase.from('empregadores').insert([payload]);
-    if (error) { alert('Erro ao salvar empregador: ' + error.message); return; }
-    setFEmp(EMPREGADOR_VAZIO);
-    carregar();
-  }
 
   async function addUnidade(e) {
     e.preventDefault();
@@ -95,18 +83,9 @@ function Conteudo() {
           Pessoa jurídica que assina a carteira. As marcas do sistema (Steakhouse, Food Service…) são operações; o vínculo trabalhista do colaborador é com o empregador cadastrado aqui.
         </p>
         {isAdmin && (
-          <form onSubmit={addEmpregador} className="form-grid">
-            <div><label>Razão social</label><input required value={fEmp.razao_social} onChange={e => setFEmp({ ...fEmp, razao_social: e.target.value })} /></div>
-            <div><label>Nome fantasia</label><input value={fEmp.nome_fantasia} onChange={e => setFEmp({ ...fEmp, nome_fantasia: e.target.value })} /></div>
-            <div><label>CNPJ</label><input required value={formatarCnpj(fEmp.cnpj)} onChange={e => setFEmp({ ...fEmp, cnpj: e.target.value })} placeholder="00.000.000/0000-00" /></div>
-            <div><label>Inscrição estadual</label><input value={fEmp.inscricao_estadual} onChange={e => setFEmp({ ...fEmp, inscricao_estadual: e.target.value })} /></div>
-            <div><label>Endereço</label><input value={fEmp.endereco} onChange={e => setFEmp({ ...fEmp, endereco: e.target.value })} /></div>
-            <div><label>Cidade</label><input value={fEmp.cidade} onChange={e => setFEmp({ ...fEmp, cidade: e.target.value })} /></div>
-            <div><label>UF</label><input maxLength={2} value={fEmp.uf} onChange={e => setFEmp({ ...fEmp, uf: e.target.value.toUpperCase() })} /></div>
-            <div><label>CEP</label><input value={fEmp.cep} onChange={e => setFEmp({ ...fEmp, cep: e.target.value })} /></div>
-            <div><label>Responsável legal</label><input value={fEmp.responsavel_legal} onChange={e => setFEmp({ ...fEmp, responsavel_legal: e.target.value })} /></div>
-            <div><button className="btn" type="submit">Adicionar empregador</button></div>
-          </form>
+          <p className="muted" style={{ fontSize: 11.5, marginBottom: 12 }}>
+            Cadastro, dados fiscais e certificado A1 ficam em <a href="/empresas">Cadastros → Empresas (CNPJ)</a>.
+          </p>
         )}
         <div className="table-wrap" style={{ marginTop: 14 }}>
           <table>
@@ -121,7 +100,7 @@ function Conteudo() {
                   <td>{emp.ativo ? <span className="tag ok">Ativo</span> : <span className="tag bad">Inativo</span>}</td>
                   {isAdmin && <td><button className="btn secondary small" onClick={() => alternarAtivo('empregadores', emp)}>{emp.ativo ? 'Inativar' : 'Reativar'}</button></td>}
                 </tr>
-              )) : <tr className="empty-row"><td colSpan={6}>Nenhum empregador cadastrado.{isAdmin ? ' Cadastre o CNPJ real do grupo acima.' : ''}</td></tr>}
+              )) : <tr className="empty-row"><td colSpan={6}>Nenhum empregador cadastrado.{isAdmin ? ' Cadastre em Empresas (CNPJ).' : ''}</td></tr>}
             </tbody>
           </table>
         </div>
