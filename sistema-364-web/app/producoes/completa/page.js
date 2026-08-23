@@ -138,9 +138,26 @@ function Conteudo({ setFicha, setEtiqueta }) {
     carregar();
   }
 
-  async function excluir(id) {
+  async function excluir(pr) {
+    // Linha nascida de `fn_embalagem_gerar_producao` (ficha de embalagem
+    // finalizada, atualização 30) não pode ser apagada por aqui: nada no
+    // banco impede — a FK `producoes.embalagem_id` protege apagar a FICHA,
+    // não a produção, e não há trigger de delete em `producoes` — mas apagar
+    // quebraria o par "finalizar gera / cancelar desfaz" de um jeito
+    // irreconciliável: a ficha continuaria `finalizada` dizendo que gerou
+    // estoque, e cancelar depois rodaria `delete ... where embalagem_id =
+    // ...` sobre zero linhas, sem devolver nada. O botão já vem desabilitado
+    // com o motivo (ver `<button title=...>` abaixo); esta é a segunda trava,
+    // contra o clique chegar aqui por outro caminho.
+    if (pr.embalagem_id) {
+      alert('Este lote nasceu de uma ficha de embalagem finalizada — não pode ser excluído por aqui. Para desfazer, cancele a ficha de embalagem (aba Produções → Embalagem): é ela quem devolve o estoque.');
+      return;
+    }
     if (!confirm('Excluir este lote de produção? O consumo de matéria-prima será estornado.')) return;
-    const { error } = await supabase.from('producoes').delete().eq('id', id);
+    // `empresa_id` estava faltando aqui — sem ele, o delete não tinha o
+    // mesmo filtro de empresa que toda outra escrita do sistema, e dependia
+    // só da RLS para não apagar produção de empresa alheia.
+    const { error } = await supabase.from('producoes').delete().eq('id', pr.id).eq('empresa_id', empresaAtual.id);
     if (error) alert('Erro ao excluir: ' + error.message);
     carregar();
   }
@@ -240,7 +257,16 @@ function Conteudo({ setFicha, setEtiqueta }) {
                       <button className="btn secondary small" onClick={() => setModalEtq(pr)}>
                         {impressoes.some(i => i.source_id === pr.id) ? 'Reimprimir etiquetas' : 'Imprimir etiquetas'}
                       </button>
-                      <button className="btn danger" onClick={() => excluir(pr.id)}>Excluir</button>
+                      <button className="btn danger" disabled={!!pr.embalagem_id}
+                        title={pr.embalagem_id ? 'Nasceu de uma ficha de embalagem finalizada — cancele a ficha (Produções → Embalagem) para devolver o estoque' : undefined}
+                        onClick={() => excluir(pr)}>Excluir</button>
+                      {/* Motivo visível sem precisar do hover no title — mesmo
+                          espírito do <option disabled> do produto rastreado,
+                          acima: sumir (ou só desabilitar em silêncio) gera
+                          chamado. */}
+                      {pr.embalagem_id && (
+                        <span className="tag" style={{ fontSize: 10.5 }}>via ficha de embalagem</span>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -167,6 +167,11 @@ export default function ModalEtiquetas({
             <select value={modeloEfetivo} disabled>
               <option value="validade-cozinha">Validade Cozinha (50×30 mm)</option>
               <option value="recebimento">Recebimento (50×30 mm)</option>
+              {/* Fase 3 do controle de lote (Task 6): sem esta opção, o valor
+                  'producao-lote' não batia com nenhuma <option> e o <select>
+                  desabilitado renderizava em branco — não muda o que é
+                  gravado nem impresso, só a conferência visual do modal. */}
+              <option value="producao-lote">Produção (lote) (50×30 mm)</option>
             </select>
           </div>
           <div><label>Impressora</label>
@@ -197,6 +202,24 @@ export default function ModalEtiquetas({
                 <div style={{ fontSize: 11 }}>Forn.: {dadosEtiqueta.fornecedor}</div>
                 <div style={{ fontSize: 11 }}>NF {dadosEtiqueta.notaFiscal} · vol. {volumeInicial}/{dadosEtiqueta.volumesTotal || copias}</div>
               </>
+            ) : modeloEfetivo === 'producao-lote' ? (
+              // Fase 3 (Task 6): mesmos campos que EtiquetaPrint.ProducaoLote
+              // realmente imprime — produto, lote, fabricação e validade, com
+              // o QR já resolvido em `dados.qrSvg` (a tela chamadora resolve
+              // ANTES de abrir o modal). Sem este ramo, o "Visualizar" caía no
+              // genérico abaixo e mostrava "Produção: —" sem lote nem QR —
+              // divergente do que sai impresso.
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>{dadosEtiqueta.produto}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace', margin: '2px 0' }}>LOTE {dadosEtiqueta.lote}</div>
+                  <div style={{ fontSize: 11 }}>Fab. {fmtDate(dadosEtiqueta.fabricacao)}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>VAL {fmtDate(dadosEtiqueta.validade)}</div>
+                </div>
+                {dadosEtiqueta.qrSvg && (
+                  <div style={{ width: 60, flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: dadosEtiqueta.qrSvg }} />
+                )}
+              </div>
             ) : (
               <>
                 <div style={{ fontSize: 10, textTransform: 'uppercase' }}>{dadosEtiqueta.empresa}{dadosEtiqueta.unidade ? ` · ${dadosEtiqueta.unidade}` : ''}</div>
