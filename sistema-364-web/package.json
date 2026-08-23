@@ -10,7 +10,8 @@
     "lint": "next lint",
     "test": "node --test tests/*.test.mjs",
     "verify": "npm run test && npm run build",
-    "backup": "bash scripts/backup-364.sh"
+    "backup": "bash scripts/backup-364.sh",
+    "importar-pdv": "node scripts/importar-pdv-consumer.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
