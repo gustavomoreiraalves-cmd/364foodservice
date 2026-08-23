@@ -91,3 +91,20 @@ test('erro 500 é tentado três vezes antes de falhar', async () => {
   assert.deepEqual(linhas, []);
   assert.equal(n, 3);
 });
+
+test('erro de rede (fetch rejeitado) é tentado três vezes antes de resolver', async () => {
+  let n = 0;
+  const f = fetchFalso({ '/Financeiro/GetRecebimentos': () => { n++; if (n < 3) throw new Error('ECONNRESET'); return { body: { recordsTotal: 0, data: [] } }; } });
+  const c = criarClienteConnect({ cookie: 'x', fetch: f, pausaMs: 0, dormir: async () => {} });
+  const linhas = await c.listar('/Financeiro/GetRecebimentos', COLUNAS.recebimentos);
+  assert.deepEqual(linhas, []);
+  assert.equal(n, 3);
+});
+
+test('erro de rede persistente propaga depois de três tentativas', async () => {
+  let n = 0;
+  const f = fetchFalso({ '/Financeiro/GetRecebimentos': () => { n++; throw new Error('ECONNRESET'); } });
+  const c = criarClienteConnect({ cookie: 'x', fetch: f, pausaMs: 0, dormir: async () => {} });
+  await assert.rejects(() => c.listar('/Financeiro/GetRecebimentos', COLUNAS.recebimentos), /ECONNRESET/);
+  assert.equal(n, 3);
+});

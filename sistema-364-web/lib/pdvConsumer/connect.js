@@ -54,17 +54,25 @@ export function criarClienteConnect({ cookie, fetch = globalThis.fetch, base = '
     let ultimoErro;
     for (let tentativa = 1; tentativa <= 3; tentativa++) {
       if (pausaMs) await esperar(pausaMs);
-      const resp = await fetch(base + caminho, {
-        method,
-        headers: cabecalhos(body !== undefined ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
-        body,
-        redirect: 'follow',
-      });
-      const texto = await resp.text();
-      if (pareceLogin(resp, texto)) throw new SessaoExpiradaError();
-      if (resp.ok) return texto;
-      ultimoErro = new Error(`Connect ${method} ${caminho} respondeu ${resp.status}`);
-      await esperar(500 * tentativa);
+      try {
+        const resp = await fetch(base + caminho, {
+          method,
+          headers: cabecalhos(body !== undefined ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+          body,
+          redirect: 'follow',
+        });
+        const texto = await resp.text();
+        if (pareceLogin(resp, texto)) throw new SessaoExpiradaError();
+        if (resp.ok) return texto;
+        ultimoErro = new Error(`Connect ${method} ${caminho} respondeu ${resp.status}`);
+      } catch (e) {
+        // Sessão expirada é definitivo: não adianta tentar de novo, escapa na hora.
+        if (e instanceof SessaoExpiradaError) throw e;
+        // Qualquer outro erro (fetch rejeitado por DNS/conexão/timeout, etc.)
+        // conta como tentativa falha, igual a uma resposta HTTP de erro.
+        ultimoErro = e;
+      }
+      if (tentativa < 3) await esperar(500 * tentativa);
     }
     throw ultimoErro;
   }
