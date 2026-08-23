@@ -23,10 +23,11 @@ import { FUSO_MS } from '../lib/pdvConsumer/parse.js';
 // Carrega .env.local sem depender de pacote: linha CHAVE=valor, aspas opcionais.
 function carregarEnv(arquivo) {
   if (!fs.existsSync(arquivo)) return;
-  for (const linha of fs.readFileSync(arquivo, 'utf8').split('\n')) {
+  for (const linhaBruta of fs.readFileSync(arquivo, 'utf8').split('\n')) {
+    const linha = linhaBruta.replace(/\r$/, '');
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(linha);
     if (!m || linha.trim().startsWith('#')) continue;
-    let v = m[2];
+    let v = m[2].trimEnd();
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
     if (process.env[m[1]] === undefined) process.env[m[1]] = v;
   }
@@ -77,9 +78,15 @@ function bancoSupabase() {
       if (pagamentos.length) falhou((await sb.from('pdv_pagamentos').insert(pagamentos.map(p => ({ ...p, pedido_id: pedidoId })))).error, 'inserir pagamentos');
     },
     async caixasExistentes(empresaId, codigos) {
-      const { data, error } = await sb.from('pdv_caixas').select('id, codigo, status').eq('empresa_id', empresaId).in('codigo', codigos);
-      falhou(error, 'caixasExistentes');
-      return new Map((data || []).map(c => [c.codigo, c]));
+      const mapa = new Map();
+      for (let i = 0; i < codigos.length; i += 500) {
+        const { data, error } = await sb.from('pdv_caixas')
+          .select('id, codigo, status')
+          .eq('empresa_id', empresaId).in('codigo', codigos.slice(i, i + 500));
+        falhou(error, 'caixasExistentes');
+        for (const c of data || []) mapa.set(c.codigo, c);
+      }
+      return mapa;
     },
     async gravarCaixa({ caixa, movimentos }) {
       const { data, error } = await sb.from('pdv_caixas').upsert(caixa, { onConflict: 'empresa_id,codigo' }).select('id').single();
@@ -124,13 +131,13 @@ async function main() {
   const cliente = criarClienteConnect({ cookie });
   const banco = dryRun ? bancoSeco() : bancoSupabase();
   let statusGeral = 'ok';
-  const resumo = [];
 
   for (const loja of alvo) {
     console.log(`\n${loja.nome_connect}`);
     let logId = null;
     if (!dryRun) {
-      const { data } = await sb.from('pdv_importacoes').insert({ empresa_id: loja.empresa_id, janela_inicio: de, janela_fim: ate }).select('id').single();
+      const { data, error } = await sb.from('pdv_importacoes').insert({ empresa_id: loja.empresa_id, janela_inicio: de, janela_fim: ate }).select('id').single();
+      falhou(error, 'pdv_importacoes insert');
       logId = data?.id;
     }
     try {
@@ -139,12 +146,17 @@ async function main() {
       r.avisos.forEach(a => console.warn('  aviso: ' + a));
       const status = r.avisos.length ? 'parcial' : 'ok';
       if (status === 'parcial') statusGeral = 'parcial';
-      resumo.push({ loja: loja.nome_connect, ...r });
-      if (logId) await sb.from('pdv_importacoes').update({ terminado_em: new Date().toISOString(), status, pedidos: r.pedidos, caixas: r.caixas, recebimentos: r.recebimentos, itens_dia: r.itensDia, detalhes: { avisos: r.avisos } }).eq('id', logId);
+      if (logId) {
+        const { error } = await sb.from('pdv_importacoes').update({ terminado_em: new Date().toISOString(), status, pedidos: r.pedidos, caixas: r.caixas, recebimentos: r.recebimentos, itens_dia: r.itensDia, detalhes: { avisos: r.avisos } }).eq('id', logId);
+        if (error) { console.error('  ERRO ao gravar pdv_importacoes: ' + error.message); statusGeral = 'erro'; }
+      }
     } catch (e) {
       console.error(`  ERRO: ${e.message}`);
       statusGeral = 'erro';
-      if (logId) await sb.from('pdv_importacoes').update({ terminado_em: new Date().toISOString(), status: 'erro', erro: e.message }).eq('id', logId);
+      if (logId) {
+        const { error } = await sb.from('pdv_importacoes').update({ terminado_em: new Date().toISOString(), status: 'erro', erro: e.message }).eq('id', logId);
+        if (error) console.error('  ERRO ao gravar pdv_importacoes: ' + error.message);
+      }
       if (e instanceof SessaoExpiradaError) break; // as outras lojas vão falhar igual
     }
   }
