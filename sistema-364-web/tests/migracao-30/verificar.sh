@@ -44,6 +44,24 @@ case "$mina" in
   *) echo "o fixture deveria reproduzir o trigger antigo quebrado; psql respondeu: $mina"; exit 1 ;;
 esac
 
+# A segunda mina, mesma técnica: a tela da Fase 2 (já no ar) manda `null` em
+# perda, sobra e peso defumado quando o campo fica em branco, e as três colunas
+# são `not null` em produção. Salvar item de defumação sem esses campos estoura
+# 23502 (not_null_violation). Se este insert passar, o fixture parou de espelhar
+# produção e o cenário 4p não prova o conserto.
+defum=$(psql -tAq -d "$BANCO" <<'SQL' 2>&1 || true
+insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id,
+                             peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, empresa_id)
+  values ('8f8f8f8f-8f8f-8f8f-8f8f-8f8f8f8f8f8f', '33333333-3333-3333-3333-333333333333',
+          '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', 60, null, null, null,
+          '11111111-1111-1111-1111-111111111111');
+SQL
+)
+case "$defum" in
+  *23502*|*"null value in column"*) echo "OK: a ficha de defumação está quebrada no fixture (23502 nos campos opcionais)" ;;
+  *) echo "o fixture deveria recusar item de defumação com campo opcional em branco; psql respondeu: $defum"; exit 1 ;;
+esac
+
 # Recria o banco do zero. O `do` acima estoura como statement único, então o
 # `insert into embalagens` dele já volta atrás sozinho — refazer é cinto e
 # suspensório, para os cenários nunca herdarem sujeira da checagem da mina.
@@ -67,6 +85,19 @@ antigo=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_trigger where tgname 
 antiga_fn=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname = 'trigger_embalagem_para_producao';")
 [ "$antiga_fn" = "0" ] || { echo "a função antiga trigger_embalagem_para_producao continua no banco"; exit 1; }
 echo "OK: trigger e função antigos removidos"
+
+# E as três colunas opcionais da defumação precisam ter perdido o `not null` —
+# é o que faz a tela da Fase 2 voltar a gravar, e o que torna o filtro de
+# `fn_rendimento_defumacao` load-bearing. `peso_bruto_kg` continua obrigatório.
+opcionais=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.columns
+  where table_name = 'defumacao_itens'
+    and column_name in ('peso_final_kg','perda_limpeza_kg','sobra_kg')
+    and is_nullable = 'YES';")
+[ "$opcionais" = "3" ] || { echo "os três campos opcionais da defumação precisam aceitar nulo (achou $opcionais)"; exit 1; }
+bruto=$(psql -tAq -d "$BANCO" -c "select is_nullable from information_schema.columns
+  where table_name = 'defumacao_itens' and column_name = 'peso_bruto_kg';")
+[ "$bruto" = "NO" ] || { echo "peso_bruto_kg NÃO podia virar nulável — sem bruto não há o que custear"; exit 1; }
+echo "OK: campos opcionais da defumação aceitam nulo, peso bruto continua obrigatório"
 
 # Os cenários rodam como dono do banco, onde RLS não se aplica, então eles não
 # conseguem provar que as travas resistem a um usuário `authenticated`. O que dá

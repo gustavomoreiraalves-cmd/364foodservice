@@ -78,6 +78,37 @@
 -- finalizada), a FINALIZAÇÃO É RECUSADA com mensagem em português. Custo errado
 -- no estoque não avisa ninguém; recusa avisa.
 --
+-- ---------- E CONSERTA A FICHA DE DEFUMAÇÃO, QUE ESTÁ QUEBRADA ----------
+--
+-- Achado ao conferir o catálogo de produção para escrever o custo desta fase, e
+-- consertado aqui porque a Fase 3 depende do conserto: `defumacao_itens` tem
+-- `perda_limpeza_kg`, `sobra_kg` e `peso_final_kg` como NOT NULL, e a tela da
+-- Fase 2 — que já está no ar — manda `null` nos três quando o campo fica em
+-- branco (app/producoes/defumacao/[id]/page.js:415-417). Resultado: lançar item
+-- de defumação sem informar perda, sobra ou peso defumado é recusado pelo banco
+-- com 23502 cru, em inglês. E deixar esses campos em branco é o caso COMUM: o
+-- fluxo normal é pesar o bruto quando a carne entra no defumador e o defumado só
+-- horas depois.
+--
+-- O `not null` é que está fora de sincronia com o resto do sistema, e em três
+-- lugares independentes:
+--   • o check `defumacao_itens_pesos_coerentes` da atualização 29 é escrito com
+--     `peso_final_kg is null or ...` — foi desenhado para aceitar nulo;
+--   • `rendimentoDaFicha` (lib/defumacao.js) filtra item sem peso final, com
+--     comentário explicando que item não pesado é "ainda sem dado";
+--   • a própria tela oferece finalizar ficha com item não pesado, com aviso e
+--     caixa de confirmação ("Estou ciente e quero finalizar mesmo assim").
+--
+-- As colunas são anteriores às migrações versionadas (a tabela foi criada
+-- direto no banco), e o `not null` veio de lá. Esta migração o remove dos TRÊS
+-- campos opcionais. `peso_bruto_kg` continua obrigatório: `pesosValidos` exige
+-- bruto maior que zero, e sem ele não há o que custear.
+--
+-- Isso também é o que torna o filtro de `fn_rendimento_defumacao` (lá embaixo)
+-- load-bearing em vez de decorativo: item finalizado sem peso defumado passa a
+-- ser possível de verdade, e é exatamente o caso que inflaria o custo se o peso
+-- bruto dele entrasse no denominador do rendimento sozinho.
+--
 -- Idempotente: `add column if not exists`, `drop constraint if exists` e
 -- `create or replace`. Fichas já lançadas nascem em `rascunho`, com
 -- `recebimento_item_id` e `validade` nulos — nulo significa "ficha anterior à
@@ -345,6 +376,21 @@ drop trigger if exists trg_embalagens_bloquear_delete on public.embalagens;
 create trigger trg_embalagens_bloquear_delete
   before delete on public.embalagens
   for each row execute function public.fn_embalagens_bloquear_delete();
+
+-- ---------- CONSERTO DA FASE 2: OS CAMPOS OPCIONAIS DA DEFUMAÇÃO ----------
+-- Ver o cabeçalho. A tela da Fase 2 grava `null` nesses três campos quando o
+-- operador deixa em branco, e o `not null` da tabela original recusa o insert
+-- com 23502. `drop not null` é idempotente e não toca em nenhum dado: linha que
+-- já tem valor continua igual.
+--
+-- `peso_bruto_kg` fica de fora de propósito — continua obrigatório.
+
+alter table public.defumacao_itens alter column peso_final_kg drop not null;
+alter table public.defumacao_itens alter column perda_limpeza_kg drop not null;
+alter table public.defumacao_itens alter column sobra_kg drop not null;
+
+comment on column public.defumacao_itens.peso_final_kg is
+  'Peso defumado do item. NULO = ainda não pesado (o fluxo normal pesa o bruto na entrada e o defumado horas depois). Item sem este peso fica fora dos dois lados do cálculo de rendimento — ver fn_rendimento_defumacao e rendimentoDaFicha em lib/defumacao.js.';
 
 -- ---------- RENDIMENTO DA DEFUMAÇÃO ----------
 -- Quanto sobra de um quilo daquele lote depois de defumado: soma dos pesos
@@ -684,6 +730,17 @@ commit;
 -- `supabase/atualizacao_10_recebimento_itens.sql` — mas ele traz a função, não o
 -- trigger, que em produção foi criado fora das migrações versionadas.
 --
+-- O `not null` de `defumacao_itens.peso_final_kg`, `perda_limpeza_kg` e
+-- `sobra_kg` NÃO é restaurado, de propósito — mesmo raciocínio do check de
+-- `source_type` no rollback da atualização 28. Depois que a tela da Fase 2 voltar
+-- a funcionar, vão existir linhas com esses campos nulos, e `set not null`
+-- falharia no meio do rollback; pior, "consertar" isso apagando ou preenchendo
+-- essas linhas com zero seria inventar peso de processo sanitário para caber num
+-- rollback de schema. Rollback desfaz schema, não histórico. Se for mesmo
+-- necessário reapertar, primeiro decida o que fazer com as linhas nulas:
+--   select id, defumacao_id from defumacao_itens
+--    where peso_final_kg is null or perda_limpeza_kg is null or sobra_kg is null;
+--
 -- A RPC `registrar_impressao` volta ao formato da Fase 1 reaplicando
 -- `supabase/atualizacao_28_lote_recebimento.sql`, que é idempotente — não vale
 -- duplicar cem linhas de SQL aqui.
@@ -719,6 +776,7 @@ commit;
 -- -- `lote` é coluna anterior a esta migração; só o comentário que ela ganhou
 -- -- volta a nulo, a coluna em si fica.
 -- comment on column public.embalagens.lote is null;
+-- comment on column public.defumacao_itens.peso_final_kg is null;
 --
 -- alter table public.embalagens
 --   drop column if exists status,

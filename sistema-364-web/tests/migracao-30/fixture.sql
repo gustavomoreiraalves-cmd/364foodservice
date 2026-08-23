@@ -101,18 +101,16 @@ create table defumacao_itens (
   defumacao_id uuid not null references defumacoes(id) on delete cascade,
   materia_prima_id uuid not null references materias_primas(id),
   recebimento_item_id uuid references recebimento_itens(id),
+  -- Os quatro pesos `not null`, como estão na produção ANTES da 30 (conferido no
+  -- catálogo em 2026-08-23). É a segunda mina desta migração: a tela da Fase 2,
+  -- já no ar, manda `null` em perda, sobra e peso final quando o campo fica em
+  -- branco, e o banco recusa com 23502. O runner prova que o insert falha aqui e
+  -- passa depois da migração; o `peso_bruto_kg` continua obrigatório dos dois
+  -- lados.
   peso_bruto_kg numeric(12,4) not null,
-  -- NULÁVEL de propósito, e a única coluna deste fixture que NÃO copia a
-  -- produção de hoje (lá `peso_final_kg` é `not null`). Modela a forma que o
-  -- resto do sistema já assume: o check `defumacao_itens_pesos_coerentes` da
-  -- atualização 29 é escrito com `peso_final_kg is null or ...`, o
-  -- `rendimentoDaFicha` de lib/defumacao.js filtra item sem peso final, e a tela
-  -- da Fase 2 oferece finalizar assim mesmo, com aviso e caixa de confirmação.
-  -- O `not null` da produção é resquício da tabela original, criada fora das
-  -- migrações versionadas — é ele, e não o trigger, que hoje segura esse caso.
-  -- O fixture usa a forma permissiva para provar que o custo não infla se aquele
-  -- `not null` cair.
-  peso_final_kg numeric(12,4),
+  perda_limpeza_kg numeric(12,4) not null default 0,
+  sobra_kg numeric(12,4) not null default 0,
+  peso_final_kg numeric(12,4) not null,
   empresa_id uuid not null references empresas(id)
 );
 
@@ -361,9 +359,10 @@ insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quant
           '11111111-1111-1111-1111-111111111111');
 
 -- LOTE E — aprovado, R$ 20,00/kg, duas fornadas FINALIZADAS: uma pesada
--- (100 → 45) e outra finalizada sem peso defumado informado. O rendimento tem
--- que sair só da pesada (0,45). Somando o bruto da não pesada no denominador,
--- cairia para 45 ÷ 160 = 0,28125 e o custo subiria 60% sem erro nenhum.
+-- (100 → 45) e outra finalizada sem peso defumado, lançada no cenário 4p. O
+-- rendimento tem que sair só da pesada (0,45). Somando o bruto da não pesada no
+-- denominador, cairia para 45 ÷ 160 = 0,28125 e o custo subiria 60% sem erro
+-- nenhum.
 insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
   values ('6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', '55555555-5555-5555-5555-555555555555',
           '33333333-3333-3333-3333-333333333333', 'LT-260822-006', 200, 20.00,
@@ -408,6 +407,8 @@ insert into defumacoes (id, lote, responsavel_id, empresa_id, status) values
    '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada'),
   ('8f8f8f8f-8f8f-8f8f-8f8f-8f8f8f8f8f8f', 'DEF-260822-008',
    '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada');
+-- A ficha DEF-260822-008 nasce vazia de propósito: o item dela (fornada sem peso
+-- defumado) só pode ser lançado depois da migração — ver o cenário 4p.
 
 insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id, peso_bruto_kg, peso_final_kg, empresa_id) values
   -- Lote A, fornadas finalizadas.
@@ -434,12 +435,11 @@ insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id
    '67676767-6767-6767-6767-676767676767', 20, 9, '11111111-1111-1111-1111-111111111111'),
   -- Lote E, fornada finalizada e PESADA: 100 kg brutos renderam 45 kg.
   ('8e8e8e8e-8e8e-8e8e-8e8e-8e8e8e8e8e8e', '33333333-3333-3333-3333-333333333333',
-   '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', 100, 45, '11111111-1111-1111-1111-111111111111'),
-  -- Lote E, fornada FINALIZADA SEM PESO DEFUMADO. A atualização 29 permite (a
-  -- tela avisa e pede confirmação). Os 60 kg brutos não podem entrar no
-  -- denominador do rendimento sem um final correspondente no numerador.
-  ('8f8f8f8f-8f8f-8f8f-8f8f-8f8f8f8f8f8f', '33333333-3333-3333-3333-333333333333',
-   '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', 60, null, '11111111-1111-1111-1111-111111111111');
+   '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', 100, 45, '11111111-1111-1111-1111-111111111111');
+
+-- A segunda fornada do lote E — finalizada SEM peso defumado — não cabe aqui:
+-- neste ponto a coluna ainda é `not null`, como em produção. Ela é lançada no
+-- cenário 4p, depois da migração, que é o que prova o conserto.
 
 -- Ficha de embalagem LEGADA, anterior à 30: sem status, sem lote de origem no
 -- item, sem validade. Prova que a migração não quebra o que já está lançado.

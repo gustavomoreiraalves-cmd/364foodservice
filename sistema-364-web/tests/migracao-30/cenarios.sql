@@ -225,14 +225,27 @@ begin
     raise exception 'FALHA 4o: produto B tem item sem validade — a linha não podia prometer % ', v_validade;
   end if;
 
-  -- 4p: rendimento de lote cuja defumação foi FINALIZADA com item sem peso
-  -- defumado informado — caminho que a atualização 29 permite de propósito (a
-  -- tela da Fase 2 avisa e pede confirmação). O item não pesado tem que ficar
+  -- 4p: duas coisas de uma vez. Primeira, o conserto da Fase 2 — item de
+  -- defumação com perda, sobra e peso defumado em branco passa a ser aceito.
+  -- Segunda, o rendimento de um lote cuja defumação foi FINALIZADA com item sem
+  -- peso defumado — caminho que a atualização 29 e a tela da Fase 2 preveem (a
+  -- tela avisa e pede confirmação). O item não pesado tem que ficar
   -- fora dos DOIS lados da fração: o lote E tem uma fornada 100 → 45 e outra de
   -- 60 kg brutos sem peso final.
   --   certo  = 45 ÷ 100 = 0,45  →  9 kg ÷ 0,45 × R$ 20,00 = R$ 400,00
   --   errado = 45 ÷ 160 = 0,28125 →  9 kg ÷ 0,28125 × R$ 20,00 = R$ 640,00
   -- É a mesma regra de `rendimentoDaFicha` em lib/defumacao.js.
+  -- Primeiro o conserto da Fase 2: lançar item de defumação com perda, sobra e
+  -- peso defumado em branco. Antes da migração o banco recusava com 23502 (o
+  -- runner prova isso no fixture cru, antes de aplicar). É exatamente o payload
+  -- que a tela da Fase 2 manda — três `null` explícitos, não campos omitidos:
+  -- com `not null`, o default 0 não salva, porque o nulo vem escrito.
+  insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id,
+                               peso_bruto_kg, perda_limpeza_kg, sobra_kg, peso_final_kg, empresa_id)
+    values ('8f8f8f8f-8f8f-8f8f-8f8f-8f8f8f8f8f8f', '33333333-3333-3333-3333-333333333333',
+            '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b', 60, null, null, null,
+            '11111111-1111-1111-1111-111111111111');
+
   insert into embalagens (lote, data, empresa_id)
     values ('EMB-260822-905', current_date, '11111111-1111-1111-1111-111111111111') returning id into v_outra;
   insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
