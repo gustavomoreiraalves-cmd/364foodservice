@@ -141,7 +141,7 @@ create index if not exists embalagem_itens_recebimento_item_idx
 comment on column public.embalagem_itens.recebimento_item_id is
   'Lote de matéria-prima que originou este produto embalado. Nulo = ficha anterior à atualização 30.';
 comment on column public.embalagem_itens.validade is
-  'Validade calculada na finalização a partir da data da ficha e da regra de conservação do produto, e congelada aqui: mudar a regra depois não altera validade já impressa.';
+  'Validade do produto embalado, calculada pela tela a partir da data da ficha e da regra de conservação do produto, e gravada AINDA EM RASCUNHO: depois de finalizar, a imutabilidade impede corrigir o item. Congelada aqui para que mudar a regra depois não altere validade já impressa.';
 
 -- Quantidade embalada é contagem de UNIDADES: fração de embalagem não existe
 -- na etiqueta nem na prateleira. `peso_total_kg` aceita nulo (a coluna já era
@@ -356,9 +356,27 @@ create trigger trg_embalagens_bloquear_delete
 -- é o rendimento do lote inteiro. Só ficha FINALIZADA entra — rascunho ainda
 -- pode ter o peso corrigido, e um peso provisório viraria custo definitivo.
 --
--- Devolve NULO quando não há defumação finalizada (o `nullif` também cobre soma
--- de peso bruto zero). Quem chama trata nulo e zero da mesma forma: recusa a
--- finalização. Nunca devolve zero disfarçado de custo.
+-- Só entram na conta os itens que têm OS DOIS pesos. É a mesma regra de
+-- `rendimentoDaFicha` em lib/defumacao.js — as duas precisam continuar iguais,
+-- porque o número que a tela da Fase 2 mostra ao operador é o mesmo que custeia
+-- o produto aqui.
+--
+-- O motivo: `defumacao_itens.peso_final_kg` é NULÁVEL, e a atualização 29
+-- permite finalizar ficha com item ainda não pesado de propósito (a tela avisa e
+-- pede confirmação). Somar o bruto desse item sem o final correspondente infla o
+-- denominador sem contrapartida no numerador: o rendimento sai menor do que o
+-- real, a recusa (4) lá embaixo não dispara porque o número é positivo, e o
+-- custo entra inflado, em silêncio. Com uma fornada de 100/50 e outra de 80 kg
+-- brutos sem peso final, o rendimento cairia de 0,50 para 0,2778 e o custo do
+-- produto subiria 62% sem erro nenhum.
+--
+-- Item não pesado não é "rendimento zero", é "ainda sem dado": fica fora dos
+-- dois lados da fração. O que sobra é a melhor estimativa disponível, e não
+-- deixa produto que existe fisicamente sem poder ser embalado.
+--
+-- Devolve NULO quando não há nenhuma fornada finalizada E pesada (o `nullif`
+-- também cobre soma de peso bruto zero). Quem chama trata nulo e zero da mesma
+-- forma: recusa a finalização. Nunca devolve zero disfarçado de custo.
 --
 -- É uma função à parte, e não a mesma subconsulta escrita duas vezes, porque a
 -- checagem que RECUSA e a conta que CUSTEIA precisam usar exatamente o mesmo
@@ -378,10 +396,23 @@ language sql stable security definer set search_path = public as $$
    where di.recebimento_item_id = p_recebimento_item_id
      and di.empresa_id = p_empresa_id
      and d.status = 'finalizada'
+     -- Os dois pesos, ou nenhum dos dois lados da fração. Ver o comentário
+     -- acima e `rendimentoDaFicha` em lib/defumacao.js.
+     and di.peso_final_kg is not null
+     and di.peso_bruto_kg is not null
 $$;
 
 comment on function public.fn_rendimento_defumacao(uuid, uuid) is
-  'Rendimento agregado da defumação de um lote (peso final ÷ peso bruto, só fichas finalizadas). Nulo quando não há defumação finalizada. Base do custo do produto embalado na atualização 30.';
+  'Rendimento agregado da defumação de um lote (peso final ÷ peso bruto, só fichas finalizadas e só itens com os dois pesos, igual a rendimentoDaFicha em lib/defumacao.js). Nulo quando não há fornada finalizada e pesada. Base do custo do produto embalado na atualização 30.';
+
+-- Diferente das quatro funções de trigger, esta é chamável direto por qualquer
+-- um que saiba dois UUIDs — e, como `security definer`, ela ignora a policy por
+-- empresa de `defumacoes`/`defumacao_itens`, que é justamente o que ela precisa
+-- fazer para o trigger funcionar. Sem o `revoke`, isso vira um vazamento: o
+-- rendimento (e portanto a produtividade) de qualquer empresa do grupo sai por
+-- um `select`. Mesmo padrão de `registrar_marcacao` na atualização 12. O
+-- trigger continua chamando normalmente: ele roda como definer, dono da função.
+revoke execute on function public.fn_rendimento_defumacao(uuid, uuid) from public, anon, authenticated;
 
 -- ---------- O TRIGGER REESCRITO ----------
 -- Reescrito. A versão anterior disparava `after insert on embalagem_itens` e

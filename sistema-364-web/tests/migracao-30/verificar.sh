@@ -79,6 +79,17 @@ definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname i
 [ "$definer" = "5" ] || { echo "as cinco funções da migração precisam ser security definer (achou $definer)"; exit 1; }
 echo "OK: funções em security definer"
 
+# `fn_rendimento_defumacao` é a única das cinco que NÃO é função de trigger: é
+# chamável direto, e como definer ela ignora a policy por empresa — que é
+# exatamente o que ela precisa fazer para o trigger funcionar. Sem o `revoke`,
+# quem souber dois UUIDs lê o rendimento (e a produtividade) de qualquer empresa
+# do grupo.
+for papel in anon authenticated public; do
+  pode=$(psql -tAq -d "$BANCO" -c "select has_function_privilege('$papel', 'public.fn_rendimento_defumacao(uuid,uuid)', 'execute');")
+  [ "$pode" = "f" ] || { echo "$papel ainda pode executar fn_rendimento_defumacao — falta o revoke"; exit 1; }
+done
+echo "OK: fn_rendimento_defumacao não é chamável por anon/authenticated"
+
 # O rollback vive comentado no fim da migração; extrai e aplica para provar que
 # é SQL válido e que desfaz o que a migração criou.
 sed -n '/^-- begin;/,/^-- commit;/p' "$MIGRACAO" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"

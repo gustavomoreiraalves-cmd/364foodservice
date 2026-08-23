@@ -105,7 +105,7 @@ end $$;
 --
 -- Os números do fixture foram escolhidos para que cada fórmula errada dê um
 -- resultado diferente destes:
---   • `peso × custo` (sem o rendimento):        A = R$ 555,20
+--   • `peso × custo` (sem o rendimento):        A = R$ 556,20
 --   • `unidades × ficha_tecnica × custo`:       A = R$ 660,60
 --   • rendimento só da primeira fornada (0,50): A = R$ 1.058,40
 --   • rendimento contando o rascunho (0,505):   A = R$ 1.050,58
@@ -223,6 +223,26 @@ begin
   -- prazo para unidades que não têm. `min` sozinho ignoraria o nulo.
   if v_validade is not null then
     raise exception 'FALHA 4o: produto B tem item sem validade — a linha não podia prometer % ', v_validade;
+  end if;
+
+  -- 4p: rendimento de lote cuja defumação foi FINALIZADA com item sem peso
+  -- defumado informado — caminho que a atualização 29 permite de propósito (a
+  -- tela da Fase 2 avisa e pede confirmação). O item não pesado tem que ficar
+  -- fora dos DOIS lados da fração: o lote E tem uma fornada 100 → 45 e outra de
+  -- 60 kg brutos sem peso final.
+  --   certo  = 45 ÷ 100 = 0,45  →  9 kg ÷ 0,45 × R$ 20,00 = R$ 400,00
+  --   errado = 45 ÷ 160 = 0,28125 →  9 kg ÷ 0,28125 × R$ 20,00 = R$ 640,00
+  -- É a mesma regra de `rendimentoDaFicha` em lib/defumacao.js.
+  insert into embalagens (lote, data, empresa_id)
+    values ('EMB-260822-905', current_date, '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
+    values (v_outra, '44444444-4444-4444-4444-444444444444', '6b6b6b6b-6b6b-6b6b-6b6b-6b6b6b6b6b6b',
+            20, 9, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  update embalagens set status = 'finalizada' where id = v_outra;
+
+  select custo_total into v_custo from producoes where embalagem_id = v_outra;
+  if v_custo <> 400.00 then
+    raise exception 'FALHA 4p: a fornada finalizada sem peso defumado inflou o custo — esperava 400,00, achou %', v_custo;
   end if;
 
   raise notice 'OK 4: finalizar gera uma producao por produto, custeada lote a lote pelo rendimento';
