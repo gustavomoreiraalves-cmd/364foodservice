@@ -1,0 +1,42 @@
+[
+  {
+    "CODIGO": 9025,
+    "CODIGOCAIXA": 1503,
+    "TIPO": "D",
+    "VALORENTRADA": null,
+    "VALORSAIDA": 30.0,
+    "DATAOPERACAO": "2026-06-20 19:43:21.955",
+    "OBSERVACAO": null,
+    "FORMA": "Dinheiro"
+  },
+  {
+    "CODIGO": 9256,
+    "CODIGOCAIXA": 1536,
+    "TIPO": "A",
+    "VALORENTRADA": 300.0,
+    "VALORSAIDA": null,
+    "DATAOPERACAO": "2026-07-25 20:16:32.744",
+    "OBSERVACAO": null,
+    "FORMA": "Dinheiro"
+  },
+  {
+    "CODIGO": 9371,
+    "CODIGOCAIXA": 1561,
+    "TIPO": "E",
+    "VALORENTRADA": null,
+    "VALORSAIDA": 119.8,
+    "DATAOPERACAO": "2026-08-21 19:17:43.799",
+    "OBSERVACAO": "O usuário Caixa excluiu um pagamento do pedido 75096 pertencente a esse caixa. | O usuário 2 excluiu um pagamento do pedido 75096 pertencente a esse caixa.",
+    "FORMA": "Cartão de Débito"
+  },
+  {
+    "CODIGO": 9380,
+    "CODIGOCAIXA": 1562,
+    "TIPO": "S",
+    "VALORENTRADA": null,
+    "VALORSAIDA": 450.0,
+    "DATAOPERACAO": "2026-08-22 23:06:28.229",
+    "OBSERVACAO": null,
+    "FORMA": "Dinheiro"
+  }
+]

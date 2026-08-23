@@ -1,0 +1,58 @@
+[
+  {
+    "CODIGO": 101300,
+    "CODIGOPEDIDO": 75088,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 55.0,
+    "DATAPAGAMENTO": "2026-08-21 19:19:56.690",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": 1,
+    "OBSERVACAO": null,
+    "FORMA": "Cartão de Crédito",
+    "OPERADORA": "Mastercard",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101301,
+    "CODIGOPEDIDO": 75088,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 57.97,
+    "DATAPAGAMENTO": "2026-08-21 19:20:04.001",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": 1,
+    "OBSERVACAO": null,
+    "FORMA": "Cartão de Crédito",
+    "OPERADORA": "Mastercard",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101295,
+    "CODIGOPEDIDO": 75089,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 139.6,
+    "DATAPAGAMENTO": "2026-08-21 18:37:37.586",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": null,
+    "OBSERVACAO": "Levar Máquina - Lanç. Aut.",
+    "FORMA": "Cartão de Crédito",
+    "OPERADORA": "Mastercard",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101384,
+    "CODIGOPEDIDO": 75162,
+    "CODIGOCAIXA": 1562,
+    "VALOR": 19.9,
+    "DATAPAGAMENTO": "2026-08-22 19:24:35.998",
+    "DATACREDITO": "2026-08-22 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": 1,
+    "OBSERVACAO": null,
+    "FORMA": "Dinheiro",
+    "OPERADORA": null,
+    "CATEGORIA": "Recebimento - Vendas"
+  }
+]

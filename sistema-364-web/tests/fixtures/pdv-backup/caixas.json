@@ -1,0 +1,22 @@
+[
+  {
+    "CODIGO": 1561,
+    "DATAABERTURA": "2026-08-21 17:40:14.587",
+    "DATAFECHAMENTO": "2026-08-21 23:47:18.541",
+    "SALDOINICIAL": 178.6,
+    "SALDOFINAL": 7902.13,
+    "SALDOFINALINFORMADO": null,
+    "USUARIO": "Caixa",
+    "OBSERVACAO": "Aberto às 17:39 por Caixa"
+  },
+  {
+    "CODIGO": 1562,
+    "DATAABERTURA": "2026-08-22 17:39:09.837",
+    "DATAFECHAMENTO": "2026-08-22 23:51:05.556",
+    "SALDOINICIAL": 178.6,
+    "SALDOFINAL": 10273.94,
+    "SALDOFINALINFORMADO": null,
+    "USUARIO": "Caixa",
+    "OBSERVACAO": "Aberto às 17:38 por Caixa"
+  }
+]

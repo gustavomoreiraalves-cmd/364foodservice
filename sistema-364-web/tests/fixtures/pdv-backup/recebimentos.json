@@ -1,0 +1,72 @@
+[
+  {
+    "CODIGO": 101295,
+    "CODIGOPEDIDO": 75089,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 139.6,
+    "DATAPAGAMENTO": "2026-08-21 18:37:37.586",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": null,
+    "OBSERVACAO": "Levar Máquina - Lanç. Aut.",
+    "FORMA": "Cartão de Crédito",
+    "OPERADORA": "Mastercard",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101303,
+    "CODIGOPEDIDO": 75099,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 135.6,
+    "DATAPAGAMENTO": "2026-08-21 19:31:27.808",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": null,
+    "OBSERVACAO": "Lanç. Aut.",
+    "FORMA": "Pix Manual",
+    "OPERADORA": "(69)90000-0000",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101307,
+    "CODIGOPEDIDO": 75107,
+    "CODIGOCAIXA": 1561,
+    "VALOR": 9.22,
+    "DATAPAGAMENTO": "2026-08-21 19:51:13.418",
+    "DATACREDITO": "2026-08-21 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": null,
+    "OBSERVACAO": "Pago Online - Lanç. Aut.",
+    "FORMA": "iFood Online",
+    "OPERADORA": "Voucher",
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101384,
+    "CODIGOPEDIDO": 75162,
+    "CODIGOCAIXA": 1562,
+    "VALOR": 19.9,
+    "DATAPAGAMENTO": "2026-08-22 19:24:35.998",
+    "DATACREDITO": "2026-08-22 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": 1,
+    "OBSERVACAO": null,
+    "FORMA": "Dinheiro",
+    "OPERADORA": null,
+    "CATEGORIA": "Recebimento - Vendas"
+  },
+  {
+    "CODIGO": 101401,
+    "CODIGOPEDIDO": 75182,
+    "CODIGOCAIXA": 1562,
+    "VALOR": 42.9,
+    "DATAPAGAMENTO": "2026-08-22 20:06:03.192",
+    "DATACREDITO": "2026-08-22 00:00:00.000",
+    "PERCENTUALTAXA": 0.0,
+    "NROPARCELA": null,
+    "OBSERVACAO": "Levar Máquina - Lanç. Aut.",
+    "FORMA": "Vale Alimentação",
+    "OPERADORA": "Alelo",
+    "CATEGORIA": "Recebimento - Vendas"
+  }
+]
