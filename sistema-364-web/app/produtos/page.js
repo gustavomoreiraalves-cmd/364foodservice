@@ -7,7 +7,7 @@ import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { camposDoFormulario, mensagemAoAlternarAtivo } from '../../lib/cadastro';
 
-const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false };
+const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false, rastreado: false };
 
 const CUSTO_INVALIDO = 'Custo inválido. Informe um número igual ou maior que zero (ex.: 45,50), sem separador de milhar. Deixe em branco para usar o custo da ficha técnica.';
 
@@ -79,6 +79,7 @@ function Conteudo() {
         ? 90
         : Number(formProd.validade_dias),
       producao_interna: !!formProd.producao_interna,
+      rastreado: !!formProd.rastreado,
     };
 
     setSalvando(true);
@@ -236,6 +237,15 @@ function Conteudo() {
             <input type="checkbox" checked={formProd.producao_interna} onChange={e => setFormProd({ ...formProd, producao_interna: e.target.checked })} />
             Produto de produção interna
           </label></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={formProd.rastreado} onChange={e => setFormProd({ ...formProd, rastreado: e.target.checked })} />
+              Produto rastreado (entra no estoque pela ficha de embalagem)
+            </label>
+            <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+              Marcado, este produto passa a entrar no estoque só pela ficha de embalagem — a Produção Completa recusa lançá-lo.
+            </p>
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <button className="btn" type="submit" disabled={salvando}>
               {salvando ? 'Salvando…' : (editandoProduto ? 'Salvar alterações' : 'Adicionar produto')}
@@ -268,6 +278,7 @@ function Conteudo() {
                 <div>
                   <b>{p.codigo}</b> — {p.nome} <span className="muted">({p.categoria || 'sem categoria'})</span>
                   {p.producao_interna && <span style={{ marginLeft: 8, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--amber-bright)', border: '1px solid var(--amber)', borderRadius: 4, padding: '2px 6px' }}>Produção interna</span>}
+                  {p.rastreado && <span className="tag ok" style={{ marginLeft: 8 }} title="Entra no estoque só pela ficha de embalagem">Rastreado</span>}
                   {p.ativo === false && <span className="tag warn" style={{ marginLeft: 8 }}>inativo</span>}
                 </div>
                 <div className="row-actions">

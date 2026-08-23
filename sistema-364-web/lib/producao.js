@@ -92,3 +92,40 @@ export function inputLocalParaIso(valor) {
   const d = new Date(valor);
   return isNaN(d) ? null : d.toISOString();
 }
+
+// Busca linhas de `tabela` cujo `coluna` está entre `ids`, em blocos de
+// `tamanhoBloco` (padrão 100). Extraído da ficha de defumação
+// (`carregarItensDeDefumacaoDosLotes`, app/producoes/defumacao/[id]/page.js):
+// a ficha de embalagem precisa do MESMO mecanismo duas vezes — uma para saber
+// quanto cada lote já rendeu de defumação, outra para saber quanto dele já foi
+// embalado —, e as duas cópias locais ficariam idênticas exceto pela tabela e
+// pelas colunas. `supabase` entra por parâmetro em vez de importado aqui: este
+// arquivo é lógica pura do módulo Produção, sem efeito colateral próprio.
+//
+// Cada uuid custa ~39 caracteres no query string do `.in(...)`; uma lista
+// grande de lotes estoura o limite de tamanho de URL do gateway antes de
+// chegar no PostgREST — por isso os blocos, não um `.in()` só. Cada bloco
+// ainda pede `order('id')` e `limit` explícitos: sem ordem determinística, um
+// corte no teto do Supabase (`limitePorBloco`, default 1000 linhas)
+// devolveria um subconjunto arbitrário a cada carga. `estourouTeto` avisa o
+// chamador quando algum bloco bateu nesse teto — nesse caso o resultado está
+// faltando linhas, e quem calcula saldo em cima dele precisa saber que o
+// saldo mostrado pode estar MAIOR que o real (consumo faltando é descontado a
+// menos).
+export async function buscarPorIdsEmBlocos(supabase, { tabela, coluna, empresaId, ids, selectStr, tamanhoBloco = 100, limitePorBloco = 1000 }) {
+  if (!ids.length) return { data: [], error: null, estourouTeto: false };
+  const blocos = [];
+  for (let i = 0; i < ids.length; i += tamanhoBloco) blocos.push(ids.slice(i, i + tamanhoBloco));
+  const respostas = await Promise.all(blocos.map(bloco =>
+    supabase.from(tabela)
+      .select(selectStr)
+      .eq('empresa_id', empresaId)
+      .in(coluna, bloco)
+      .order('id')
+      .limit(limitePorBloco)
+  ));
+  const comErro = respostas.find(r => r.error);
+  if (comErro) return { data: [], error: comErro.error, estourouTeto: false };
+  const estourouTeto = respostas.some(r => (r.data || []).length >= limitePorBloco);
+  return { data: respostas.flatMap(r => r.data || []), error: null, estourouTeto };
+}

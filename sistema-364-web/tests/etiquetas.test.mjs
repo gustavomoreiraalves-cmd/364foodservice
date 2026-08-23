@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MODELOS, modelo, medidasImpressao, paginarEtiquetas, urlRastreio } from '../lib/etiquetas.js';
 
-test('MODELOS: só os dois modelos desta fase', () => {
-  assert.deepEqual(Object.keys(MODELOS).sort(), ['recebimento', 'validade-cozinha']);
+test('MODELOS: só os três modelos desta fase', () => {
+  assert.deepEqual(Object.keys(MODELOS).sort(), ['producao-lote', 'recebimento', 'validade-cozinha']);
 });
 
 test('modelo: devolve o modelo pedido', () => {
@@ -84,5 +84,17 @@ test('urlRastreio: prefixo com espaço ou barra também é escapado', () => {
 
 test('medidasImpressao: recebimento deriva o tamanho do QR do modelo', () => {
   const m = medidasImpressao('recebimento');
+  assert.equal(m.qrTamanho_mm, 16);
+});
+
+test('medidasImpressao: producao-lote usa a mesma geometria de rolo dos demais modelos', () => {
+  const m = medidasImpressao('producao-lote');
+  assert.equal(m.paginaLargura_mm, 108);
+  assert.equal(m.paginaAltura_mm, 32);
+  assert.equal(m.margemLateral_mm, 2.75);
+  assert.equal(m.etiquetaLargura_mm, 50);
+  assert.equal(m.etiquetaAltura_mm, 30);
+  assert.equal(m.gapColuna_mm, 2.5);
+  assert.equal(m.colunas, 2);
   assert.equal(m.qrTamanho_mm, 16);
 });

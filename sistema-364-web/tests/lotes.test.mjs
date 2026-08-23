@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// lib/format.js importa lib/supabase.js, que chama createClient no topo do
-// módulo e exige as variáveis de ambiente.
+// lib/format.js só importa lib/supabase.js sob demanda, dentro das funções
+// que batem no banco quando nenhum `cliente` de teste é passado — não mais
+// no topo do módulo. Aqui todo teste passa seu próprio cliente de fachada,
+// então isto é só precaução caso isso mude.
 process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'http://localhost:54321';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
 const { proximosLotes, proximoLote, mensagemAoGravarItemRecebido } = await import('../lib/format.js');
