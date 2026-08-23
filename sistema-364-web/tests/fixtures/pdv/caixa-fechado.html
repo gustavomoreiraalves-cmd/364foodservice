@@ -1,0 +1,183 @@
+<div class="modal-dialog modal-xl">
+<div class="modal-content">
+<div class="modal-header">
+<h4 class="modal-title">Detalhes do Caixa</h4>
+<button type="button" class="close" data-dismiss="modal">×</button>
+</div>
+<div class="modal-body">
+<div class="row">
+
+<div class="col-md-4">
+<small class="text-muted">ID</small>
+<h6>
+1561
+</h6>
+</div>
+
+<div class="col-md-4">
+<small class="text-muted">Usuário</small>
+<h6>
+Caixa
+</h6>
+</div>
+
+<div class="col-md-4">
+<small class="text-muted">Status</small>
+<h6>
+<span class="label label-success">Fechado</span>
+</h6>
+</div>
+
+<div class="col-md-4">
+<small class="text-muted">Abertura</small>
+<h6>
+21/08/2026 17:40:14
+</h6>
+<h6>R$ 178,60</h6>
+</div>
+
+<div class="col-md-4">
+<small class="text-muted">Total em Dinheiro</small>
+
+<h6>R$ 178,60</h6>
+</div>
+
+</div>
+
+<hr class="mt-2">
+
+<h4>Movimentações do Caixa</h4>
+<div class="table-responsive">
+<table id="table-movimentacoes-caixa" class="table no-wrap">
+<thead>
+<tr>
+<th id="th-operacao" style="cursor:pointer; white-space:nowrap;">
+Operação <i class="mdi mdi-filter-variant"></i>
+<div id="filtro-operacao-container" style="display:none; margin-top:4px;" onclick="event.stopPropagation()">
+<select id="filtro-operacao" class="form-control form-control-sm">
+<option value="">Todos</option>
+</select>
+</div>
+</th>
+<th id="th-origem" style="cursor:pointer; white-space:nowrap;">
+Origem <i class="mdi mdi-filter-variant"></i>
+</th>
+<th id="th-datahora" style="cursor:pointer; white-space:nowrap;">
+Data/Hora <i class="mdi mdi-filter-variant"></i>
+</th>
+<th id="th-entrada" style="cursor:pointer; white-space:nowrap;">
+Entrada <i class="mdi mdi-filter-variant"></i>
+</th>
+<th id="th-saida" style="cursor:pointer; white-space:nowrap;">
+Saída <i class="mdi mdi-filter-variant"></i>
+</th>
+<th id="th-meio" style="cursor:pointer; white-space:nowrap;">
+Meio <i class="mdi mdi-filter-variant"></i>
+</th>
+</tr>
+</thead>
+<tbody>
+<tr class="font-weight-bold">
+<td>Abertura</td>
+<td>Caixa</td>
+<td>21/08/2026 17:40:14</td>
+<td class="text-success">R$ 178,60</td>
+<td></td>
+<td>Diversos</td>
+</tr>
+
+<tr>
+<td>
+<a tabindex="0" href="#" role="button" data-toggle="popover" data-trigger="hover" title="Observações" data-content="Levar Máquina - Lanç. Aut.">Recebimento</a>
+</td>
+<td>Pedido 75089</td>
+<td>21/08/2026 18:37:37</td>
+<td class="text-success">R$ 139,60</td>
+<td class="text-danger"></td>
+<td>Cartão de Crédito Mastercard</td>
+</tr>
+<tr>
+<td>
+<a tabindex="0" href="#" role="button" data-toggle="popover" data-trigger="hover" title="Observações" data-content="Pago Online - Lanç. Aut.">Recebimento</a>
+</td>
+<td>Pedido 75090</td>
+<td>21/08/2026 18:42:57</td>
+<td class="text-success">R$ 136,09</td>
+<td class="text-danger"></td>
+<td>iFood Online Outros</td>
+</tr>
+<tr>
+<td>
+<a tabindex="0" href="#" role="button" data-toggle="popover" data-trigger="hover" title="Observações" data-content="Levar Máquina - Lanç. Aut.">Recebimento</a>
+</td>
+<td>Pedido 75091</td>
+<td>21/08/2026 18:49:28</td>
+<td class="text-success">R$ 129,70</td>
+<td class="text-danger"></td>
+<td>Cartão de Crédito Mastercard</td>
+</tr>
+<tr>
+<td>
+<a tabindex="0" href="#" role="button" data-toggle="popover" data-trigger="hover" title="Observações" data-content="Pago Online - Lanç. Aut.">Recebimento</a>
+</td>
+<td>Pedido 75092</td>
+<td>21/08/2026 18:51:13</td>
+<td class="text-success">R$ 111,65</td>
+<td class="text-danger"></td>
+<td>iFood Online Mastercard</td>
+</tr>
+<tr>
+<td>
+Recebimento </td>
+<td>Pedido 75088</td>
+<td>21/08/2026 19:19:56</td>
+<td class="text-success">R$ 55,00</td>
+<td class="text-danger"></td>
+<td>Cartão de Crédito Mastercard</td>
+</tr>
+<tr>
+<td>
+Sangria </td>
+<td>Caixa</td>
+<td>21/08/2026 21:00:00</td>
+<td class="text-success"></td>
+<td class="text-danger">R$ 100,00</td>
+<td>Dinheiro</td>
+</tr>
+<tr>
+<td>
+Recebimento </td>
+<td>Pedido 75120</td>
+<td>21/08/2026 21:46:28</td>
+<td class="text-success">R$ 87,89</td>
+<td class="text-danger"></td>
+<td>Vale Refeição Voucher</td>
+</tr>
+<tr>
+<td>
+Recebimento </td>
+<td>Pedido 75143</td>
+<td>21/08/2026 23:40:32</td>
+<td class="text-success">R$ 66,22</td>
+<td class="text-danger"></td>
+<td>Pix Manual (69)99280-1420</td>
+</tr>
+
+<tr class="font-weight-bold">
+<td>Saldo Atual</td>
+<td>Caixa</td>
+<td></td>
+<td class="text-success">R$ 7.902,13</td>
+<td></td>
+<td>Diversos</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div><!-- /.modal-content -->
+</div><!-- /.modal-dialog -->
+
+<script>
+(function () { /* filtros de coluna do painel — irrelevante para o parser */ })();
+</script>
