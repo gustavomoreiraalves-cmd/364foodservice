@@ -50,3 +50,11 @@ com rede às 05:00 (mesma condição do backup das 12:30).
 Compare um dia no painel (Dashboard → Valor Total Recebido, com o período
 ajustado para o dia) com a soma de `vw_pdv_vendas_dia` daquele dia. Diferença
 esperada: zero para dias com todos os pedidos finalizados.
+
+Confira também `vw_pdv_caixa_formas_dia` contra o painel (Financeiro →
+Recebimentos, total do dia): é a fonte da tabela "Caixa por forma de
+pagamento" da tela.
+
+> Se o total de recebimentos divergir, verifique se o painel filtra
+> Recebimentos por data de pagamento ou de crédito — a
+> `vw_pdv_caixa_formas_dia` agrupa por `dia_pagamento`.

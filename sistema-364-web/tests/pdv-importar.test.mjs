@@ -38,7 +38,7 @@ function bancoFalso({ pedidos = new Map(), caixas = new Map() } = {}) {
     async gravarPedido(p) { gravados.pedidos.push(p); },
     async caixasExistentes() { return caixas; },
     async gravarCaixa(c) { gravados.caixas.push(c); },
-    async gravarRecebimentos(l) { gravados.recebimentos.push(...l); },
+    async substituirRecebimentos(empresaId, de, ate, linhas) { gravados.recebimentos.push({ de, ate, n: linhas.length }); },
     async substituirItensDia(empresaId, dia, linhas) { gravados.itensDia.push({ dia, n: linhas.length }); },
   };
 }
@@ -71,7 +71,8 @@ test('importarLoja: banco vazio busca detalhe de pedido finalizado e grava tudo'
   assert.equal(banco.gravados.caixas.length, 2);
   assert.equal(banco.gravados.caixas.find(c => c.caixa.codigo === 1561).movimentos.length, 9);
 
-  assert.equal(banco.gravados.recebimentos.length, 3);
+  // recebimentos: uma única substituição da janela inteira
+  assert.deepEqual(banco.gravados.recebimentos, [{ de: '2026-08-21', ate: '2026-08-22', n: 3 }]);
 
   // itens por dia: um setPeriodo + produtosVendidos por dia da janela
   assert.deepEqual(banco.gravados.itensDia, [{ dia: '2026-08-21', n: 3 }, { dia: '2026-08-22', n: 3 }]);

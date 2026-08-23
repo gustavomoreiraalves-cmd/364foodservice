@@ -135,14 +135,9 @@ create table if not exists public.pdv_caixa_movimentos (
 create index if not exists pdv_caixa_movimentos_caixa_idx on public.pdv_caixa_movimentos (caixa_id);
 
 -- ---------- RECEBIMENTOS ----------
--- Única fonte com taxa e valor líquido. Sem chave própria no payload, então a
--- chave natural é a combinação que identifica um lançamento.
---
--- `unique nulls not distinct`, não `unique` puro: `pedido_codigo` (recebimento
--- avulso de caixa) e `operadora` (por exemplo, pagamentos em "Dinheiro") podem
--- vir nulos no payload. Com `unique` comum, dois nulos nunca são considerados
--- iguais e o upsert do importador (on conflict nesta mesma chave) duplicava a
--- linha a cada reimportação em vez de atualizar.
+-- Única fonte com taxa e valor líquido. Sem chave natural confiável no payload
+-- (parcelas iguais colidem): o importador apaga e regrava a janela de
+-- `dia_pagamento` a cada rodada.
 create table if not exists public.pdv_recebimentos (
   id uuid primary key default gen_random_uuid(),
   empresa_id uuid not null references public.empresas(id),
@@ -161,8 +156,7 @@ create table if not exists public.pdv_recebimentos (
   credito_em date,
   observacao text,
   origem_raw jsonb,
-  criado_em timestamptz not null default now(),
-  unique nulls not distinct (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, valor, pago_em)
+  criado_em timestamptz not null default now()
 );
 create index if not exists pdv_recebimentos_dia_idx on public.pdv_recebimentos (empresa_id, dia_pagamento);
 

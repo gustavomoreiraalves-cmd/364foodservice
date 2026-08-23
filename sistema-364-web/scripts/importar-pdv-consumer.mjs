@@ -94,12 +94,12 @@ function bancoSupabase() {
       falhou((await sb.from('pdv_caixa_movimentos').delete().eq('caixa_id', data.id)).error, 'apagar movimentos');
       if (movimentos.length) falhou((await sb.from('pdv_caixa_movimentos').insert(movimentos.map(m => ({ ...m, caixa_id: data.id })))).error, 'inserir movimentos');
     },
-    async gravarRecebimentos(linhas) {
+    // Sem chave natural (parcelas iguais colidem): apaga e regrava a janela.
+    async substituirRecebimentos(empresaId, de, ate, linhas) {
+      falhou((await sb.from('pdv_recebimentos').delete()
+        .eq('empresa_id', empresaId).gte('dia_pagamento', de).lte('dia_pagamento', ate)).error, 'apagar recebimentos da janela');
       for (let i = 0; i < linhas.length; i += 500) {
-        const { error } = await sb.from('pdv_recebimentos').upsert(linhas.slice(i, i + 500), {
-          onConflict: 'empresa_id,pedido_codigo,caixa_codigo,forma,operadora,valor,pago_em', ignoreDuplicates: false,
-        });
-        falhou(error, 'gravarRecebimentos');
+        falhou((await sb.from('pdv_recebimentos').insert(linhas.slice(i, i + 500))).error, 'inserir recebimentos');
       }
     },
     async substituirItensDia(empresaId, dia, linhas) {
@@ -116,7 +116,7 @@ function bancoSeco() {
     async gravarPedido() {},
     async caixasExistentes() { return new Map(); },
     async gravarCaixa() {},
-    async gravarRecebimentos() {},
+    async substituirRecebimentos() {},
     async substituirItensDia() {},
   };
 }

@@ -84,25 +84,37 @@ begin
   end;
 end $$;
 
--- Cenário 7: upsert de recebimento com pedido_codigo e operadora nulos (por
--- exemplo, pagamento em "Dinheiro") não duplica. `unique` comum não bastaria
--- aqui: dois nulos nunca são iguais para ele, e cada reimportação criaria uma
--- linha nova em vez de atualizar a existente.
+-- Cenário 7: sem chave natural, o importador substitui a janela inteira. Duas
+-- parcelas idênticas (mesmo pedido, forma, operadora nula, valor e pago_em)
+-- convivem; o delete por `dia_pagamento` limpa só o dia reimportado.
+-- O recebimento do cenário 5 também cai no dia 21 e é varrido pelo delete —
+-- por isso o total esperado ao fim é 3, e não 4.
 do $$
-declare n integer;
+declare n integer; n21 integer;
 begin
-  insert into pdv_recebimentos (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, forma_grupo, valor, valor_liquido, pago_em, dia_pagamento)
-    values ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', null, 1561, 'Dinheiro', null, 'dinheiro', 50, 50, '2026-08-21T23:10:00Z', '2026-08-21')
-  on conflict (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, valor, pago_em)
-    do update set valor_liquido = excluded.valor_liquido;
-  insert into pdv_recebimentos (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, forma_grupo, valor, valor_liquido, pago_em, dia_pagamento)
-    values ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', null, 1561, 'Dinheiro', null, 'dinheiro', 50, 48.5, '2026-08-21T23:10:00Z', '2026-08-21')
-  on conflict (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, valor, pago_em)
-    do update set valor_liquido = excluded.valor_liquido;
+  insert into pdv_recebimentos (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, forma_grupo, valor, valor_liquido, parcela, pago_em, dia_pagamento)
+  values
+    ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', 75091, 1561, 'Cartão de Crédito', null, 'credito', 60, 58.2, 1, '2026-08-21T23:10:00Z', '2026-08-21'),
+    ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', 75091, 1561, 'Cartão de Crédito', null, 'credito', 60, 58.2, 2, '2026-08-21T23:10:00Z', '2026-08-21'),
+    ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', 75200, 1562, 'Dinheiro', null, 'dinheiro', 25, 25, null, '2026-08-22T20:00:00Z', '2026-08-22');
+
+  -- o que o importador faz a cada rodada da janela 21..21
+  delete from pdv_recebimentos
+    where empresa_id = '0dda3c8e-228b-4d05-b50a-2e2f301d75a3'
+      and dia_pagamento between '2026-08-21' and '2026-08-21';
+  insert into pdv_recebimentos (empresa_id, pedido_codigo, caixa_codigo, forma, operadora, forma_grupo, valor, valor_liquido, parcela, pago_em, dia_pagamento)
+  values
+    ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', 75091, 1561, 'Cartão de Crédito', null, 'credito', 60, 58.2, 1, '2026-08-21T23:10:00Z', '2026-08-21'),
+    ('0dda3c8e-228b-4d05-b50a-2e2f301d75a3', 75091, 1561, 'Cartão de Crédito', null, 'credito', 60, 58.2, 2, '2026-08-21T23:10:00Z', '2026-08-21');
+
   select count(*) into n from pdv_recebimentos
-    where caixa_codigo = 1561 and forma = 'Dinheiro' and operadora is null and pedido_codigo is null;
-  if n <> 1 then raise exception 'FALHA 7: % linhas para recebimento com operadora nula', n; end if;
-  raise notice 'OK 7: upsert de recebimento com operadora nula';
+    where empresa_id = '0dda3c8e-228b-4d05-b50a-2e2f301d75a3';
+  select count(*) into n21 from pdv_recebimentos
+    where empresa_id = '0dda3c8e-228b-4d05-b50a-2e2f301d75a3' and dia_pagamento = '2026-08-21';
+  if n <> 3 or n21 <> 2 then
+    raise exception 'FALHA 7: % recebimentos no total, % no dia 21 (esperava 3 e 2)', n, n21;
+  end if;
+  raise notice 'OK 7: replace da janela mantém parcelas iguais e não vaza para outro dia';
 end $$;
 
 rollback;

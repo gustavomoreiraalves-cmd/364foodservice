@@ -67,11 +67,15 @@ export async function importarLoja({ cliente, banco, loja, de, ate, log = () => 
   }
 
   // ---- recebimentos ----
+  // Recebimento não tem chave natural confiável (duas parcelas do mesmo pedido
+  // são iguais em tudo), então a janela de `dia_pagamento` é apagada e
+  // regravada inteira. Chamado mesmo com 0 linhas: é assim que um lançamento
+  // estornado no painel some do banco. `r.recebimentos` = linhas gravadas na
+  // janela.
   const linhasReceb = await cliente.listar('/Financeiro/GetRecebimentos', COLUNAS.recebimentos);
-  if (linhasReceb.length) {
-    await banco.gravarRecebimentos(linhasReceb.map(l => normalizaRecebimento(l, empresaId)));
-    r.recebimentos = linhasReceb.length;
-  }
+  const recebimentos = linhasReceb.map(l => normalizaRecebimento(l, empresaId));
+  await banco.substituirRecebimentos(empresaId, de, ate, recebimentos);
+  r.recebimentos = recebimentos.length;
 
   // ---- itens vendidos por dia ----
   for (const dia of diasEntre(de, ate)) {
