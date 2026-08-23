@@ -87,7 +87,8 @@ async function main() {
       console.log(`  ${dryRun ? '(dry-run, nada gravado) ' : ''}gravados: ${r.pedidos} pedidos, ${r.caixas} caixas, ${r.recebimentos} recebimentos, ${r.itensDia} itens/dia`);
       r.avisos.forEach(a => console.warn('  aviso: ' + a));
       const status = r.avisos.length ? 'parcial' : 'ok';
-      if (status === 'parcial') statusGeral = 'parcial';
+      // Uma loja parcial não pode apagar o erro de outra loja anterior.
+      if (status === 'parcial' && statusGeral === 'ok') statusGeral = 'parcial';
       if (logId) {
         const { error } = await sb.from('pdv_importacoes').update({ terminado_em: new Date().toISOString(), status, pedidos: r.pedidos, caixas: r.caixas, recebimentos: r.recebimentos, itens_dia: r.itensDia, detalhes: { avisos: r.avisos } }).eq('id', logId);
         if (error) { console.error('  ERRO ao gravar pdv_importacoes: ' + error.message); statusGeral = 'erro'; }
