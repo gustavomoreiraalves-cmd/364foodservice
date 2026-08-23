@@ -1,5 +1,16 @@
-import { supabase } from './supabase.js';
 import { inspecaoAprovada } from './qualidade.js';
+
+// lib/supabase.js chama createClient() no topo do módulo e exige as
+// variáveis de ambiente NEXT_PUBLIC_SUPABASE_URL/ANON_KEY — em produção elas
+// sempre existem, mas testes de helper puro (ex.: tests/defumacao.test.mjs,
+// que importa lib/defumacao.js, que importa este arquivo) não as definem.
+// Por isso o cliente padrão só é importado dentro das funções que realmente
+// batem no banco, nunca no topo deste módulo: assim quem só usa as funções
+// puras daqui (proximoNumeroFicha, parseCustoUnitario, custoMedioMP, ...)
+// pode importar este arquivo sem precisar de nenhuma variável de ambiente.
+async function clientePadrao() {
+  return (await import('./supabase.js')).supabase;
+}
 
 export function fmtMoney(v) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -40,6 +51,20 @@ export function hoje() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Próximo número de ficha a partir do MAIOR sufixo já usado, nunca da
+// contagem de fichas: contagem repete número assim que alguém apaga uma
+// linha, e com unique (empresa_id, lote) isso trava o lançamento em loop.
+// Foi bug real, corrigido em proximosLotes e replicado aqui de propósito.
+export function proximoNumeroFicha(prefixo, fichas) {
+  const maior = (fichas || []).reduce((max, f) => {
+    const lote = String(f?.lote || '');
+    if (!lote.startsWith(prefixo)) return max;
+    const sufixo = lote.slice(prefixo.length);
+    return /^\d+$/.test(sufixo) ? Math.max(max, Number(sufixo)) : max;
+  }, 0);
+  return prefixo + String(maior + 1).padStart(3, '0');
+}
+
 export function diasEntre(a, b) {
   return Math.round((new Date(b) - new Date(a)) / 86400000);
 }
@@ -63,12 +88,16 @@ export function diasEntre(a, b) {
 // banco antes de qualquer insert — e lote repetido quebra a rastreabilidade.
 //
 // `cliente` existe para os testes injetarem uma fachada do PostgREST.
-export async function proximosLotes(dataStr, empresaId, quantidade, cliente = supabase) {
+export async function proximosLotes(dataStr, empresaId, quantidade, cliente) {
   if (!(quantidade > 0)) return [];
+  // `=== undefined`, não um `||` genérico: preserva a semântica do antigo
+  // default `cliente = supabase` — um `null` passado por engano precisa
+  // estourar, não cair em silêncio no cliente de produção.
+  const db = cliente === undefined ? await clientePadrao() : cliente;
   const prefixo = `LT-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
   const [r1, r2] = await Promise.all([
-    cliente.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
-    cliente.from('producoes').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
+    db.from('recebimento_itens').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
+    db.from('producoes').select('lote').eq('empresa_id', empresaId).like('lote', `${prefixo}%`),
   ]);
   const lotes = [...(r1.data || []), ...(r2.data || [])];
   // Sufixo não numérico (dado sujo, ou lote de outro padrão) é ignorado em
@@ -81,7 +110,7 @@ export async function proximosLotes(dataStr, empresaId, quantidade, cliente = su
 }
 
 // Um único lote — mesmo número que o primeiro do lote plural.
-export async function proximoLote(dataStr, empresaId, cliente = supabase) {
+export async function proximoLote(dataStr, empresaId, cliente) {
   const [lote] = await proximosLotes(dataStr, empresaId, 1, cliente);
   return lote;
 }
@@ -116,7 +145,8 @@ export function mensagemAoGravarItemRecebido(erro, descricaoItem) {
 // para o Food Service, STK-XXX para o Steakhouse), contando só os produtos
 // dessa empresa com esse prefixo.
 export async function proximoCodigoProduto(empresaId, prefixo) {
-  const { data } = await supabase.from('produtos').select('codigo').eq('empresa_id', empresaId);
+  const db = await clientePadrao();
+  const { data } = await db.from('produtos').select('codigo').eq('empresa_id', empresaId);
   const nums = (data || [])
     .filter(p => (p.codigo || '').startsWith(prefixo + '-'))
     .map(p => parseInt(p.codigo.split('-')[1]) || 0);
