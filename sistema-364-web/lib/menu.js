@@ -27,7 +27,7 @@ export const MENU = [
   {
     tipo: 'grupo', id: 'vendas', label: 'Vendas', ic: '▩', itens: [
       { label: 'Pedidos (Food Services)', href: '/pedidos', modulo: 'pedidos' },
-      { label: 'Importação Steakhouse/Afya', href: '/vendas/importacao', modulo: 'pedidos' },
+      { label: 'Vendas PDV (Steakhouse/Afya)', href: '/vendas/importacao', modulo: 'pedidos' },
       { label: 'Vendas Buffet', href: '/vendas/buffet', modulo: 'pedidos' },
       { label: 'Vendas Burguer (iFood)', href: '/vendas/burguer', modulo: 'pedidos' },
     ],
