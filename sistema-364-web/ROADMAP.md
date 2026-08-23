@@ -264,7 +264,7 @@ recebimentos com taxa/líquido e itens vendidos por dia. Tela em
 Vendas → Vendas PDV. Spec em `docs/superpowers/specs/2026-08-23-importacao-vendas-consumer-design.md`,
 operação em `scripts/IMPORTACAO-PDV.md`.
 
-Pendente: aplicar a migração 30 em produção; copiar o cookie de sessão e
+Pendente: aplicar a migração 32 em produção; copiar o cookie de sessão e
 rodar a carga inicial (`scripts/IMPORTACAO-PDV.md`); agendar o cron 05:00;
 alimentar `/grupo` com a receita do PDV; de-para item × produto para baixa
 de estoque; duração real do cookie (medir na primeira semana).

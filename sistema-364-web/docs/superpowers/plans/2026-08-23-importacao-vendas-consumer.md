@@ -4,7 +4,7 @@
 
 **Goal:** Trazer para o 364 OS, por dia e por unidade, as vendas (mesa × delivery × origem), o caixa por forma de pagamento e os itens vendidos da 364 Steakhouse e da 364 Foodtruck/Afya, lendo o painel Consumer Connect.
 
-**Architecture:** Migração 30 cria as tabelas `pdv_*` e duas views por dia. Um script Node roda no Mac via cron, usa o cookie de uma sessão do Connect, pagina os endpoints internos (JSON DataTables + fragmentos HTML), normaliza com funções puras e faz upsert no Supabase com a service role. A tela `/vendas/importacao` lê as views e a tabela de itens.
+**Architecture:** Migração 32 cria as tabelas `pdv_*` e duas views por dia. Um script Node roda no Mac via cron, usa o cookie de uma sessão do Connect, pagina os endpoints internos (JSON DataTables + fragmentos HTML), normaliza com funções puras e faz upsert no Supabase com a service role. A tela `/vendas/importacao` lê as views e a tabela de itens.
 
 **Tech Stack:** Next.js 14 (App Router, JS sem TypeScript), Supabase (Postgres + RLS), `@supabase/supabase-js`, `cheerio` (novo, para os fragmentos HTML), `node --test` para testes, `psql` local para smoke da migração.
 
@@ -15,7 +15,7 @@
 - Código, comentários, commits e docs em português, no estilo dos arquivos existentes (ver `lib/consolidado.js`, `supabase/atualizacao_29_ficha_defumacao.sql`).
 - Sem TypeScript. Módulos ES (`"type": "module"` no `package.json`).
 - Testes: `tests/*.test.mjs` com `node:test` + `node:assert/strict`. Rodar com `npm test`.
-- Migração: `supabase/atualizacao_30_pdv_consumer.sql`, idempotente (`if not exists`, `drop policy if exists`), tudo em uma transação, rollback comentado no fim entre `-- begin;` e `-- commit;`. Nunca rodar em produção sem ok explícito do usuário (ver memória `acesso-psql-supabase-producao`).
+- Migração: `supabase/atualizacao_32_pdv_consumer.sql`, idempotente (`if not exists`, `drop policy if exists`), tudo em uma transação, rollback comentado no fim entre `-- begin;` e `-- commit;`. Nunca rodar em produção sem ok explícito do usuário (ver memória `acesso-psql-supabase-producao`).
 - Valores monetários `numeric(12,2)`, quantidades `numeric(12,4)`.
 - Fuso do PDV: America/Porto_Velho (UTC-4, sem horário de verão). `/Date(ms)/` e as datas `dd/mm/aaaa hh:mm:ss` do HTML são **hora local rotulada como UTC**: o instante real é `ms + 4h`; o dia local é `new Date(ms).toISOString().slice(0,10)`.
 - Lojas do Connect: `-2147478159` = 364 Steakhouse (`empresas.slug = 'steakhouse'`), `-2147458165` = 364 Foodtruck/Afya (`slug = 'foodtruck-afya'`). O campo `Estabelecimento` do payload diz "364 Steakhouse" para as duas — nunca usar para identificar a loja.
@@ -29,8 +29,8 @@
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `supabase/atualizacao_30_pdv_consumer.sql` | tabelas `pdv_*`, views, RLS, seed de `pdv_lojas` |
-| `tests/migracao-30/{fixture.sql,cenarios.sql,verificar.sh}` | smoke da migração em Postgres local |
+| `supabase/atualizacao_32_pdv_consumer.sql` | tabelas `pdv_*`, views, RLS, seed de `pdv_lojas` |
+| `tests/migracao-32/{fixture.sql,cenarios.sql,verificar.sh}` | smoke da migração em Postgres local |
 | `lib/pdvConsumer/parse.js` | funções puras: datas, dinheiro, HTML do pedido e do caixa → objetos |
 | `lib/pdvConsumer/normaliza.js` | funções puras: classificação e linhas prontas para o banco |
 | `lib/pdvConsumer/connect.js` | cliente HTTP do Connect (filtros de sessão, paginação, detalhes) |
@@ -43,23 +43,23 @@
 
 ---
 
-### Task 1: Migração 30 — tabelas, views, RLS e smoke
+### Task 1: Migração 32 — tabelas, views, RLS e smoke
 
 **Files:**
-- Create: `supabase/atualizacao_30_pdv_consumer.sql`
-- Create: `tests/migracao-30/fixture.sql`
-- Create: `tests/migracao-30/cenarios.sql`
-- Create: `tests/migracao-30/verificar.sh`
+- Create: `supabase/atualizacao_32_pdv_consumer.sql`
+- Create: `tests/migracao-32/fixture.sql`
+- Create: `tests/migracao-32/cenarios.sql`
+- Create: `tests/migracao-32/verificar.sh`
 
 **Interfaces:**
 - Produces: tabelas `pdv_lojas`, `pdv_pedidos`, `pdv_pedido_itens`, `pdv_pagamentos`, `pdv_caixas`, `pdv_caixa_movimentos`, `pdv_recebimentos`, `pdv_vendas_itens_dia`, `pdv_importacoes`; views `vw_pdv_vendas_dia`, `vw_pdv_caixa_formas_dia`. Colunas exatamente como abaixo — `normaliza.js` (Task 3) e a tela (Task 8) dependem dos nomes.
 
 - [ ] **Step 1: Escrever o fixture mínimo do Postgres local**
 
-`tests/migracao-30/fixture.sql`:
+`tests/migracao-32/fixture.sql`:
 
 ```sql
--- Esqueleto mínimo para exercitar a atualização 30 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 32 num Postgres local.
 create schema if not exists auth;
 create or replace function auth.uid() returns uuid
   language sql stable as $$ select nullif(current_setting('req.uid', true), '')::uuid $$;
@@ -81,11 +81,11 @@ create or replace function public.fn_set_updated_at() returns trigger
 
 - [ ] **Step 2: Escrever a migração**
 
-`supabase/atualizacao_30_pdv_consumer.sql`:
+`supabase/atualizacao_32_pdv_consumer.sql`:
 
 ```sql
 -- =========================================================
--- Atualização 30 — vendas importadas do PDV Consumer
+-- Atualização 32 — vendas importadas do PDV Consumer
 --
 -- Tabelas pdv_* guardam, por empresa, o que o painel Consumer Connect
 -- mostra para a 364 Steakhouse e a 364 Foodtruck/Afya: pedidos com itens e
@@ -374,10 +374,10 @@ commit;
 
 - [ ] **Step 3: Escrever os cenários**
 
-`tests/migracao-30/cenarios.sql`:
+`tests/migracao-32/cenarios.sql`:
 
 ```sql
--- Exercita a atualização 30. Roda depois do fixture e da migração.
+-- Exercita a atualização 32. Roda depois do fixture e da migração.
 \set QUIET on
 set client_min_messages = warning;
 begin;
@@ -468,13 +468,13 @@ rollback;
 
 - [ ] **Step 4: Escrever o runner**
 
-`tests/migracao-30/verificar.sh`:
+`tests/migracao-32/verificar.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# Exercita a atualização 30 (tabelas pdv_* do PDV Consumer) num Postgres
+# Exercita a atualização 32 (tabelas pdv_* do PDV Consumer) num Postgres
 # local descartável. Não toca em produção. Requer psql no PATH e um servidor
-# local. Uso: tests/migracao-30/verificar.sh
+# local. Uso: tests/migracao-32/verificar.sh
 set -euo pipefail
 export PGOPTIONS='-c client_min_messages=warning'
 
@@ -492,30 +492,30 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 # Duas vezes: prova idempotência da migração real.
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql"
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
-sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
+sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql"
 rm -f "$AQUI/.rollback.sql"
 
 sobraram=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.tables where table_name like 'pdv_%';")
 [ "$sobraram" = "0" ] || { echo "rollback deixou $sobraram tabelas pdv_*"; exit 1; }
 echo "OK: rollback limpo"
-echo "MIGRAÇÃO 30 OK"
+echo "MIGRAÇÃO 32 OK"
 ```
 
 - [ ] **Step 5: Rodar o smoke**
 
-Run: `chmod +x tests/migracao-30/verificar.sh && tests/migracao-30/verificar.sh`
-Expected: seis linhas `OK n: …`, depois `OK: rollback limpo` e `MIGRAÇÃO 30 OK`. Se `pg_isready` falhar, suba o Postgres local (`brew services start postgresql@17`) — a memória `backup-364-os` registra que o 17 está no PATH.
+Run: `chmod +x tests/migracao-32/verificar.sh && tests/migracao-32/verificar.sh`
+Expected: seis linhas `OK n: …`, depois `OK: rollback limpo` e `MIGRAÇÃO 32 OK`. Se `pg_isready` falhar, suba o Postgres local (`brew services start postgresql@17`) — a memória `backup-364-os` registra que o 17 está no PATH.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add supabase/atualizacao_30_pdv_consumer.sql tests/migracao-30 tests/fixtures/pdv
-git commit -m "feat(pdv): migração 30 com tabelas e views das vendas do PDV Consumer"
+git add supabase/atualizacao_32_pdv_consumer.sql tests/migracao-32 tests/fixtures/pdv
+git commit -m "feat(pdv): migração 32 com tabelas e views das vendas do PDV Consumer"
 ```
 
 ---
@@ -1995,7 +1995,7 @@ esperada: zero para dias com todos os pedidos finalizados.
 
 - [ ] **Step 4: Rodar em dry-run contra o Connect real**
 
-Pré-requisito: o usuário já colocou `CONSUMER_CONNECT_COOKIE` no `.env.local` e a migração 30 **ainda não** está em produção — o dry-run precisa de `pdv_lojas`. Ordem: (a) usuário aplica a migração 30 na produção via `psql "$SUPABASE_DB_URL" -f supabase/atualizacao_30_pdv_consumer.sql` (com ok explícito, conforme memória `acesso-psql-supabase-producao`); (b) `npm run importar-pdv -- --dry-run --de 2026-08-21 --ate 2026-08-22`.
+Pré-requisito: o usuário já colocou `CONSUMER_CONNECT_COOKIE` no `.env.local` e a migração 32 **ainda não** está em produção — o dry-run precisa de `pdv_lojas`. Ordem: (a) usuário aplica a migração 32 na produção via `psql "$SUPABASE_DB_URL" -f supabase/atualizacao_32_pdv_consumer.sql` (com ok explícito, conforme memória `acesso-psql-supabase-producao`); (b) `npm run importar-pdv -- --dry-run --de 2026-08-21 --ate 2026-08-22`.
 
 Expected: duas lojas listadas, contadores maiores que zero na Steakhouse, `Fim: ok`. Se der `SESSAO_EXPIRADA`, o cookie está errado ou faltou aspas.
 

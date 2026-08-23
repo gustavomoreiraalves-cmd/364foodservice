@@ -1,4 +1,4 @@
--- Exercita a atualização 30. Roda depois do fixture e da migração.
+-- Exercita a atualização 32. Roda depois do fixture e da migração.
 \set QUIET on
 set client_min_messages = warning;
 begin;

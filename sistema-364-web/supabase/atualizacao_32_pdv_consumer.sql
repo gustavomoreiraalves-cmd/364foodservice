@@ -1,5 +1,5 @@
 -- =========================================================
--- Atualização 30 — vendas importadas do PDV Consumer
+-- Atualização 32 — vendas importadas do PDV Consumer
 --
 -- Tabelas pdv_* guardam, por empresa, o que o painel Consumer Connect
 -- mostra para a 364 Steakhouse e a 364 Foodtruck/Afya: pedidos com itens e
@@ -7,7 +7,7 @@
 -- o snapshot diário de itens vendidos. O importador (scripts/
 -- importar-pdv-consumer.mjs) escreve com a service role; usuários só leem.
 --
--- Rode depois de atualizacao_29_ficha_defumacao.sql. Idempotente.
+-- Rode depois de atualizacao_31_empresas_pessoa_juridica.sql. Idempotente.
 -- Spec: docs/superpowers/specs/2026-08-23-importacao-vendas-consumer-design.md
 -- =========================================================
 begin;

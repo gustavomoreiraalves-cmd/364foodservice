@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Exercita a atualização 30 (tabelas pdv_* do PDV Consumer) num Postgres
+# Exercita a atualização 32 (tabelas pdv_* do PDV Consumer) num Postgres
 # local descartável. Não toca em produção. Requer psql no PATH e um servidor
-# local. Uso: tests/migracao-30/verificar.sh
+# local. Uso: tests/migracao-32/verificar.sh
 set -euo pipefail
 export PGOPTIONS='-c client_min_messages=warning'
 
@@ -19,15 +19,15 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 # Duas vezes: prova idempotência da migração real.
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql"
-psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/cenarios.sql"
 
-sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_30_pdv_consumer.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
+sed -n '/^-- begin;/,/^-- commit;/p' "$RAIZ/supabase/atualizacao_32_pdv_consumer.sql" | sed 's/^-- \{0,1\}//' > "$AQUI/.rollback.sql"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/.rollback.sql"
 rm -f "$AQUI/.rollback.sql"
 
 sobraram=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.tables where table_name like 'pdv_%';")
 [ "$sobraram" = "0" ] || { echo "rollback deixou $sobraram tabelas pdv_*"; exit 1; }
 echo "OK: rollback limpo"
-echo "MIGRAÇÃO 30 OK"
+echo "MIGRAÇÃO 32 OK"

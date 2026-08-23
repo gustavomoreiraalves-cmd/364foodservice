@@ -1,4 +1,4 @@
--- Esqueleto mínimo para exercitar a atualização 30 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 32 num Postgres local.
 create schema if not exists auth;
 create or replace function auth.uid() returns uuid
   language sql stable as $$ select nullif(current_setting('req.uid', true), '')::uuid $$;

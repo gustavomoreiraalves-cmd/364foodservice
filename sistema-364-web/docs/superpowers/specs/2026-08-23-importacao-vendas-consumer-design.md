@@ -87,7 +87,7 @@ an object`.
 ## Arquitetura
 
 ```
-supabase/atualizacao_30_pdv_consumer.sql
+supabase/atualizacao_32_pdv_consumer.sql
   ├── pdv_lojas                  (id_connect → empresa_id)
   ├── pdv_pedidos                (1 por pedido)
   ├── pdv_pedido_itens           (itens, com pai p/ combo e complemento)
@@ -115,7 +115,7 @@ lib/pdvVendas.js                    (funções puras de agregação da tela)
 
 tests/pdv-parse.test.mjs            (fixtures reais anonimizadas de HTML/JSON)
 tests/pdv-normaliza.test.mjs
-tests/migracao-30/                  (smoke da migração, como migracao-29)
+tests/migracao-32/                  (smoke da migração, como migracao-29)
 ```
 
 ## Modelo de dados
@@ -294,14 +294,14 @@ script depende do cookie da máquina, não do servidor.
   venda virando a meia-noite, detecção de "pedido mudou".
 - `tests/pdv-vendas.test.mjs`: agregações da tela (KPIs, comparação de
   períodos, ABC no período).
-- `tests/migracao-30/`: smoke contra `psql` (tabelas, views, RLS, seed das
+- `tests/migracao-32/`: smoke contra `psql` (tabelas, views, RLS, seed das
   lojas), no padrão de `tests/migracao-29`.
 - Importador não tem teste automatizado contra o Connect (depende de sessão);
   tem modo `--dry-run` que imprime contadores sem gravar.
 
 ## Ordem de entrega
 
-1. Migração 30 + smoke.
+1. Migração 32 + smoke.
 2. `lib/pdvConsumer/parse.js` e `normaliza.js` com testes (fixtures capturadas
    da sessão atual).
 3. `connect.js` + script + `IMPORTACAO-PDV.md`; primeira carga manual de
