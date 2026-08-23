@@ -1,9 +1,140 @@
-# Importação das vendas do PDV Consumer
+# Importação das vendas do PDV
 
-O 364 OS lê o painel **Consumer Connect** (connect.consumer.com.br) da 364
-Steakhouse e da 364 Foodtruck/Afya e grava pedidos, itens, pagamentos, caixas
-e recebimentos nas tabelas `pdv_*`. A tela é **Vendas → Vendas PDV
-(Steakhouse/Afya)**.
+O 364 OS lê as vendas do PDV Consumer e grava pedidos, itens, pagamentos,
+caixas, recebimentos e o retrato diário de itens vendidos nas tabelas `pdv_*`.
+A tela é **Vendas → Vendas PDV (Steakhouse/Afya)**.
+
+Há dois caminhos, escolhidos por loja em `pdv_lojas.origem`:
+
+| origem | Como lê | Situação |
+|---|---|---|
+| `backup` | Backup Firebird diário que o PDV sobe para o Drive | **Caminho principal** (Steakhouse) |
+| `painel` | Scraping do painel Consumer Connect com cookie | Plano B, sem cron (ver o fim deste arquivo) |
+
+---
+
+# Caminho principal — backup Firebird do Drive
+
+## Como funciona
+
+O PDV da Steakhouse gera todo dia um backup `gbak` do `CONSUMER.FDB` e sobe
+para a pasta pública "Backup Consumer" do Drive da conta steakhouse364. É um
+arquivo por dia da semana (`domingo.fbconsumer` … `sábado.fbconsumer`, ~365 MB),
+sempre sobrescrito no MESMO file id — por isso a configuração é um mapa
+dia → file id em `pdv_lojas.drive_arquivos` (semeado pela migração 33), e não
+uma listagem de pasta (que exigiria credencial do Google).
+
+Cada rodada de `scripts/importar-pdv-backup.mjs`, por loja:
+
+1. Descobre o dia da semana em Porto Velho e baixa o arquivo daquele dia
+   (`curl`, direto para um diretório temporário do `mkdtemp`).
+2. Lê os primeiros 4 KB e confere a data que o `gbak` grava no cabeçalho
+   ("Sun Aug 23 09:20:09 2026", hora local). Se o backup tiver mais de 48 h,
+   tenta o arquivo de ontem; se nenhum servir, a loja falha com aviso claro.
+3. Garante o docker (`colima status` → `colima start` quando parado) e sobe um
+   container `firebirdsql/firebird:5` **efêmero**, com nome único, senha
+   sorteada e a porta publicada só em `127.0.0.1`.
+4. `docker cp` do arquivo + `gbak -c` + consultas com `node-firebird`
+   (`lib/pdvBackup/consultas.js`), normalização (`lib/pdvBackup/normaliza.js`)
+   e gravação no Supabase na ordem pedidos → caixas → recebimentos → itens/dia.
+5. **Sempre** derruba o container (`docker rm -f`) e apaga o diretório
+   temporário, mesmo quando a rodada falha.
+
+Cada rodada deixa uma linha em `pdv_importacoes` (a tela mostra como "Última
+importação") com `detalhes.fonte = 'backup'`, o dia do arquivo usado e a hora
+do backup.
+
+Idempotência: pedidos e caixas por upsert em `(empresa_id, codigo)` — pedido
+que não mudou desde a última rodada nem é reescrito; recebimentos e itens/dia
+por substituição da janela. Rodar de novo nunca duplica.
+
+## Pré-requisitos
+
+- `colima` + `docker` instalados (`brew install colima docker`). A imagem
+  `firebirdsql/firebird:5` é baixada na primeira rodada.
+- `.env.local` com `NEXT_PUBLIC_SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+  Este caminho **não** usa cookie do painel.
+- Migração `supabase/atualizacao_33_pdv_backup.sql` aplicada (colunas `origem`
+  e `drive_arquivos` em `pdv_lojas`).
+
+## Rodar
+
+```bash
+npm run importar-pdv-backup                          # últimos 3 dias
+npm run importar-pdv-backup -- --de 2026-08-01       # desde 1º de agosto
+npm run importar-pdv-backup -- --dry-run             # só conta, não grava
+npm run importar-pdv-backup -- --loja -2147478159    # só a Steakhouse
+npm run importar-pdv-backup -- --de 2022-03-14       # carga histórica (demora)
+```
+
+Saída: contadores por loja e `Fim: ok | parcial | erro` (código de saída 2 no
+erro). A janela padrão é D-3 até hoje (`PDV_JANELA_DIAS`).
+
+Variáveis opcionais: `PDV_FB_PORTA` (padrão 3050, porta local do container),
+`PDV_FB_IMAGEM`, `PDV_GBAK_TIMEOUT_S` (padrão 1800),
+`PDV_DOWNLOAD_TIMEOUT_S` (padrão 1800).
+
+## Agendar (cron, 14:00)
+
+O upload do backup do dia chega por volta das 13h30.
+
+```bash
+crontab -e
+```
+
+```
+0 14 * * * cd "/caminho/do/sistema-364-web" && /usr/local/bin/npm run importar-pdv-backup >> "$HOME/Library/Logs/364-importar-pdv.log" 2>&1
+```
+
+Use o caminho que `which npm` devolver. O Mac precisa estar ligado e com rede
+às 14:00 (mesma condição do backup das 12:30). Não deve existir cron do
+importador do painel (`npm run importar-pdv`).
+
+## Conferir sem baixar nada
+
+`scripts/importar-pdv-backup.mjs` exporta as partes do fluxo para dar para
+exercitar cada pedaço isolado, com um Firebird já restaurado:
+
+- `extrairLoja({ db, banco, loja, de, ate, log })` — consultas + normalização +
+  gravação. Com `bancoSeco()` (de `lib/pdvConsumer/banco.js`) roda sem tocar no
+  Supabase; com um "banco" espião dá para conferir linha a linha.
+- `restaurarNoContainer({ nome, porta, senha, arquivo, log })` e
+  `derrubarContainer(nome)` — o par sobe/derruba do container efêmero, com um
+  arquivo de backup que você já tenha em disco.
+
+Importar o módulo não dispara a rodada: o `main()` só roda quando o script é
+chamado direto.
+
+## Conferência dos números
+
+Compare um dia no painel (Dashboard → Valor Total Recebido, com o período
+ajustado para o dia) com a soma de `vw_pdv_vendas_dia` daquele dia, e
+`vw_pdv_caixa_formas_dia` com Financeiro → Recebimentos.
+
+Um caixa fechado é a melhor conferência isolada: a soma dos movimentos
+(`pdv_caixa_movimentos`) tem que dar exatamente o `saldo_final` do caixa —
+conferido no 1561 (R$ 7.902,13) e no 1562 (R$ 10.273,94).
+
+## Quando dá errado
+
+| Sintoma | O que é |
+|---|---|
+| `nenhum backup recente (< 48 h) no Drive` | O PDV não subiu o arquivo (loja fechada, rede caiu) ou o link da pasta deixou de ser público. A janela é reprocessada na rodada seguinte, então um dia perdido se corrige sozinho. |
+| `o arquivo baixado ... não é um backup gbak` | O Drive devolveu HTML: quota de download estourada ou arquivo sem permissão pública. |
+| `docker não respondeu (colima start?)` | VM do colima não subiu. Rode `colima start` na mão e veja o erro. |
+| `Firebird não abriu a porta 3050 a tempo` | Porta ocupada por outro container Firebird (`docker ps`), ou imagem baixando ainda. `PDV_FB_PORTA` troca a porta. |
+
+Diferenças conhecidas em relação ao painel: `valor_liquido` dos recebimentos
+vem igual ao bruto e `percentual_taxa` fica nulo (o backup não traz a taxa da
+credenciadora).
+
+---
+
+# Plano B — painel Consumer Connect (scraping)
+
+Continua funcionando para lojas com `pdv_lojas.origem = 'painel'` (hoje só a
+Afya, desativada até o backup dela subir para o Drive). É lento e o painel
+devolve 429 com facilidade — use só se o backup estiver indisponível.
 
 ## Pegar o cookie da sessão
 
@@ -23,38 +154,11 @@ os passos. Não feche a sessão no navegador ("Sair"), isso invalida o cookie.
 ## Rodar
 
 ```bash
-npm run importar-pdv                        # últimos 3 dias, as duas lojas
-npm run importar-pdv -- --de 2026-08-01     # carga inicial desde 1º de agosto
-npm run importar-pdv -- --dry-run           # só conta, não grava
+npm run importar-pdv                        # últimos 3 dias
+npm run importar-pdv -- --de 2026-08-01
+npm run importar-pdv -- --dry-run
 npm run importar-pdv -- --loja -2147458165  # só a Afya
 ```
 
-Saída: contadores por loja e `Fim: ok | parcial | erro`. Cada rodada deixa
-uma linha em `pdv_importacoes`, que a tela mostra como "Última importação".
-
-## Agendar (cron, 05:00)
-
-```bash
-crontab -e
-```
-
-```
-0 5 * * * cd "/caminho/do/sistema-364-web" && /usr/local/bin/npm run importar-pdv >> "$HOME/Library/Logs/364-importar-pdv.log" 2>&1
-```
-
-Use o caminho do `npm` que `which npm` devolver. O Mac precisa estar ligado e
-com rede às 05:00 (mesma condição do backup das 12:30).
-
-## Conferência
-
-Compare um dia no painel (Dashboard → Valor Total Recebido, com o período
-ajustado para o dia) com a soma de `vw_pdv_vendas_dia` daquele dia. Diferença
-esperada: zero para dias com todos os pedidos finalizados.
-
-Confira também `vw_pdv_caixa_formas_dia` contra o painel (Financeiro →
-Recebimentos, total do dia): é a fonte da tabela "Caixa por forma de
-pagamento" da tela.
-
-> Se o total de recebimentos divergir, verifique se o painel filtra
-> Recebimentos por data de pagamento ou de crédito — a
-> `vw_pdv_caixa_formas_dia` agrupa por `dia_pagamento`.
+`PDV_PAUSA_MS` (padrão 600) é o intervalo entre requisições ao painel; abaixo
+disso o Connect começa a responder 429.

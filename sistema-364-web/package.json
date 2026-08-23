@@ -11,6 +11,7 @@
     "test": "node --test tests/*.test.mjs",
     "verify": "npm run test && npm run build",
     "backup": "bash scripts/backup-364.sh",
+    "importar-pdv-backup": "node scripts/importar-pdv-backup.mjs",
     "importar-pdv": "node scripts/importar-pdv-consumer.mjs"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "cheerio": "^1.2.0",
     "fast-xml-parser": "^4.4.1",
     "next": "14.2.5",
+    "node-firebird": "^2.15.0",
     "node-forge": "^1.4.0",
     "nodemailer": "^9.0.5",
     "qrcode": "^1.5.4",
