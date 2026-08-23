@@ -45,6 +45,12 @@ const de = arg('--de', new Date(new Date(hojeLocal + 'T00:00:00Z').getTime() - j
 const ate = arg('--ate', hojeLocal);
 const somenteLoja = arg('--loja', null);
 
+const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+if (!dataOk(de) || !dataOk(ate) || de > ate) {
+  console.error('ERRO: --de/--ate precisam ser YYYY-MM-DD e --de <= --ate');
+  process.exit(1);
+}
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const chave = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const cookie = process.env.CONSUMER_CONNECT_COOKIE;
@@ -142,7 +148,7 @@ async function main() {
     }
     try {
       const r = await importarLoja({ cliente, banco, loja, de, ate, log: m => console.log(m) });
-      console.log(`  gravados: ${r.pedidos} pedidos, ${r.caixas} caixas, ${r.recebimentos} recebimentos, ${r.itensDia} itens/dia`);
+      console.log(`  ${dryRun ? '(dry-run, nada gravado) ' : ''}gravados: ${r.pedidos} pedidos, ${r.caixas} caixas, ${r.recebimentos} recebimentos, ${r.itensDia} itens/dia`);
       r.avisos.forEach(a => console.warn('  aviso: ' + a));
       const status = r.avisos.length ? 'parcial' : 'ok';
       if (status === 'parcial') statusGeral = 'parcial';

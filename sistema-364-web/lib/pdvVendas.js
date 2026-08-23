@@ -113,5 +113,8 @@ export function statusImportacao(ultima, agora = new Date()) {
   const hh = String(local.getUTCHours()).padStart(2, '0');
   const mi = String(local.getUTCMinutes()).padStart(2, '0');
   const texto = `Última importação: ${dd}/${mm}/${local.getUTCFullYear()} ${hh}:${mi} · ${ultima.status}`;
-  return { texto, alerta: ultima.status === 'erro' || horas > 36 };
+  // 'executando' que não fecha em 1 h é rodada travada: o processo morreu sem
+  // atualizar o log e a tela mostraria "em andamento" para sempre.
+  const travada = ultima.status === 'executando' && horas > 1;
+  return { texto, alerta: ultima.status === 'erro' || travada || horas > 36 };
 }

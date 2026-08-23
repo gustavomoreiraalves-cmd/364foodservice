@@ -111,6 +111,16 @@ test('normalizaCaixa', () => {
   assert.equal(movimentos[6].forma_grupo, 'dinheiro');
 });
 
+test('normalizaCaixa: caixa aberto não tem saldo final', () => {
+  const linha = json('caixas-lista.json').data[0];
+  const html = fx('caixa-fechado.html');
+  // o detalhe traz um "saldo atual", que num caixa aberto ainda vai mudar:
+  // gravar isso como saldo_final faria a tela mostrar fechamento que não houve
+  const { caixa } = normalizaCaixa({ linha, detalhe: { ...parseCaixaDetalhe(html), html }, empresaId: EMPRESA });
+  assert.equal(caixa.status, 'Aberto');
+  assert.equal(caixa.saldo_final, null);
+});
+
 test('normalizaRecebimento guarda taxa, líquido e data de crédito', () => {
   const r = normalizaRecebimento(json('recebimentos-lista.json').data[2], EMPRESA);
   assert.equal(r.pedido_codigo, 75090);

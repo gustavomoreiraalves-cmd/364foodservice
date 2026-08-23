@@ -106,17 +106,19 @@ export function normalizaPedido({ linha, detalhe, empresaId }) {
 
 export function normalizaCaixa({ linha, detalhe, empresaId }) {
   const abertoEm = dataConnect(linha.DataHoraAbertura) || detalhe?.abertoEm;
+  const status = linha.StatusCaixa || detalhe?.status || null;
   const caixa = {
     empresa_id: empresaId,
     codigo: Number(linha.Codigo),
     id_connect: num(linha.ID),
     usuario: linha.NomeUsuario || detalhe?.usuario || null,
-    status: linha.StatusCaixa || detalhe?.status || null,
+    status,
     aberto_em: iso(abertoEm),
     fechado_em: iso(dataConnect(linha.DataHoraFechamento)),
     dia_caixa: diaLocalConnect(linha.DataHoraAbertura) || diaLocal(abertoEm),
     saldo_inicial: num(linha.SaldoInicial) ?? detalhe?.saldoInicial ?? null,
-    saldo_final: num(linha.SaldoFinal) ?? detalhe?.saldoAtual ?? null,
+    // Caixa aberto não tem saldo final; o "saldo atual" do detalhe ainda muda.
+    saldo_final: status === 'Fechado' ? (num(linha.SaldoFinal) ?? detalhe?.saldoAtual ?? null) : null,
     total_dinheiro: detalhe?.totalDinheiro ?? num(linha.ValorTotalDinheiro),
     observacao: linha.Observacao || null,
     origem_raw: linha,

@@ -92,4 +92,7 @@ test('statusImportacao', () => {
   assert.deepEqual(statusImportacao({ iniciado_em: '2026-08-23T08:00:00Z', status: 'ok' }, agora), { texto: 'Última importação: 23/08/2026 04:00 · ok', alerta: false });
   assert.equal(statusImportacao({ iniciado_em: '2026-08-21T08:00:00Z', status: 'ok' }, agora).alerta, true);
   assert.equal(statusImportacao({ iniciado_em: '2026-08-23T08:00:00Z', status: 'erro', erro: 'SESSAO_EXPIRADA' }, agora).alerta, true);
+  // 'executando' há horas é rodada travada (processo morto sem fechar o log)
+  assert.equal(statusImportacao({ iniciado_em: '2026-08-23T11:45:00Z', status: 'executando' }, agora).alerta, false);
+  assert.equal(statusImportacao({ iniciado_em: '2026-08-23T10:00:00Z', status: 'executando' }, agora).alerta, true);
 });

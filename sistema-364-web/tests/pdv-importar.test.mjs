@@ -130,3 +130,34 @@ test('importarLoja: dia sem itens mantém o snapshot e vira aviso', async () => 
   assert.equal(r.avisos.length, 1);
   assert.match(r.avisos[0], /2026-08-22/);
 });
+
+test('importarLoja: falha ao normalizar/gravar um pedido vira aviso e não aborta', async () => {
+  const cliente = clienteFalso();
+  const banco = bancoFalso();
+  const original = banco.gravarPedido;
+  banco.gravarPedido = async p => {
+    if (p.pedido.codigo === 74941) throw new TypeError("Cannot read properties of undefined (reading 'map')");
+    return original(p);
+  };
+  const r = await importarLoja({ cliente, banco, loja: LOJA, de: '2026-08-21', ate: '2026-08-21' });
+  assert.equal(r.avisos.length, 1);
+  assert.match(r.avisos[0], /pedido 74941: normalização falhou/);
+  // os outros pedidos da loja continuam entrando
+  assert.equal(banco.gravados.pedidos.length, 2);
+  assert.equal(r.pedidos, 2);
+});
+
+test('importarLoja: falha ao normalizar/gravar um caixa vira aviso e não aborta', async () => {
+  const cliente = clienteFalso();
+  const banco = bancoFalso();
+  const original = banco.gravarCaixa;
+  banco.gravarCaixa = async c => {
+    if (c.caixa.codigo === 1561) throw new TypeError('campo faltando');
+    return original(c);
+  };
+  const r = await importarLoja({ cliente, banco, loja: LOJA, de: '2026-08-21', ate: '2026-08-21' });
+  assert.equal(r.avisos.length, 1);
+  assert.match(r.avisos[0], /caixa 1561: normalização falhou/);
+  assert.equal(banco.gravados.caixas.length, 1);
+  assert.equal(r.caixas, 1);
+});

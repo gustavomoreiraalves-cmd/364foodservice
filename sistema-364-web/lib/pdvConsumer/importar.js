@@ -31,19 +31,22 @@ export async function importarLoja({ cliente, banco, loja, de, ate, log = () => 
   for (const linha of linhasPedidos) {
     const atual = existentes.get(Number(linha.Codigo)) || null;
     if (!pedidoMudou(linha, atual)) continue;
-    let detalhe = null;
-    if (/^finalizado/i.test(linha.Status || '')) {
-      try {
+    // Um pedido problemático (detalhe fora do ar, campo que sumiu do payload)
+    // não pode derrubar a loja inteira: vira aviso e o loop segue.
+    let etapa = 'detalhe';
+    try {
+      let detalhe = null;
+      if (/^finalizado/i.test(linha.Status || '')) {
         const html = await cliente.detalhe('/Pedidos/GetDetalhesPedido', linha.ID);
         detalhe = { ...parsePedidoDetalhe(html), html };
-      } catch (e) {
-        if (e instanceof SessaoExpiradaError) throw e;
-        avisos.push(`pedido ${linha.Codigo}: detalhe falhou (${e.message})`);
-        continue;
       }
+      etapa = 'normalização';
+      await banco.gravarPedido(normalizaPedido({ linha, detalhe, empresaId }));
+      r.pedidos++;
+    } catch (e) {
+      if (e instanceof SessaoExpiradaError) throw e;
+      avisos.push(`pedido ${linha.Codigo}: ${etapa} falhou (${e.message})`);
     }
-    await banco.gravarPedido(normalizaPedido({ linha, detalhe, empresaId }));
-    r.pedidos++;
   }
 
   // ---- caixas ----
@@ -53,17 +56,17 @@ export async function importarLoja({ cliente, banco, loja, de, ate, log = () => 
     const atual = caixasBanco.get(Number(linha.Codigo));
     // Caixa fechado que já está fechado no banco não muda mais.
     if (atual && atual.status === 'Fechado' && linha.StatusCaixa === 'Fechado') continue;
-    let detalhe = null;
+    let etapa = 'detalhe';
     try {
       const html = await cliente.detalhe('/Financeiro/GetDetalhesCaixa', linha.ID);
-      detalhe = { ...parseCaixaDetalhe(html), html };
+      const detalhe = { ...parseCaixaDetalhe(html), html };
+      etapa = 'normalização';
+      await banco.gravarCaixa(normalizaCaixa({ linha, detalhe, empresaId }));
+      r.caixas++;
     } catch (e) {
       if (e instanceof SessaoExpiradaError) throw e;
-      avisos.push(`caixa ${linha.Codigo}: detalhe falhou (${e.message})`);
-      continue;
+      avisos.push(`caixa ${linha.Codigo}: ${etapa} falhou (${e.message})`);
     }
-    await banco.gravarCaixa(normalizaCaixa({ linha, detalhe, empresaId }));
-    r.caixas++;
   }
 
   // ---- recebimentos ----

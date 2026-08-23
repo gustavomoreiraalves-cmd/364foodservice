@@ -213,7 +213,7 @@ function Conteudo() {
             <thead><tr><th>Item</th><th>Categoria</th><th className="num">Qtd</th><th className="num">Valor</th><th className="num">Lucro</th><th className="num">Margem</th><th>ABC</th><th>Participação</th></tr></thead>
             <tbody>
               {itensFiltrados.map(i => (
-                <tr key={i.codigoDetalhe}><td>{i.nome}</td><td className="muted">{i.categoria}</td><td className="num">{i.quantidade}</td><td className="num">{fmtMoney(i.valor)}</td><td className="num">{fmtMoney(i.lucro)}</td><td className="num">{i.margem.toFixed(1)}%</td><td><span className={`tag ${i.abc === 'A' ? 'ok' : i.abc === 'B' ? 'warn' : 'muted'}`}>{i.abc}</span></td><td><BarraParticipacao pct={i.pct} /></td></tr>
+                <tr key={i.codigoDetalhe}><td>{i.nome}</td><td className="muted">{i.categoria}</td><td className="num">{i.quantidade}</td><td className="num">{fmtMoney(i.valor)}</td><td className="num">{fmtMoney(i.lucro)}</td><td className="num">{i.margem.toFixed(1)}%</td><td><span className={i.abc === 'A' ? 'tag ok' : i.abc === 'B' ? 'tag warn' : 'tag'}>{i.abc}</span></td><td><BarraParticipacao pct={i.pct} /></td></tr>
               ))}
             </tbody>
           </table>
