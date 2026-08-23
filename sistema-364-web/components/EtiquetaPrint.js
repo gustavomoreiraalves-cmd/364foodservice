@@ -7,9 +7,10 @@ import { medidasImpressao, paginarEtiquetas } from '../lib/etiquetas';
 // exato. Cada página de impressão é uma LINHA do rolo: com duas colunas, duas
 // etiquetas lado a lado. A geometria mora em lib/etiquetas.js.
 //
-// Dois modelos hoje:
+// Três modelos hoje:
 //   validade-cozinha — produção completa e interna (comportamento original)
 //   recebimento      — volume de matéria-prima, com lote e QR
+//   producao-lote    — unidade de produto acabado embalada, com lote e QR
 //
 // Os dados vêm SEMPRE do registro de origem — nunca redigitados. O QR chega
 // pronto em `qrSvg`, gerado antes da impressão.
@@ -70,6 +71,18 @@ export default function EtiquetaPrint({ etiqueta }) {
         .etiquetas-print .et-mp { font-size: 8pt; font-weight: 700; text-transform: uppercase; margin: .3mm 0; overflow: hidden; min-height: 0; }
         .etiquetas-print .et-rodape { margin-top: auto; flex-shrink: 0; display: flex; justify-content: space-between; gap: 1mm; font-size: 6.5pt; }
         .etiquetas-print .et-vol { font-weight: 700; white-space: nowrap; }
+        /* producao-lote: mesma coluna de texto + QR fixo à direita do
+           recebimento, mesma lógica de encolhimento — o que não pode sumir
+           aqui é a validade (dado sanitário, não numeração de volume), então
+           quem ganha overflow:hidden + min-height:0 é produto/lote/fabricação,
+           e a validade fica presa no rodapé com flex-shrink:0. */
+        .etiquetas-print .et-prod { display: flex; gap: 1.5mm; height: 100%; width: 100%; }
+        .etiquetas-print .et-prod-texto { flex: 1; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+        .etiquetas-print .et-prod-texto .et-produto { overflow: hidden; min-height: 0; }
+        .etiquetas-print .et-prod-texto .et-linha { overflow: hidden; min-height: 0; }
+        .etiquetas-print .et-prod-validade { margin-top: auto; flex-shrink: 0; font-size: 7pt; font-weight: 700; overflow: hidden; }
+        .etiquetas-print .et-prod-qr { width: ${m.qrTamanho_mm || 0}mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .etiquetas-print .et-prod-qr svg { display: block; }
       `}</style>
       {linhas.map((linha, i) => (
         <div className="et-fileira" key={i}>
@@ -77,6 +90,8 @@ export default function EtiquetaPrint({ etiqueta }) {
             <div className="etiqueta" key={n}>
               {modeloId === 'recebimento'
                 ? <Recebimento etiqueta={etiqueta} indice={n} volumesTotal={volumesTotal} volumeInicial={volumeInicial} />
+                : modeloId === 'producao-lote'
+                ? <ProducaoLote etiqueta={etiqueta} />
                 : <ValidadeCozinha etiqueta={etiqueta} />}
             </div>
           ))}
@@ -127,6 +142,27 @@ function Recebimento({ etiqueta, indice, volumesTotal, volumeInicial }) {
         </div>
       </div>
       <div className="et-receb-qr" dangerouslySetInnerHTML={{ __html: etiqueta.qrSvg || '' }} />
+    </div>
+  );
+}
+
+// Uma etiqueta por unidade embalada de produto acabado — todas as cópias
+// desta impressão saem idênticas, sem numeração (ao contrário do recebimento,
+// que numera volume por volume). O dado que não pode sumir aqui é a
+// VALIDADE: é ela quem faz a etiqueta ser um controle sanitário, não só uma
+// identificação. Por isso ela ocupa o rodapé protegido (flex-shrink:0), e
+// produto/lote/fabricação — que podem ser mais compridos, sobretudo o nome
+// do produto — encolhem primeiro.
+function ProducaoLote({ etiqueta }) {
+  return (
+    <div className="et-prod">
+      <div className="et-prod-texto">
+        <div className="et-produto">{etiqueta.produto}</div>
+        <div className="et-lote">LOTE {etiqueta.lote || '—'}</div>
+        <div className="et-linha">Fab. {fmtDate(etiqueta.fabricacao)}</div>
+        <div className="et-prod-validade">VAL {fmtDate(etiqueta.validade)}</div>
+      </div>
+      <div className="et-prod-qr" dangerouslySetInnerHTML={{ __html: etiqueta.qrSvg || '' }} />
     </div>
   );
 }

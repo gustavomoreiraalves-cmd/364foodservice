@@ -26,6 +26,17 @@ export const MODELOS = {
     // sobram para o texto.
     qr_mm: 16,
   },
+  'producao-lote': {
+    id: 'producao-lote',
+    nome: 'Produção (lote)',
+    largura_mm: 50, altura_mm: 30, colunas: 2,
+    rolo_mm: 108, gap_coluna_mm: 2.5, gap_linha_mm: 2,
+    // Mesma etiqueta física e mesmo rolo do modelo `recebimento` — uma por
+    // unidade embalada, com QR do rastreio do lote ao lado do texto. A conta
+    // de 16 mm é a mesma feita ali em cima: cabe nos 46 mm úteis (50 mm −
+    // 2×2 mm de padding) ao lado do texto de produto/lote/fabricação/validade.
+    qr_mm: 16,
+  },
 };
 
 // A produção roda em https://364foodservice.vercel.app (projeto Vercel
