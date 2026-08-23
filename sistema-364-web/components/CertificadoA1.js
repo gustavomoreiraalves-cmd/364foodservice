@@ -28,7 +28,16 @@ export default function CertificadoA1({ empregadorId, resumoInicial, aoMudar }) 
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState('');
 
-  useEffect(() => { setResumo(resumoInicial || null); }, [resumoInicial?.id, empregadorId]);
+  // Troca de empresa em edição reaproveita esta instância (mesma posição na
+  // árvore) — sem isto, arquivo/senha/mensagem digitados para uma empresa
+  // vazariam para a próxima. Ver também `key={emEdicao.id}` em app/empresas/page.js,
+  // que já força remontagem; este reset cobre o caso de a key não bastar.
+  useEffect(() => {
+    setResumo(resumoInicial || null);
+    setArquivo(null);
+    setSenha('');
+    setMensagem('');
+  }, [resumoInicial?.id, empregadorId]);
 
   async function enviar(e) {
     e.preventDefault();

@@ -81,16 +81,28 @@ function Conteudo() {
 
   function aoSubmeter(e) {
     if (!cnpjValido(form.cnpj)) { e.preventDefault(); alert('CNPJ inválido: confira os dígitos.'); return; }
-    if (!editando && lista.some(x => x.cnpj === somenteDigitos(form.cnpj))) {
+    if (lista.some(x => x.id !== editando && x.cnpj === somenteDigitos(form.cnpj))) {
       e.preventDefault();
       alert('Já existe uma empresa com este CNPJ.');
+      return;
+    }
+    // grupo_id vem da empresa selecionada no topo (ver paraGravar); se o
+    // contexto ainda está carregando ou não há nenhuma empresa, o insert cairia
+    // numa violação de NOT NULL em inglês — barra aqui com mensagem em português.
+    if (!(empresaAtual?.grupo_id || empresas?.[0]?.grupo_id)) {
+      e.preventDefault();
+      alert('Selecione uma empresa antes de cadastrar (grupo não identificado).');
       return;
     }
     return salvar(e);
   }
 
-  async function vincularMarca(marcaId, empregadorId) {
+  async function vincularMarca(marcaId, empregadorId, alvoSelect) {
     const { error } = await supabase.from('empresas').update({ empregador_id: empregadorId || null }).eq('id', marcaId);
+    // O select de vínculo é não-controlado (defaultValue): sem zerar aqui, uma
+    // tentativa que falhou deixa o valor "preso" na opção escolhida e uma nova
+    // seleção da mesma marca não dispara onChange (o DOM já está nesse valor).
+    if (alvoSelect) alvoSelect.value = '';
     if (error) { alert('Não foi possível vincular: ' + error.message); return; }
     await carregar();
   }
@@ -98,7 +110,7 @@ function Conteudo() {
   const emEdicao = editando ? lista.find(x => x.id === editando) : null;
   const visiveis = mostrarInativos ? lista : lista.filter(x => x.ativo !== false);
   const campo = (k, label, props = {}) => (
-    <div><label>{label}</label><input value={form[k] ?? ''} onChange={e => setForm({ ...form, [k]: e.target.value })} {...props} /></div>
+    <div><label>{label}</label><input value={form[k] ?? ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })); }} {...props} /></div>
   );
 
   return (
@@ -110,7 +122,7 @@ function Conteudo() {
             <legend><strong>Dados fiscais</strong></legend>
             {campo('razao_social', 'Razão social', { required: true })}
             {campo('nome_fantasia', 'Nome fantasia')}
-            <div><label>CNPJ</label><input required value={formatarCnpj(form.cnpj)} onChange={e => setForm({ ...form, cnpj: e.target.value })} placeholder="00.000.000/0000-00" /></div>
+            <div><label>CNPJ</label><input required value={formatarCnpj(form.cnpj)} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, cnpj: v })); }} placeholder="00.000.000/0000-00" /></div>
             {campo('inscricao_estadual', 'Inscrição estadual')}
             {campo('inscricao_municipal', 'Inscrição municipal')}
             <div><label>Regime tributário</label>
@@ -144,7 +156,7 @@ function Conteudo() {
             {campo('contador_email', 'E-mail do contador', { type: 'email' })}
             {campo('contador_telefone', 'Telefone do contador')}
             <div style={{ gridColumn: '1 / -1' }}><label>Observações</label>
-              <textarea rows={3} value={form.observacoes ?? ''} onChange={e => setForm({ ...form, observacoes: e.target.value })} />
+              <textarea rows={3} value={form.observacoes ?? ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, observacoes: v })); }} />
             </div>
           </fieldset>
 
@@ -159,6 +171,7 @@ function Conteudo() {
         {emEdicao && (
           <>
             <CertificadoA1
+              key={emEdicao.id}
               empregadorId={emEdicao.id}
               resumoInicial={certificados[emEdicao.id]}
               aoMudar={r => setCertificados(c => ({ ...c, [emEdicao.id]: r || undefined }))}
@@ -173,7 +186,7 @@ function Conteudo() {
               {marcas.some(m => !m.empregador_id) && (
                 <div className="form-grid">
                   <div><label>Vincular marca sem pessoa jurídica</label>
-                    <select defaultValue="" onChange={e => { if (e.target.value) vincularMarca(e.target.value, emEdicao.id); }}>
+                    <select defaultValue="" onChange={e => { if (e.target.value) vincularMarca(e.target.value, emEdicao.id, e.target); }}>
                       <option value="">Selecione…</option>
                       {marcas.filter(m => !m.empregador_id).map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
                     </select>
