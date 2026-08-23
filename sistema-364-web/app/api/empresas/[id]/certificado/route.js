@@ -74,15 +74,12 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 
-  // Guarda o id do certificado ativo atual antes de desativar: se o insert
-  // abaixo falhar (inclusive por corrida com outro envio simultâneo), restaura
-  // este id em vez de deixar a empresa sem nenhum certificado ativo.
-  const { data: anterior } = await sb.from('certificados_digitais')
-    .select('id').eq('empregador_id', params.id).eq('ativo', true).maybeSingle();
-
   // Substituição = desativa o anterior e insere o novo; o histórico fica.
-  const { error: errDesativa } = await sb.from('certificados_digitais')
-    .update({ ativo: false }).eq('empregador_id', params.id).eq('ativo', true);
+  // O `.select('id')` no update devolve exatamente as linhas que ESTA requisição
+  // desativou — não um id lido antes, que uma corrida poderia deixar estale (o
+  // update de outra requisição concorrente já teria mudado o que estava ativo).
+  const { data: desativados, error: errDesativa } = await sb.from('certificados_digitais')
+    .update({ ativo: false }).eq('empregador_id', params.id).eq('ativo', true).select('id');
   if (errDesativa) return NextResponse.json({ error: errDesativa.message }, { status: 500 });
 
   const { data, error } = await sb.from('certificados_digitais').insert([{
@@ -98,10 +95,14 @@ export async function POST(request, { params }) {
     enviado_por: user.id,
   }]).select('id, titular, emissor, cnpj_certificado, numero_serie, valido_de, valido_ate, created_at').single();
   if (error) {
-    // Desfaz a desativação: sem isto, um insert que falha (inclusive a corrida
-    // abaixo) deixaria a empresa sem nenhum certificado ativo.
-    if (anterior) {
-      await sb.from('certificados_digitais').update({ ativo: true }).eq('id', anterior.id);
+    // Desfaz exatamente a desativação que este request fez: sem isto, um insert
+    // que falha (inclusive a corrida abaixo) deixaria a empresa sem nenhum
+    // certificado ativo.
+    let erroRestauro;
+    if (desativados?.length) {
+      const { error: errRestaura } = await sb.from('certificados_digitais')
+        .update({ ativo: true }).in('id', desativados.map(d => d.id));
+      erroRestauro = errRestaura;
     }
     // Dois envios simultâneos para a mesma empresa colidem no índice único
     // parcial (um ativo por empregador); quem perde a corrida cai aqui.
@@ -110,7 +111,12 @@ export async function POST(request, { params }) {
         error: 'Outro envio para esta empresa foi processado ao mesmo tempo. Recarregue a tela e tente de novo.',
       }, { status: 409 });
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Se o restauro também falhar (por exemplo 23505: um terceiro envio já
+    // ativou outra linha para este empregador), não é um erro de verdade — a
+    // empresa continua com exatamente um certificado ativo, só que não é mais
+    // o antigo. Só avisamos na mensagem, sem tratar como falha nova.
+    const sufixo = erroRestauro ? ' Não foi possível reativar o certificado anterior: ' + erroRestauro.message : '';
+    return NextResponse.json({ error: error.message + sufixo }, { status: 500 });
   }
 
   return NextResponse.json({ certificado: resumoCertificado(data), aviso });
