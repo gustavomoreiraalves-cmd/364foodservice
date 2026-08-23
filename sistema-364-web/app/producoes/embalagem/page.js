@@ -3,22 +3,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { hoje, fmtDate } from '../../../lib/format';
-import { proximaFichaEmbalagem, prefixoFichaEmbalagem } from '../../../lib/embalagem';
+import { proximaFichaEmbalagem, prefixoFichaEmbalagem, STATUS_LABELS, STATUS_TAG } from '../../../lib/embalagem';
 import AppShell from '../../../components/AppShell';
 import ProducaoTabs from '../../../components/ProducaoTabs';
 import { useEmpresaAtual } from '../../../lib/empresa';
-
-const STATUS_LABELS = {
-  rascunho: 'Rascunho',
-  finalizada: 'Finalizada',
-  cancelada: 'Cancelada',
-};
-
-const STATUS_TAG = {
-  rascunho: 'warn',
-  finalizada: 'ok',
-  cancelada: 'bad',
-};
 
 export default function EmbalagemPage() {
   return (

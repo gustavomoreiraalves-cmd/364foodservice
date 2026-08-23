@@ -8,6 +8,24 @@ import { proximoNumeroFicha } from './format.js';
 
 export const STATUS_EMBALAGEM = ['rascunho', 'finalizada', 'cancelada'];
 
+// Rótulo em português e classe visual (`tag ok/warn/bad`) de cada status —
+// achado da revisão final: as duas telas de embalagem
+// (app/producoes/embalagem/page.js e app/producoes/embalagem/[id]/page.js)
+// duplicavam este par de objetos literalmente, e `STATUS_EMBALAGEM`, acima,
+// não era consumido por nenhuma das duas. Fonte única aqui: quem editar um
+// rótulo ou uma cor edita uma vez só.
+export const STATUS_LABELS = {
+  rascunho: 'Rascunho',
+  finalizada: 'Finalizada',
+  cancelada: 'Cancelada',
+};
+
+export const STATUS_TAG = {
+  rascunho: 'warn',
+  finalizada: 'ok',
+  cancelada: 'bad',
+};
+
 const num = v => (v === null || v === undefined || v === '' ? null : Number(v));
 
 export function prefixoFichaEmbalagem(dataStr) {

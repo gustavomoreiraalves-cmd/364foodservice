@@ -594,4 +594,72 @@ begin
   raise notice 'OK 12: ficha em rascunho continua editável — cabeçalho e itens';
 end $$;
 
+-- Cenário 13: `fn_embalagem_bloquear_edicao` passou a travar a ficha-mãe com
+-- `for share` antes de ler o status (Important 2 da revisão final) — a
+-- corrida de verdade é entre DUAS transações concorrentes (uma inserindo
+-- item, outra finalizando a ficha ao mesmo tempo), e este script roda tudo
+-- numa sessão psql só: não há como abrir uma segunda transação de verdade
+-- aqui dentro e provar que uma bloqueia a outra até a primeira commitar. Isso
+-- fica fora do que dá para cobrir sem duas sessões — precisaria de dois
+-- processos `psql` concorrentes (fora do escopo deste script) para provar a
+-- serialização em si.
+--
+-- O que ESTE cenário prova, dentro de uma sessão só: que o `for share`
+-- novo não regrediu nenhum caminho que já funcionava. Duas coisas
+-- especificamente —
+--
+--   a) uma transação que já segura `for share` na ficha (por ter chamado o
+--      próprio select manualmente, simulando o que o trigger faz) continua
+--      livre para inserir, atualizar e apagar itens da mesma ficha sem se
+--      autobloquear — locks de linha em Postgres não bloqueiam a MESMA
+--      transação que já os segura, então se isso travasse aqui seria sinal
+--      de erro de sintaxe ou de uma armadilha diferente (ex.: `for share`
+--      preso num contexto que vira `for update` em cascata), não da corrida
+--      em si;
+--   b) o ciclo completo lançar item → finalizar → cancelar continua gerando
+--      e desfazendo estoque como antes (cenários 3, 4 e 5 já cobrem isso
+--      linha a linha; aqui é só a confirmação de que rodar tudo tocando a
+--      MESMA ficha em sequência rápida, sem intervalo, não muda o resultado).
+do $$
+declare v_ficha uuid; v_item uuid; v_status text; v_gerou int;
+begin
+  insert into embalagens (lote, data, empresa_id)
+    values ('EMB-260822-951', current_date, '11111111-1111-1111-1111-111111111111')
+    returning id into v_ficha;
+
+  -- 13a: segura o mesmo tipo de lock que o trigger agora segura, ANTES de
+  -- inserir o item — se `for share` tivesse virado autobloqueio dentro da
+  -- própria transação, o insert abaixo travaria (ou o script inteiro
+  -- travaria esperando um lock que ele mesmo já tem).
+  perform status from embalagens where id = v_ficha for share;
+
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
+    values (v_ficha, '44444444-4444-4444-4444-444444444444', '66666666-6666-6666-6666-666666666666',
+            4, 2, date '2026-12-21', '11111111-1111-1111-1111-111111111111')
+    returning id into v_item;
+
+  update embalagem_itens set quantidade = 5, peso_total_kg = 2.5 where id = v_item;
+
+  -- 13b: o ciclo finalizar → conferir estoque → cancelar → conferir que
+  -- desfez, tocando a MESMA ficha que já está com o lock manual acima.
+  update embalagens set status = 'finalizada' where id = v_ficha;
+  select status into v_status from embalagens where id = v_ficha;
+  if v_status <> 'finalizada' then
+    raise exception 'FALHA 13a: ficha não finalizou com o lock manual ativo (status %)', v_status;
+  end if;
+
+  select count(*) into v_gerou from producoes where embalagem_id = v_ficha;
+  if v_gerou <> 1 then
+    raise exception 'FALHA 13b: finalizar com o item lançado sob for share não gerou 1 linha de estoque (gerou %)', v_gerou;
+  end if;
+
+  update embalagens set status = 'cancelada', cancelada_motivo = 'teste do cenário 13' where id = v_ficha;
+  select count(*) into v_gerou from producoes where embalagem_id = v_ficha;
+  if v_gerou <> 0 then
+    raise exception 'FALHA 13c: cancelar não desfez o estoque gerado sob for share (sobrou %)', v_gerou;
+  end if;
+
+  raise notice 'OK 13: for share na ficha-mãe não regrediu inserir/atualizar item nem o ciclo finalizar/cancelar (a corrida em si exige duas sessões — fora do escopo deste script)';
+end $$;
+
 commit;

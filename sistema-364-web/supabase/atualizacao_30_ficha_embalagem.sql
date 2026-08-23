@@ -177,9 +177,20 @@ comment on column public.embalagem_itens.validade is
 -- Quantidade embalada é contagem de UNIDADES: fração de embalagem não existe
 -- na etiqueta nem na prateleira. `peso_total_kg` aceita nulo (a coluna já era
 -- nula em produção), mas quando vier, vem positivo.
+--
+-- `quantidade`, ao contrário de `peso_total_kg`, NÃO aceita nulo — conferido
+-- direto no schema de produção (achado da revisão final): a coluna já é
+-- `not null` desde antes desta migração, mesma nulabilidade que o fixture de
+-- teste (`tests/migracao-30/fixture.sql`) já declarava. O check antigo tinha
+-- `quantidade is null or (...)`, uma tolerância que nunca podia disparar de
+-- verdade (a própria coluna barra o null primeiro com 23502) e que, se um dia
+-- a coluna virasse nulável, deixaria passar em silêncio um item que o
+-- `sum(i.quantidade)` de `fn_embalagem_gerar_producao` simplesmente ignoraria
+-- — nenhuma das quatro recusas daquela função cobre "item sem quantidade".
+-- Sem a tolerância morta, a checagem passa a exigir o que a coluna já exige.
 alter table public.embalagem_itens drop constraint if exists embalagem_itens_quantidade_valida;
 alter table public.embalagem_itens add constraint embalagem_itens_quantidade_valida
-  check (quantidade is null or (quantidade > 0 and quantidade = floor(quantidade)));
+  check (quantidade > 0 and quantidade = floor(quantidade));
 
 alter table public.embalagem_itens drop constraint if exists embalagem_itens_peso_valido;
 alter table public.embalagem_itens add constraint embalagem_itens_peso_valido
@@ -222,6 +233,19 @@ comment on column public.producoes.embalagem_id is
 -- sozinho, sem depender do `if not found`. Com `is distinct from`, o `if not
 -- found` deixa de ser redundante — é ele quem garante que a cascata passa; sem
 -- ele, `v_status` ficaria nulo e a exceção dispararia.
+--
+-- `for share` no select da ficha-mãe: achado da revisão final (Important 2).
+-- Sem o lock, em `read committed` duas transações concorrentes — uma inserindo
+-- item, outra finalizando a ficha — podiam ler `status = 'rascunho'` cada uma a
+-- partir do snapshot que enxergava ANTES da outra confirmar, e as duas
+-- prosseguirem: o insert do item commitava depois que a finalização já tinha
+-- rodado `fn_embalagem_gerar_producao` sem ele. O item nascia numa ficha
+-- `finalizada` sem nunca ter sido contado no estoque gerado, e a imutabilidade
+-- não deixa corrigir depois — só cancelar e refazer a ficha inteira. `for
+-- share` (não `for update`) basta: o objetivo é só serializar contra a
+-- transação de UPDATE do status, que sempre pede lock exclusivo da linha por
+-- conta própria; múltiplos inserts de item concorrentes entre si continuam
+-- livres para coexistir, sem se bloquear um ao outro.
 create or replace function public.fn_embalagem_bloquear_edicao() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -231,7 +255,8 @@ declare
   v_lote_empresa uuid;
 begin
   v_ficha := coalesce(new.embalagem_id, old.embalagem_id);
-  select status, empresa_id into v_status, v_ficha_empresa from public.embalagens where id = v_ficha;
+  select status, empresa_id into v_status, v_ficha_empresa
+    from public.embalagens where id = v_ficha for share;
   -- Ficha já apagada: é a cascata do `on delete cascade`, deixa passar.
   if not found then
     return coalesce(new, old);
@@ -580,6 +605,18 @@ begin
         select i.produto_id,
                sum(i.quantidade) as quantidade,
                sum(i.peso_total_kg) as peso_kg,
+               -- Suposição não documentada em lugar nenhum antes desta migração
+               -- (achado da revisão final): `recebimento_itens.custo_unitario` é
+               -- tratado aqui como custo por QUILO de matéria-prima, não por
+               -- unidade recebida — por isso o peso defumado (kg) divide pelo
+               -- rendimento (kg/kg) e só então multiplica pelo custo. É a mesma
+               -- suposição que a Fase 2 já faz (app/producoes/completa/page.js,
+               -- que soma `materia_prima.quantidade * custo_unitario` tratando o
+               -- resultado como custo em reais de um consumo em quilos): as duas
+               -- telas cadastram `custo_unitario` como "custo unitário padrão
+               -- (R$)" por matéria-prima cuja unidade é tipicamente `kg`
+               -- (app/materias-primas/page.js), nunca por caixa ou unidade de
+               -- embalagem do fornecedor.
                round(sum(i.peso_total_kg
                          / public.fn_rendimento_defumacao(i.recebimento_item_id, i.empresa_id)
                          * ri.custo_unitario), 2) as custo_total,
@@ -668,10 +705,24 @@ begin
     -- Fase 3 do controle de lote: a etiqueta identifica a unidade embalada.
     -- Módulo `producoes` porque a ficha de embalagem mora dentro de Produção,
     -- junto com a defumação — é a mesma permissão que abre a tela.
+    --
+    -- Confere o status da FICHA-MÃE (join com `embalagens`), não só o item —
+    -- achado da revisão final (Menor, junto do Important 2): o ramo
+    -- `producao_interna` acima recusa produção não finalizada, mas este ramo
+    -- não conferia nada. A tela só oferece o botão de imprimir com
+    -- `ficha.status === 'finalizada'`, então na prática isso nunca dispara por
+    -- ali — mas a RPC é `security definer` e chamável direto por qualquer um
+    -- que tenha permissão de `producoes` e saiba o uuid do item, sem passar
+    -- pela tela: defesa em profundidade, mesmo padrão do ramo irmão.
     v_modulo := 'producoes';
-    select empresa_id into v_empresa
-      from embalagem_itens where id = p_source_id;
+    select ei.empresa_id, e.status into v_empresa, v_status
+      from embalagem_itens ei
+      join embalagens e on e.id = ei.embalagem_id
+     where ei.id = p_source_id;
     if not found then raise exception 'Item de embalagem não encontrado.'; end if;
+    if v_status <> 'finalizada' then
+      raise exception 'Etiquetas só podem ser impressas para ficha de embalagem finalizada (está "%").', v_status;
+    end if;
   else
     raise exception 'source_type inválido: %', p_source_type;
   end if;

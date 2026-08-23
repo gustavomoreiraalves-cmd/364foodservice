@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
 import { fmtDate } from '../../../../lib/format';
 import { buscarPorIdsEmBlocos, CONSERVACOES, fmtDateTime } from '../../../../lib/producao';
-import { saldoDefumado, validadeDoItem, itemEmbalagemValido } from '../../../../lib/embalagem';
+import { saldoDefumado, validadeDoItem, itemEmbalagemValido, STATUS_LABELS, STATUS_TAG } from '../../../../lib/embalagem';
 import { inspecaoAprovada } from '../../../../lib/qualidade';
 import { useAuth } from '../../../../lib/auth';
 import { qrSvg } from '../../../../lib/qr';
@@ -15,18 +15,6 @@ import FichaPrint, { imprimirFicha } from '../../../../components/FichaPrint';
 import EtiquetaPrint from '../../../../components/EtiquetaPrint';
 import ModalEtiquetas from '../../../../components/ModalEtiquetas';
 import { useEmpresaAtual } from '../../../../lib/empresa';
-
-const STATUS_LABELS = {
-  rascunho: 'Rascunho',
-  finalizada: 'Finalizada',
-  cancelada: 'Cancelada',
-};
-
-const STATUS_TAG = {
-  rascunho: 'warn',
-  finalizada: 'ok',
-  cancelada: 'bad',
-};
 
 const ITEM_VAZIO = {
   recebimento_item_id: '',
@@ -226,6 +214,12 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
   // segundo — e último — portão antes da imutabilidade: mesmo padrão do
   // `confirmaSemPesoFinal` da ficha de defumação.
   const [confirmaSemValidadeFinalizar, setConfirmaSemValidadeFinalizar] = useState(false);
+  // Mesmo papel de `confirmaSemValidadeFinalizar`, para o responsável pela
+  // manipulação (achado da revisão final: `finalizar()` não exigia esse
+  // campo). É o campo do registro sanitário na ficha de papel — sai "—" na
+  // ficha impressa — e `producoes.responsavel_id` herda o que estiver aqui;
+  // depois de finalizar a imutabilidade do cabeçalho impede preencher depois.
+  const [confirmaSemResponsavelFinalizar, setConfirmaSemResponsavelFinalizar] = useState(false);
 
   const [cancelando, setCancelando] = useState(false);
   const [motivoCancelamento, setMotivoCancelamento] = useState('');
@@ -684,6 +678,7 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
     // já fica desabilitado sem a caixa marcada, isto é o cinto e suspensório
     // contra clique disparado por outro caminho.
     if (itensSemValidade.length > 0 && !confirmaSemValidadeFinalizar) return;
+    if (semResponsavel && !confirmaSemResponsavelFinalizar) return;
     setSalvandoFinalizar(true);
     setErroFinalizar('');
     const { data, error } = await supabase.from('embalagens')
@@ -844,6 +839,36 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
   // dentro de cada grupo.
   const produtosOrdenados = [...produtos].sort((a, b) => (b.rastreado ? 1 : 0) - (a.rastreado ? 1 : 0));
 
+  if (loading) return <p className="muted">Carregando…</p>;
+
+  if (erroCarregar) {
+    return (
+      <div className="banner bad">
+        Não foi possível carregar a ficha de embalagem: {erroCarregar}{' '}
+        <button className="btn secondary small" onClick={carregar}>Tentar novamente</button>
+      </div>
+    );
+  }
+
+  if (naoEncontrada) {
+    return (
+      <div className="banner info">
+        Ficha de embalagem não encontrada nesta empresa.{' '}
+        <button className="btn secondary small" onClick={() => router.push('/producoes/embalagem')}>Voltar para a lista</button>
+      </div>
+    );
+  }
+
+  // Daqui para baixo `cabecalho`/`cabecalhoSalvo` já estão garantidamente
+  // preenchidos (carregar() rodou com sucesso — os três guardas acima
+  // cobrem loading, erro de carga e ficha não encontrada). Achado da
+  // revisão final: estas derivações ficavam ANTES dos guardas, e como os
+  // dois estados nascem `useState(null)` e só ganham valor dentro do
+  // `useEffect` de carregar() — depois da primeira renderização —, a
+  // primeira renderização estourava aqui (`cabecalho.data` de `null`) e a
+  // tela inteira da Fase 3 não abria. Mesmo padrão que a ficha de
+  // defumação já segue (app/producoes/defumacao/[id]/page.js).
+
   // Enquanto a data digitada (`cabecalho.data`) e a data gravada
   // (`cabecalhoSalvo.data`) divergirem — `salvarCampo('data')` ainda não
   // rodou, ou falhou —, o lançamento de item fica bloqueado (ver
@@ -879,25 +904,31 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
   // `itensSemPesoFinal` na ficha de defumação.
   const itensSemValidade = itensDaFicha.filter(it => !it.validade);
 
-  if (loading) return <p className="muted">Carregando…</p>;
+  // Produtos lançados nesta ficha que NÃO estão marcados `rastreado` — achado
+  // da revisão final (Important 3). A ficha aceita qualquer produto ativo de
+  // propósito (filtrar por `rastreado` deixaria a tela inoperante enquanto a
+  // marcação nasce `false` para todo produto já cadastrado — ver comentário
+  // no `useState` de `produtos`, acima), mas isso significa que um produto
+  // lançado aqui sem a marcação entra no estoque por ESTA ficha E continua
+  // lançável pela Produção Completa — exatamente o caminho duplo que a
+  // marcação existe para eliminar. Não trava (marcar como rastreado é decisão
+  // do dono do cadastro, não algo que esta tela deva impor): só avisa, no
+  // mesmo painel e formato de `itensSemValidade`, mas sem checkbox de
+  // confirmação — o "Confirmar finalização" já basta como reconhecimento.
+  // `[...new Map(...).values()]` deduplica por produto (dois itens do mesmo
+  // produto não repetem o nome na lista), mesma técnica de `qtdProdutosLancados`.
+  const produtosNaoRastreadosNaFicha = [...new Map(
+    itensDaFicha
+      .map(it => produtos.find(p => p.id === it.produto_id))
+      .filter(p => p && !p.rastreado)
+      .map(p => [p.id, p])
+  ).values()];
 
-  if (erroCarregar) {
-    return (
-      <div className="banner bad">
-        Não foi possível carregar a ficha de embalagem: {erroCarregar}{' '}
-        <button className="btn secondary small" onClick={carregar}>Tentar novamente</button>
-      </div>
-    );
-  }
-
-  if (naoEncontrada) {
-    return (
-      <div className="banner info">
-        Ficha de embalagem não encontrada nesta empresa.{' '}
-        <button className="btn secondary small" onClick={() => router.push('/producoes/embalagem')}>Voltar para a lista</button>
-      </div>
-    );
-  }
+  // Responsável pela manipulação em branco no momento de finalizar — achado
+  // da revisão final. Usa `cabecalhoSalvo`, não `cabecalho`: mesma regra de
+  // fonte de verdade que `dataDivergente` já segue (o que importa é o que
+  // está GRAVADO, não o que está digitado e ainda não salvo).
+  const semResponsavel = !cabecalhoSalvo.responsavel_id;
 
   return (
     <>
@@ -911,7 +942,7 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {ficha.status === 'rascunho' && itensDaFicha.length > 0 && !finalizando && (
-              <button className="btn small" onClick={() => { setConfirmaSemValidadeFinalizar(false); setFinalizando(true); }}>Finalizar ficha</button>
+              <button className="btn small" onClick={() => { setConfirmaSemValidadeFinalizar(false); setConfirmaSemResponsavelFinalizar(false); setFinalizando(true); }}>Finalizar ficha</button>
             )}
             {ficha.status !== 'cancelada' && !cancelando && (
               <button className="btn danger small" onClick={() => setCancelando(true)}>Cancelar ficha</button>
@@ -962,12 +993,39 @@ function Conteudo({ setFichaImpressao, setEtiqueta }) {
                 </label>
               </div>
             )}
+            {produtosNaoRastreadosNaFicha.length > 0 && (
+              <div className="banner" style={{ marginTop: 10 }}>
+                <p style={{ margin: 0 }}>
+                  {produtosNaoRastreadosNaFicha.length === 1 ? 'Este produto não está' : 'Estes produtos não estão'} marcado{produtosNaoRastreadosNaFicha.length === 1 ? '' : 's'} como
+                  {' '}<b>rastreado</b> no cadastro: {produtosNaoRastreadosNaFicha.map(p => p.nome).join(', ')}.
+                  {' '}{produtosNaoRastreadosNaFicha.length === 1 ? 'Ele' : 'Eles'} também pode{produtosNaoRastreadosNaFicha.length === 1 ? '' : 'm'} ser lançado{produtosNaoRastreadosNaFicha.length === 1 ? '' : 's'} pela Produção Completa — marcar como rastreado em Produtos evita a contagem dupla do mesmo estoque pelos dois caminhos. Isto é só um aviso; não impede finalizar.
+                </p>
+              </div>
+            )}
+            {semResponsavel && (
+              <div className="banner" style={{ marginTop: 10 }}>
+                <p style={{ margin: 0 }}>
+                  Nenhum <b>responsável pela manipulação</b> foi informado no cabeçalho. É campo do registro
+                  sanitário — sai "—" na ficha impressa, e a produção gerada por esta ficha herda esse
+                  responsável em branco. Depois de finalizar, o cabeçalho trava e <b>não será mais possível
+                  preencher</b>.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, fontWeight: 400 }}>
+                  <input type="checkbox" checked={confirmaSemResponsavelFinalizar}
+                    onChange={e => setConfirmaSemResponsavelFinalizar(e.target.checked)}
+                    style={{ marginTop: 2 }} />
+                  <span>Estou ciente e quero finalizar mesmo assim.</span>
+                </label>
+              </div>
+            )}
             <div className="row-actions">
               <button className="btn" onClick={finalizar}
-                disabled={salvandoFinalizar || (itensSemValidade.length > 0 && !confirmaSemValidadeFinalizar)}>
+                disabled={salvandoFinalizar
+                  || (itensSemValidade.length > 0 && !confirmaSemValidadeFinalizar)
+                  || (semResponsavel && !confirmaSemResponsavelFinalizar)}>
                 {salvandoFinalizar ? 'Finalizando…' : 'Confirmar finalização'}
               </button>
-              <button className="btn secondary" onClick={() => { setFinalizando(false); setErroFinalizar(''); setConfirmaSemValidadeFinalizar(false); }}>Voltar</button>
+              <button className="btn secondary" onClick={() => { setFinalizando(false); setErroFinalizar(''); setConfirmaSemValidadeFinalizar(false); setConfirmaSemResponsavelFinalizar(false); }}>Voltar</button>
             </div>
           </div>
         )}
