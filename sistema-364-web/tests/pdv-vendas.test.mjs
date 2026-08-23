@@ -14,6 +14,10 @@ const V = [
 
 test('periodoPadrao e periodoAnterior', () => {
   assert.deepEqual(periodoPadrao(new Date('2026-08-23T15:00:00Z')), { de: '2026-08-01', ate: '2026-08-23' });
+  // 02:00Z de 01/09 já é 22:00 de 31/08 em Porto Velho (UTC-4): "hoje" ainda é agosto.
+  assert.deepEqual(periodoPadrao(new Date('2026-09-01T02:00:00Z')), { de: '2026-08-01', ate: '2026-08-31' });
+  // 03:59Z de 24/08 é 23:59 de 23/08 local: "hoje" ainda é 23, não 24.
+  assert.deepEqual(periodoPadrao(new Date('2026-08-24T03:59:00Z')), { de: '2026-08-01', ate: '2026-08-23' });
   assert.deepEqual(periodoAnterior({ de: '2026-08-01', ate: '2026-08-23' }), { de: '2026-07-09', ate: '2026-07-31' });
   assert.deepEqual(periodoAnterior({ de: '2026-08-21', ate: '2026-08-21' }), { de: '2026-08-20', ate: '2026-08-20' });
 });

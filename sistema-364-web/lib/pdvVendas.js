@@ -8,12 +8,16 @@ export const ROTULOS_FORMA = {
 
 const iso = d => d.toISOString().slice(0, 10);
 const dataUtc = s => new Date(s + 'T00:00:00Z');
-const somaDias = (s, n) => iso(new Date(dataUtc(s).getTime() + n * 86400000));
+const somaDias = (s, dias) => iso(new Date(dataUtc(s).getTime() + dias * 86400000));
 const div = (a, b) => (b ? a / b : 0);
 const n = v => Number(v) || 0;
+// Porto Velho é UTC-4 o ano todo (sem horário de verão). "Hoje" da tela
+// precisa ser o dia local, não o dia UTC — depois das 20h local já é
+// amanhã em UTC, e o mês corrente sumiria do período padrão.
+const FUSO_MS = 4 * 36e5;
 
 export function periodoPadrao(agora = new Date()) {
-  const ate = iso(agora);
+  const ate = iso(new Date(agora.getTime() - FUSO_MS));
   return { de: ate.slice(0, 8) + '01', ate };
 }
 
@@ -103,7 +107,7 @@ export function statusImportacao(ultima, agora = new Date()) {
   if (!ultima) return { texto: 'Nenhuma importação registrada', alerta: true };
   const quando = new Date(ultima.iniciado_em);
   const horas = (agora - quando) / 36e5;
-  const local = new Date(quando.getTime() - 4 * 36e5);
+  const local = new Date(quando.getTime() - FUSO_MS);
   const dd = String(local.getUTCDate()).padStart(2, '0');
   const mm = String(local.getUTCMonth() + 1).padStart(2, '0');
   const hh = String(local.getUTCHours()).padStart(2, '0');
