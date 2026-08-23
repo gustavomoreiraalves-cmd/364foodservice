@@ -267,32 +267,77 @@ insert into funcionarios (id, empresa_id, nome) values
 
 insert into materias_primas (id, empresa_id, nome) values
   ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Costela Bovina'),
+  ('34343434-3434-3434-3434-343434343434', '11111111-1111-1111-1111-111111111111', 'Tempero Seco'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '99999999-9999-9999-9999-999999999999', 'Picanha');
 
 insert into produtos (id, codigo, nome, empresa_id) values
   ('44444444-4444-4444-4444-444444444444', '0364-001', 'Costela Defumada 500g', '11111111-1111-1111-1111-111111111111'),
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', '0364-002', 'Costela Defumada 1kg', '11111111-1111-1111-1111-111111111111');
 
+-- Ficha técnica REALISTA e, de propósito, incoerente com o peso que os cenários
+-- embalam: 0,6 kg de costela crua por unidade de 500 g (a defumação perde peso),
+-- mais um tempero. Duas coisas dependem desses números:
+--
+--   • 50 unidades × 0,6 kg = 30 kg, e o cenário 4 embala 23,4 kg. Enquanto a
+--     ficha técnica batia com o peso embalado (era 0,5 kg/un para 25 kg), trocar
+--     `peso × custo` por `unidades × ficha_tecnica × custo` dava o MESMO
+--     resultado e o cenário não distinguia as fórmulas.
+--   • O tempero é caro (R$ 80,00/kg) e está na ficha técnica do produto A. Se o
+--     custo voltar a ser média ponderada das matérias-primas da ficha técnica,
+--     em vez de vir do lote declarado no item, o número do cenário 4 muda na
+--     hora. `ficha_tecnica` NÃO é consultada pelo trigger novo — este tempero
+--     está aqui exatamente para provar isso.
 insert into ficha_tecnica (produto_id, materia_prima_id, quantidade, empresa_id) values
-  ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 0.5, '11111111-1111-1111-1111-111111111111'),
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '33333333-3333-3333-3333-333333333333', 1.0, '11111111-1111-1111-1111-111111111111');
+  ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 0.6, '11111111-1111-1111-1111-111111111111'),
+  ('44444444-4444-4444-4444-444444444444', '34343434-3434-3434-3434-343434343434', 0.02, '11111111-1111-1111-1111-111111111111'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', '33333333-3333-3333-3333-333333333333', 1.2, '11111111-1111-1111-1111-111111111111');
 
 insert into recebimentos (id, empresa_id) values
   ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111'),
   ('cccccccc-cccc-cccc-cccc-cccccccccccc', '99999999-9999-9999-9999-999999999999');
 
--- Lote aprovado: R$ 21,90/kg. É o único que pode entrar no custo médio.
+-- ---------- OS LOTES E O QUE ELES RENDERAM ----------
+-- O custo do produto embalado vem do LOTE de origem e do RENDIMENTO real da
+-- defumação daquele lote (atualização 30). Os números abaixo são escolhidos
+-- para que cada regra da conta tenha um jeito de falhar visível.
+
+-- LOTE A — aprovado, R$ 21,90/kg, 200 kg recebidos.
 insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, volumes, empresa_id)
   values ('66666666-6666-6666-6666-666666666666', '55555555-5555-5555-5555-555555555555',
-          '33333333-3333-3333-3333-333333333333', 'LT-260822-001', 180, 21.90, 20,
+          '33333333-3333-3333-3333-333333333333', 'LT-260822-001', 200, 21.90, 20,
           '11111111-1111-1111-1111-111111111111');
 
--- Lote REJEITADO da mesma matéria-prima, caríssimo: se o trigger novo ignorar
--- `inspecoes_qualidade` e somar tudo, o custo médio sai 29,71 em vez de 21,90 e
--- o cenário 4 acusa. É o que torna a leitura da inspeção discriminante.
+-- LOTE REJEITADO, da mesma matéria-prima e caríssimo. O cenário 4 tenta
+-- finalizar uma ficha que o consome e exige recusa: é o que torna a leitura de
+-- `inspecoes_qualidade` discriminante.
 insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
   values ('67676767-6767-6767-6767-676767676767', '55555555-5555-5555-5555-555555555555',
           '33333333-3333-3333-3333-333333333333', 'LT-260822-002', 20, 100.00,
+          '11111111-1111-1111-1111-111111111111');
+
+-- LOTE C — aprovado, R$ 30,00/kg e rendimento DIFERENTE do lote A. O cenário 4
+-- embala os dois na mesma ficha: se o custo voltar a ser uma média por produto,
+-- em vez de item a item pelo lote de cada um, o número muda.
+insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+  values ('68686868-6868-6868-6868-686868686868', '55555555-5555-5555-5555-555555555555',
+          '33333333-3333-3333-3333-333333333333', 'LT-260822-003', 100, 30.00,
+          '11111111-1111-1111-1111-111111111111');
+
+-- LOTE D — aprovado, mas cuja única defumação está em RASCUNHO: não tem
+-- rendimento utilizável. O cenário 4 exige que finalizar embalagem dele seja
+-- recusado.
+insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+  values ('69696969-6969-6969-6969-696969696969', '55555555-5555-5555-5555-555555555555',
+          '33333333-3333-3333-3333-333333333333', 'LT-260822-004', 50, 40.00,
+          '11111111-1111-1111-1111-111111111111');
+
+-- LOTE DE TEMPERO — aprovado e caro, ligado ao produto A pela ficha técnica.
+-- Nenhum item de embalagem aponta para ele: se o custo voltar a somar as
+-- matérias-primas da ficha técnica, este lote entra na conta e o cenário 4
+-- acusa.
+insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quantidade, custo_unitario, empresa_id)
+  values ('6a6a6a6a-6a6a-6a6a-6a6a-6a6a6a6a6a6a', '55555555-5555-5555-5555-555555555555',
+          '34343434-3434-3434-3434-343434343434', 'LT-260822-005', 500, 80.00,
           '11111111-1111-1111-1111-111111111111');
 
 -- Lote de OUTRA empresa, para o cenário 8b.
@@ -304,14 +349,55 @@ insert into recebimento_itens (id, recebimento_id, materia_prima_id, lote, quant
 insert into inspecoes_qualidade (recebimento_item_id, empresa_id, status) values
   ('66666666-6666-6666-6666-666666666666', '11111111-1111-1111-1111-111111111111', 'aprovado'),
   ('67676767-6767-6767-6767-676767676767', '11111111-1111-1111-1111-111111111111', 'rejeitado'),
+  ('68686868-6868-6868-6868-686868686868', '11111111-1111-1111-1111-111111111111', 'aprovado'),
+  ('69696969-6969-6969-6969-696969696969', '11111111-1111-1111-1111-111111111111', 'aprovado'),
+  ('6a6a6a6a-6a6a-6a6a-6a6a-6a6a6a6a6a6a', '11111111-1111-1111-1111-111111111111', 'aprovado'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '99999999-9999-9999-9999-999999999999', 'aprovado');
 
+-- O lote A foi ao defumador em DUAS fornadas finalizadas, com rendimentos
+-- diferentes (0,50 e 0,3875), e uma terceira ainda em rascunho:
+--   agregado das finalizadas = (50 + 31) ÷ (100 + 80) = 81 ÷ 180 = 0,45
+--   só a primeira fornada    = 50 ÷ 100                        = 0,50
+--   contando o rascunho      = 101 ÷ 200                       = 0,505
+-- Os três números são diferentes de propósito: só quem agrega as finalizadas —
+-- e só elas — chega no custo que o cenário 4 exige.
 insert into defumacoes (id, lote, responsavel_id, empresa_id, status) values
   ('88888888-8888-8888-8888-888888888888', 'DEF-260822-001',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada'),
+  ('89898989-8989-8989-8989-898989898989', 'DEF-260822-002',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada'),
+  ('8a8a8a8a-8a8a-8a8a-8a8a-8a8a8a8a8a8a', 'DEF-260822-003',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'rascunho'),
+  ('8b8b8b8b-8b8b-8b8b-8b8b-8b8b8b8b8b8b', 'DEF-260822-004',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada'),
+  ('8c8c8c8c-8c8c-8c8c-8c8c-8c8c8c8c8c8c', 'DEF-260822-005',
+   '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'rascunho'),
+  ('8d8d8d8d-8d8d-8d8d-8d8d-8d8d8d8d8d8d', 'DEF-260822-006',
    '22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'finalizada');
-insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id, peso_bruto_kg, peso_final_kg, empresa_id)
-  values ('88888888-8888-8888-8888-888888888888', '33333333-3333-3333-3333-333333333333',
-          '66666666-6666-6666-6666-666666666666', 180, 81, '11111111-1111-1111-1111-111111111111');
+
+insert into defumacao_itens (defumacao_id, materia_prima_id, recebimento_item_id, peso_bruto_kg, peso_final_kg, empresa_id) values
+  -- Lote A, fornadas finalizadas.
+  ('88888888-8888-8888-8888-888888888888', '33333333-3333-3333-3333-333333333333',
+   '66666666-6666-6666-6666-666666666666', 100, 50, '11111111-1111-1111-1111-111111111111'),
+  ('89898989-8989-8989-8989-898989898989', '33333333-3333-3333-3333-333333333333',
+   '66666666-6666-6666-6666-666666666666', 80, 31, '11111111-1111-1111-1111-111111111111'),
+  -- Lote A, fornada em rascunho: peso ainda pode mudar, não conta.
+  ('8a8a8a8a-8a8a-8a8a-8a8a-8a8a8a8a8a8a', '33333333-3333-3333-3333-333333333333',
+   '66666666-6666-6666-6666-666666666666', 20, 20, '11111111-1111-1111-1111-111111111111'),
+  -- Lote C: rendimento 0,60.
+  ('8b8b8b8b-8b8b-8b8b-8b8b-8b8b8b8b8b8b', '33333333-3333-3333-3333-333333333333',
+   '68686868-6868-6868-6868-686868686868', 100, 60, '11111111-1111-1111-1111-111111111111'),
+  -- Lote D: só rascunho, então não tem rendimento nenhum utilizável.
+  ('8c8c8c8c-8c8c-8c8c-8c8c-8c8c8c8c8c8c', '33333333-3333-3333-3333-333333333333',
+   '69696969-6969-6969-6969-696969696969', 50, 25, '11111111-1111-1111-1111-111111111111'),
+  -- Lote REJEITADO, com defumação finalizada e rendimento perfeitamente
+  -- utilizável (0,45). Parece contraditório — lote reprovado não deveria ir ao
+  -- defumador —, e está aqui exatamente por isso: sem esta fornada, a ficha do
+  -- cenário 4b seria recusada por FALTA DE RENDIMENTO, e o cenário passaria
+  -- verde mesmo que a recusa por inspeção reprovada fosse removida do trigger.
+  -- Com ela, a única coisa que impede aquela ficha de finalizar é a inspeção.
+  ('8d8d8d8d-8d8d-8d8d-8d8d-8d8d8d8d8d8d', '33333333-3333-3333-3333-333333333333',
+   '67676767-6767-6767-6767-676767676767', 20, 9, '11111111-1111-1111-1111-111111111111');
 
 -- Ficha de embalagem LEGADA, anterior à 30: sem status, sem lote de origem no
 -- item, sem validade. Prova que a migração não quebra o que já está lançado.

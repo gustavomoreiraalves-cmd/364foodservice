@@ -44,15 +44,25 @@ begin
             '11111111-1111-1111-1111-111111111111')
     returning id into v_ficha;
 
+  -- Produto A, do LOTE A (custo 21,90/kg, rendimento 0,45): 18 kg embalados.
   insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
     values (v_ficha, '44444444-4444-4444-4444-444444444444', '66666666-6666-6666-6666-666666666666',
-            40, 20, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+            40, 18, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  -- Mesmo produto, LOTE C (custo 30,00/kg, rendimento 0,60): 5,4 kg. Dois lotes
+  -- de custos e rendimentos diferentes no MESMO produto — é o que prova que a
+  -- conta é item a item, não média da ficha.
   insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
-    values (v_ficha, '44444444-4444-4444-4444-444444444444', '66666666-6666-6666-6666-666666666666',
-            10, 5, date '2026-12-19', '11111111-1111-1111-1111-111111111111');
+    values (v_ficha, '44444444-4444-4444-4444-444444444444', '68686868-6868-6868-6868-686868686868',
+            10, 5.4, date '2026-12-19', '11111111-1111-1111-1111-111111111111');
+  -- Produto B, lote A, com validade.
   insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
     values (v_ficha, 'dddddddd-dddd-dddd-dddd-dddddddddddd', '66666666-6666-6666-6666-666666666666',
-            12, 12, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+            12, 11.7, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  -- Produto B de novo, SEM validade: a linha de estoque do produto B não pode
+  -- prometer prazo que estas 3 unidades não têm.
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, empresa_id)
+    values (v_ficha, 'dddddddd-dddd-dddd-dddd-dddddddddddd', '66666666-6666-6666-6666-666666666666',
+            3, 1.35, '11111111-1111-1111-1111-111111111111');
 
   raise notice 'OK 2: item entra em ficha de rascunho — o trigger que lia a coluna morta saiu';
 end $$;
@@ -81,64 +91,141 @@ end $$;
 -- PRODUTO (os dois itens do produto A viram uma linha só), com `embalagem_id`,
 -- `origem = 'embalagem'` e o lote da ficha.
 --
--- O custo confere que o trigger lê `inspecoes_qualidade`: o fixture tem um
--- segundo lote da mesma matéria-prima, REJEITADO, a R$ 100,00/kg. Somando
--- tudo, o custo médio sairia 29,71/kg; só com o lote aprovado, 21,90/kg.
+-- E o centro do cenário: o CUSTO. Ele vem do lote de origem de cada item, com o
+-- rendimento real da defumação daquele lote:
+--
+--   produto A = 18 kg ÷ 0,45 × R$ 21,90  (lote A)   =  R$   876,00
+--             +  5,4 kg ÷ 0,60 × R$ 30,00 (lote C)  =  R$   270,00
+--                                                     ------------
+--                                                      R$ 1.146,00
+--   produto B = 11,7 kg ÷ 0,45 × R$ 21,90            =  R$   569,40
+--             +  1,35 kg ÷ 0,45 × R$ 21,90           =  R$    65,70
+--                                                     ------------
+--                                                      R$   635,10
+--
+-- Os números do fixture foram escolhidos para que cada fórmula errada dê um
+-- resultado diferente destes:
+--   • `peso × custo` (sem o rendimento):        A = R$ 555,20
+--   • `unidades × ficha_tecnica × custo`:       A = R$ 660,60
+--   • rendimento só da primeira fornada (0,50): A = R$ 1.058,40
+--   • rendimento contando o rascunho (0,505):   A = R$ 1.050,58
+--   • média das matérias-primas da ficha técnica (com o tempero a R$ 80/kg):
+--     qualquer coisa menos R$ 1.146,00
 do $$
 declare
   v_ficha uuid; v_linhas int;
   v_qtd numeric; v_custo numeric; v_validade date; v_lote text; v_origem text;
+  v_peso numeric; v_resp uuid;
+  v_outra uuid;
 begin
   select id into v_ficha from embalagens where lote = 'EMB-260822-001'
     and empresa_id = '11111111-1111-1111-1111-111111111111';
 
-  -- 4a: ficha sem nenhum produto lançado não finaliza (mesma regra da 29).
-  declare v_vazia uuid;
-  begin
-    insert into embalagens (lote, empresa_id)
-      values ('EMB-260822-900', '11111111-1111-1111-1111-111111111111') returning id into v_vazia;
-    begin
-      update embalagens set status = 'finalizada' where id = v_vazia;
-      raise exception 'FALHA 4a: ficha sem item foi finalizada';
-    exception when check_violation then null; end;
-  end;
+  -- ---- As recusas: nada de estoque com custo adivinhado ----
 
+  -- 4a: ficha sem nenhum produto lançado não finaliza (mesma regra da 29).
+  insert into embalagens (lote, empresa_id)
+    values ('EMB-260822-900', '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  begin
+    update embalagens set status = 'finalizada' where id = v_outra;
+    raise exception 'FALHA 4a: ficha sem item foi finalizada';
+  exception when check_violation then null; end;
+
+  -- 4b: item de lote REPROVADO na inspeção não vira produto acabado.
+  insert into embalagens (lote, empresa_id)
+    values ('EMB-260822-901', '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
+    values (v_outra, '44444444-4444-4444-4444-444444444444', '67676767-6767-6767-6767-676767676767',
+            5, 2, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  begin
+    update embalagens set status = 'finalizada' where id = v_outra;
+    raise exception 'FALHA 4b: ficha com lote reprovado na inspeção foi finalizada';
+  exception when check_violation then null; end;
+
+  -- 4c: lote sem defumação FINALIZADA não tem rendimento — sem rendimento o
+  -- custo sairia errado (ou dividiria por zero), então recusa.
+  insert into embalagens (lote, empresa_id)
+    values ('EMB-260822-902', '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
+    values (v_outra, '44444444-4444-4444-4444-444444444444', '69696969-6969-6969-6969-696969696969',
+            5, 2, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  begin
+    update embalagens set status = 'finalizada' where id = v_outra;
+    raise exception 'FALHA 4c: ficha de lote sem defumação finalizada foi finalizada';
+  exception when check_violation then null; end;
+
+  -- 4d: item sem lote de origem — é o caminho definido para a ficha legada e
+  -- para o item lançado sem lote. Não finaliza.
+  insert into embalagens (lote, empresa_id)
+    values ('EMB-260822-903', '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  insert into embalagem_itens (embalagem_id, produto_id, quantidade, peso_total_kg, validade, empresa_id)
+    values (v_outra, '44444444-4444-4444-4444-444444444444', 5, 2, date '2026-12-20',
+            '11111111-1111-1111-1111-111111111111');
+  begin
+    update embalagens set status = 'finalizada' where id = v_outra;
+    raise exception 'FALHA 4d: ficha com item sem lote de origem foi finalizada';
+  exception when check_violation then null; end;
+
+  -- 4e: item sem peso embalado. Custo zero silencioso é pior que recusa.
+  insert into embalagens (lote, empresa_id)
+    values ('EMB-260822-904', '11111111-1111-1111-1111-111111111111') returning id into v_outra;
+  insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, validade, empresa_id)
+    values (v_outra, '44444444-4444-4444-4444-444444444444', '66666666-6666-6666-6666-666666666666',
+            5, date '2026-12-20', '11111111-1111-1111-1111-111111111111');
+  begin
+    update embalagens set status = 'finalizada' where id = v_outra;
+    raise exception 'FALHA 4e: ficha com item sem peso foi finalizada';
+  exception when check_violation then null; end;
+
+  -- ---- E o caminho feliz ----
   update embalagens set status = 'finalizada' where id = v_ficha;
 
   select count(*) into v_linhas from producoes where embalagem_id = v_ficha;
   if v_linhas <> 2 then
-    raise exception 'FALHA 4b: esperava 2 linhas em producoes (uma por produto), achou %', v_linhas;
+    raise exception 'FALHA 4f: esperava 2 linhas em producoes (uma por produto), achou %', v_linhas;
   end if;
 
-  select quantidade, custo_total, validade, lote, origem
-    into v_qtd, v_custo, v_validade, v_lote, v_origem
+  select quantidade, custo_total, validade, lote, origem, peso_final_kg, responsavel_id
+    into v_qtd, v_custo, v_validade, v_lote, v_origem, v_peso, v_resp
     from producoes where embalagem_id = v_ficha
       and produto_id = '44444444-4444-4444-4444-444444444444';
   if v_qtd <> 50 then
-    raise exception 'FALHA 4c: os dois itens do produto A deveriam somar 50 unidades, achou %', v_qtd;
+    raise exception 'FALHA 4g: os dois itens do produto A deveriam somar 50 unidades, achou %', v_qtd;
   end if;
-  -- 25 kg embalados × R$ 21,90/kg = R$ 547,50.
-  if v_custo <> 547.50 then
-    raise exception 'FALHA 4d: custo deveria sair do lote APROVADO (547,50), achou %', v_custo;
+  if v_custo <> 1146.00 then
+    raise exception 'FALHA 4h: custo do produto A deveria ser 1146,00 (lote a lote, com rendimento), achou %', v_custo;
   end if;
   if v_validade <> date '2026-12-19' then
-    raise exception 'FALHA 4e: a validade da linha deveria ser a mais curta dos itens, achou %', v_validade;
+    raise exception 'FALHA 4i: a validade da linha deveria ser a mais curta dos itens, achou %', v_validade;
   end if;
   if v_lote <> 'EMB-260822-001' then
-    raise exception 'FALHA 4f: a produção deveria levar o número da ficha, achou %', v_lote;
+    raise exception 'FALHA 4j: a produção deveria levar o número da ficha, achou %', v_lote;
   end if;
   if v_origem <> 'embalagem' then
-    raise exception 'FALHA 4g: origem deveria ser embalagem, achou %', v_origem;
+    raise exception 'FALHA 4k: origem deveria ser embalagem, achou %', v_origem;
+  end if;
+  -- As duas colunas que a linha de estoque herda da ficha e dos itens. Sem
+  -- estas asserções, tirá-las do insert não derrubaria cenário nenhum.
+  if v_peso <> 23.4 then
+    raise exception 'FALHA 4l: peso_final_kg deveria ser o peso embalado (23,4), achou %', v_peso;
+  end if;
+  if v_resp is distinct from '22222222-2222-2222-2222-222222222222' then
+    raise exception 'FALHA 4m: a produção deveria herdar o responsável da ficha, achou %', v_resp;
   end if;
 
-  select quantidade, custo_total into v_qtd, v_custo
+  select quantidade, custo_total, validade into v_qtd, v_custo, v_validade
     from producoes where embalagem_id = v_ficha
       and produto_id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
-  if v_qtd <> 12 or v_custo <> 262.80 then
-    raise exception 'FALHA 4h: linha do produto B saiu com quantidade % e custo %', v_qtd, v_custo;
+  if v_qtd <> 15 or v_custo <> 635.10 then
+    raise exception 'FALHA 4n: linha do produto B saiu com quantidade % e custo %', v_qtd, v_custo;
+  end if;
+  -- Um dos itens do produto B entrou sem validade: a linha não pode prometer
+  -- prazo para unidades que não têm. `min` sozinho ignoraria o nulo.
+  if v_validade is not null then
+    raise exception 'FALHA 4o: produto B tem item sem validade — a linha não podia prometer % ', v_validade;
   end if;
 
-  raise notice 'OK 4: finalizar gera uma producao por produto, com custo do lote aprovado';
+  raise notice 'OK 4: finalizar gera uma producao por produto, custeada lote a lote pelo rendimento';
 end $$;
 
 -- Cenário 5: cancelar a ficha finalizada, com motivo, apaga EXATAMENTE as
@@ -157,7 +244,7 @@ begin
     returning id into v_vizinha;
   insert into embalagem_itens (embalagem_id, produto_id, recebimento_item_id, quantidade, peso_total_kg, validade, empresa_id)
     values (v_vizinha, '44444444-4444-4444-4444-444444444444', '66666666-6666-6666-6666-666666666666',
-            8, 4, date '2026-12-21', '11111111-1111-1111-1111-111111111111');
+            8, 4.5, date '2026-12-21', '11111111-1111-1111-1111-111111111111');
   update embalagens set status = 'finalizada' where id = v_vizinha;
 
   -- Cancelar sem motivo é recusado.

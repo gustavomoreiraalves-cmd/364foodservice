@@ -70,12 +70,14 @@ echo "OK: trigger e função antigos removidos"
 
 # Os cenários rodam como dono do banco, onde RLS não se aplica, então eles não
 # conseguem provar que as travas resistem a um usuário `authenticated`. O que dá
-# para conferir aqui é que as quatro funções continuam `security definer`: como
+# para conferir aqui é que as cinco funções continuam `security definer`: como
 # `invoker`, a policy de `embalagens`/`embalagem_itens` (atualização 06) podia
-# esconder a ficha pai de quem escreve e fazer o trigger liberar a escrita.
-definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_embalagem_bloquear_edicao','fn_embalagem_cabecalho','fn_embalagens_bloquear_delete','fn_embalagem_gerar_producao') and prosecdef;")
-[ "$definer" = "4" ] || { echo "as quatro funções de trigger precisam ser security definer (achou $definer)"; exit 1; }
-echo "OK: triggers em security definer"
+# esconder a ficha pai de quem escreve e fazer o trigger liberar a escrita — e a
+# de `defumacoes` podia esconder fornadas e devolver um rendimento parcial, que
+# não dá erro nenhum, só um custo errado.
+definer=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in ('fn_embalagem_bloquear_edicao','fn_embalagem_cabecalho','fn_embalagens_bloquear_delete','fn_embalagem_gerar_producao','fn_rendimento_defumacao') and prosecdef;")
+[ "$definer" = "5" ] || { echo "as cinco funções da migração precisam ser security definer (achou $definer)"; exit 1; }
+echo "OK: funções em security definer"
 
 # O rollback vive comentado no fim da migração; extrai e aplica para provar que
 # é SQL válido e que desfaz o que a migração criou.
@@ -100,7 +102,7 @@ triggers=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_trigger where tgnam
 [ "$triggers" = "0" ] || { echo "rollback não removeu os triggers (achou $triggers)"; exit 1; }
 
 funcoes=$(psql -tAq -d "$BANCO" -c "select count(*) from pg_proc where proname in
-  ('fn_embalagem_bloquear_edicao','fn_embalagem_cabecalho','fn_embalagens_bloquear_delete','fn_embalagem_gerar_producao');")
+  ('fn_embalagem_bloquear_edicao','fn_embalagem_cabecalho','fn_embalagens_bloquear_delete','fn_embalagem_gerar_producao','fn_rendimento_defumacao');")
 [ "$funcoes" = "0" ] || { echo "rollback não removeu as funções (achou $funcoes)"; exit 1; }
 
 # A RPC não é conferida aqui: o rollback dela é reaplicar a atualização 28, que

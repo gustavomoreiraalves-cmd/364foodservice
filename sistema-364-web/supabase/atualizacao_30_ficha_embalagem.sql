@@ -9,9 +9,15 @@
 --   • `embalagem_itens.recebimento_item_id` — o lote de matéria-prima que
 --     originou aquele produto. É o elo que fecha recebimento → defumação →
 --     embalagem.
---   • `embalagem_itens.validade` — calculada na finalização e GRAVADA, para
---     que mudar a regra de conservação do produto depois não altere validade
---     já impressa em etiqueta.
+--   • `embalagem_itens.validade` — a validade GRAVADA no item, calculada pela
+--     TELA a partir da data da ficha e da regra de conservação do produto
+--     (`lib/embalagem.js`, `validadeDoItem`). Congelada ali para que mudar a
+--     regra depois não altere validade já impressa em etiqueta. Esta migração
+--     não calcula validade nenhuma: ela só copia para `producoes` a que já
+--     está no item. Consequência que é CONTRATO para a Task 3: como a
+--     imutabilidade abaixo impede corrigir item de ficha finalizada, a tela
+--     precisa gravar a validade AINDA EM RASCUNHO, junto com o peso — depois
+--     de finalizar não há mais como preenchê-la.
 --   • `producoes.embalagem_id` — sem ele, desfazer o estoque de uma ficha
 --     cancelada dependeria de heurística por data e produto.
 --   • `produtos.rastreado` — marcação explícita de quem só pode entrar no
@@ -41,6 +47,37 @@
 -- `finalizada`, gerando as linhas de `producoes` de todos os itens da ficha de
 -- uma vez, uma por produto. Cancelar a ficha desfaz exatamente aquelas linhas.
 --
+-- ---------- O CUSTO VEM DO LOTE DE ORIGEM ----------
+--
+-- Decisão do dono do sistema. O custo de cada item não sai de média nenhuma:
+-- sai do LOTE que aquele item consumiu, com o RENDIMENTO REAL da defumação
+-- daquele lote. É para isso que a cadeia de rastreabilidade existe — lote que
+-- veio caro ou que rendeu mal precisa aparecer no custo do produto.
+--
+--   matéria-prima consumida = peso embalado ÷ rendimento do lote
+--   custo do item           = consumida × custo por quilo daquele lote
+--
+-- O rendimento é agregado: soma dos pesos finais ÷ soma dos pesos brutos de
+-- TODAS as fichas de defumação FINALIZADAS daquele lote (um lote pode ir ao
+-- defumador em mais de uma fornada; pegar só a primeira daria outro número).
+--
+-- Média ponderada por produto — o que o trigger antigo fazia, somando todos os
+-- recebimentos aprovados de todas as matérias-primas da ficha técnica — sumiu
+-- de vez, e com ela três defeitos: era cega ao lote, cega ao tempo (recebimento
+-- de seis meses atrás pesava igual) e misturava insumos diferentes (costela e
+-- tempero na mesma média, dominada por quem chegou em maior quantidade).
+-- `ficha_tecnica` deixou de ser consultada no custo: quem diz o que foi
+-- consumido é o lote declarado no item, não a receita teórica. Produto com mais
+-- de uma matéria-prima na ficha técnica tem, portanto, comportamento definido —
+-- esta migração custeia só o insumo rastreado que veio em `recebimento_item_id`;
+-- insumos secundários (tempero, embalagem) não entram neste custo e continuam
+-- fora dele até que ganhem lançamento próprio.
+--
+-- Nada de custo zero silencioso: quando falta o dado para custear (item sem
+-- lote, item sem peso, lote reprovado na inspeção, lote sem defumação
+-- finalizada), a FINALIZAÇÃO É RECUSADA com mensagem em português. Custo errado
+-- no estoque não avisa ninguém; recusa avisa.
+--
 -- Idempotente: `add column if not exists`, `drop constraint if exists` e
 -- `create or replace`. Fichas já lançadas nascem em `rascunho`, com
 -- `recebimento_item_id` e `validade` nulos — nulo significa "ficha anterior à
@@ -53,6 +90,15 @@
 --   select id, quantidade, peso_total_kg from embalagem_itens
 --    where quantidade <= 0 or quantidade <> floor(quantidade) or peso_total_kg <= 0;
 -- Ambas as consultas precisam devolver zero linhas.
+--
+-- E confira, no banco real, o NOME do trigger que esta migração derruba — é a
+-- única coisa aqui que nenhum teste local consegue provar, porque o fixture usa
+-- o nome que este arquivo escreve. Se o nome divergir, o `drop trigger` não
+-- derruba nada e a mina continua armada, em silêncio:
+--   select tgname from pg_trigger
+--    where tgrelid = 'public.embalagem_itens'::regclass and not tgisinternal;
+-- Em 2026-08-22 respondeu `trg_embalagem_items_to_producao`, que é o nome usado
+-- lá embaixo. Se responder outro, ajuste o `drop trigger` antes de aplicar.
 
 begin;
 
@@ -284,7 +330,11 @@ create trigger trg_embalagens_cabecalho
 create or replace function public.fn_embalagens_bloquear_delete() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if old.status <> 'rascunho' then
+  -- `is distinct from`, e não `<>`, pelo mesmo motivo do resto do arquivo: se
+  -- `status` chegar nulo por qualquer caminho (coluna recriada sem default num
+  -- rollback parcial, por exemplo), `null <> 'rascunho'` é nulo e a trava
+  -- deixaria passar em silêncio. Com `is distinct from`, nulo é bloqueado.
+  if old.status is distinct from 'rascunho' then
     raise exception 'A ficha de embalagem está % — não pode ser apagada. Cancele com motivo em vez de apagar.', old.status
       using errcode = 'check_violation';
   end if;
@@ -295,6 +345,43 @@ drop trigger if exists trg_embalagens_bloquear_delete on public.embalagens;
 create trigger trg_embalagens_bloquear_delete
   before delete on public.embalagens
   for each row execute function public.fn_embalagens_bloquear_delete();
+
+-- ---------- RENDIMENTO DA DEFUMAÇÃO ----------
+-- Quanto sobra de um quilo daquele lote depois de defumado: soma dos pesos
+-- finais ÷ soma dos pesos brutos, de TODAS as fichas de defumação FINALIZADAS
+-- daquele lote naquela empresa.
+--
+-- Agregado, e não a primeira ficha que aparecer: um lote pode ir ao defumador
+-- em mais de uma fornada, com rendimentos diferentes, e o que custeia o produto
+-- é o rendimento do lote inteiro. Só ficha FINALIZADA entra — rascunho ainda
+-- pode ter o peso corrigido, e um peso provisório viraria custo definitivo.
+--
+-- Devolve NULO quando não há defumação finalizada (o `nullif` também cobre soma
+-- de peso bruto zero). Quem chama trata nulo e zero da mesma forma: recusa a
+-- finalização. Nunca devolve zero disfarçado de custo.
+--
+-- É uma função à parte, e não a mesma subconsulta escrita duas vezes, porque a
+-- checagem que RECUSA e a conta que CUSTEIA precisam usar exatamente o mesmo
+-- número — se divergissem, a ficha passaria na checagem e estouraria divisão
+-- por zero na hora de gravar.
+--
+-- `security definer` pelo mesmo motivo do resto: como invoker, a policy por
+-- empresa de `defumacoes`/`defumacao_itens` podia esconder fornadas de quem
+-- está finalizando e devolver um rendimento parcial — que não dá erro nenhum,
+-- só um custo errado.
+create or replace function public.fn_rendimento_defumacao(p_recebimento_item_id uuid, p_empresa_id uuid)
+returns numeric
+language sql stable security definer set search_path = public as $$
+  select sum(di.peso_final_kg) / nullif(sum(di.peso_bruto_kg), 0)
+    from public.defumacao_itens di
+    join public.defumacoes d on d.id = di.defumacao_id
+   where di.recebimento_item_id = p_recebimento_item_id
+     and di.empresa_id = p_empresa_id
+     and d.status = 'finalizada'
+$$;
+
+comment on function public.fn_rendimento_defumacao(uuid, uuid) is
+  'Rendimento agregado da defumação de um lote (peso final ÷ peso bruto, só fichas finalizadas). Nulo quando não há defumação finalizada. Base do custo do produto embalado na atualização 30.';
 
 -- ---------- O TRIGGER REESCRITO ----------
 -- Reescrito. A versão anterior disparava `after insert on embalagem_itens` e
@@ -315,57 +402,122 @@ create trigger trg_embalagens_bloquear_delete
 -- 2. O lote da produção é o número da ficha, não `EMBALAGEM-DD/MM/AA-<3 hex
 --    aleatórios>`. Aquele sufixo aleatório não levava a lugar nenhum; o número
 --    da ficha leva ao registro que gerou o produto.
--- 3. O custo multiplica o PESO embalado (kg) pelo custo médio por kg da
---    matéria-prima. O antigo multiplicava a CONTAGEM DE UNIDADES pelo custo por
---    kg — dimensionalmente errado (50 caixas × R$/kg). Como o trigger nunca
---    rodou, não há histórico a preservar: não existe linha de `producoes` com
---    o cálculo antigo para ficar inconsistente.
+-- 3. O custo vem do LOTE de cada item, com o RENDIMENTO real da defumação
+--    daquele lote (ver o cabeçalho deste arquivo). O antigo multiplicava a
+--    contagem de unidades por um custo médio por quilo — dimensionalmente
+--    errado (50 caixas × R$/kg); multiplicar o peso embalado pelo custo por
+--    quilo já seria melhor, mas ainda assumiria que 1 kg embalado consumiu 1 kg
+--    de matéria-prima, e a defumação perde peso: 180 kg brutos que rendem 81 kg
+--    defumados fazem cada quilo embalado custar mais que o dobro do quilo
+--    comprado. Como o trigger nunca rodou, não há histórico a preservar.
 --
 -- `security definer` pelo mesmo motivo das funções acima, e aqui com peso
--- extra: a leitura de `recebimento_itens`/`inspecoes_qualidade` para o custo
--- médio e a escrita em `producoes` acontecem sob a policy por empresa. Como
--- invoker, um custo médio parcial (só os lotes visíveis) entraria em produção
--- silenciosamente.
+-- extra: a leitura de `recebimento_itens`, `inspecoes_qualidade` e
+-- `defumacao_itens` para o custo e a escrita em `producoes` acontecem sob a
+-- policy por empresa. Como invoker, um rendimento parcial (só as fichas de
+-- defumação visíveis) entraria em produção silenciosamente.
 create or replace function public.fn_embalagem_gerar_producao() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
-  r record;
-  v_custo_mp numeric(12,2);
+  v_produto text;
+  v_lote text;
 begin
   if new.status = 'finalizada' and old.status is distinct from 'finalizada' then
-    for r in
-      select i.produto_id,
-             sum(i.quantidade) as quantidade,
-             sum(coalesce(i.peso_total_kg, 0)) as peso_kg,
-             -- A validade da linha de estoque é a MAIS CURTA entre os itens
-             -- daquele produto na ficha: o lote de produção não pode prometer
-             -- mais prazo do que a unidade mais velha que ele contém.
-             min(i.validade) as validade
-        from public.embalagem_itens i
-       where i.embalagem_id = new.id
-       group by i.produto_id
-    loop
-      -- Custo médio por kg da matéria-prima do produto, lendo o status
-      -- sanitário em `inspecoes_qualidade` — mesmo critério de
-      -- `STATUS_QUALIDADE_APROVADO` em lib/qualidade.js. `join` (e não `left
-      -- join`) de propósito: item sem inspeção não gerou movimento de estoque,
-      -- logo não é matéria-prima disponível.
-      select coalesce(sum(ri.quantidade * ri.custo_unitario) / nullif(sum(ri.quantidade), 0), 0)
-        into v_custo_mp
-        from public.recebimento_itens ri
-        join public.ficha_tecnica ft
-          on ft.materia_prima_id = ri.materia_prima_id and ft.empresa_id = ri.empresa_id
-        join public.inspecoes_qualidade iq on iq.recebimento_item_id = ri.id
-       where ft.produto_id = r.produto_id
-         and ri.empresa_id = new.empresa_id
-         and iq.status in ('aprovado', 'aprovado_com_ressalva');
+    -- ---- As quatro recusas ----
+    -- Cada uma existe porque a alternativa era gravar custo errado no estoque.
+    -- Todas usam `check_violation`, como o resto do arquivo, e todas nomeiam o
+    -- produto ou o lote — a mensagem precisa dizer ao embalador o que corrigir.
 
-      insert into public.producoes (lote, data, produto_id, quantidade, custo_total, validade,
-                                    responsavel_id, peso_final_kg, origem, embalagem_id, empresa_id)
-      values (new.lote, new.data, r.produto_id, r.quantidade,
-              round(r.peso_kg * v_custo_mp, 2), r.validade,
-              new.responsavel_id, r.peso_kg, 'embalagem', new.id, new.empresa_id);
-    end loop;
+    -- (1) Item sem lote de origem. É o caminho definido para item lançado sem
+    -- lote e para a ficha legada, anterior a esta migração: ela continua
+    -- existindo, continua editável em rascunho, mas não finaliza enquanto o
+    -- lote não for informado. Sem o lote não há de onde tirar custo nem
+    -- rendimento — e inventar um (média da matéria-prima, custo do cadastro)
+    -- seria exatamente o custo silenciosamente errado que esta decisão veio
+    -- eliminar.
+    select p.nome into v_produto
+      from public.embalagem_itens i
+      join public.produtos p on p.id = i.produto_id
+     where i.embalagem_id = new.id and i.recebimento_item_id is null
+     limit 1;
+    if found then
+      raise exception 'O item de "%" está sem o lote de origem — informe de qual lote defumado ele saiu antes de finalizar a ficha.', v_produto
+        using errcode = 'check_violation';
+    end if;
+
+    -- (2) Item sem peso embalado. `peso_total_kg` é nulável em produção (coluna
+    -- anterior a esta migração), e é dele que sai a conta inteira: sem peso o
+    -- custo daria zero.
+    select p.nome into v_produto
+      from public.embalagem_itens i
+      join public.produtos p on p.id = i.produto_id
+     where i.embalagem_id = new.id and coalesce(i.peso_total_kg, 0) <= 0
+     limit 1;
+    if found then
+      raise exception 'O item de "%" está sem peso embalado — pese e lance o peso antes de finalizar a ficha.', v_produto
+        using errcode = 'check_violation';
+    end if;
+
+    -- (3) Lote que não passou na inspeção não vira produto acabado. Mesmo
+    -- critério de `STATUS_QUALIDADE_APROVADO` em lib/qualidade.js. Item sem
+    -- nenhuma inspeção cai aqui também, de propósito: sem inspeção não houve
+    -- movimento de estoque, logo aquele lote não estava disponível.
+    select ri.lote into v_lote
+      from public.embalagem_itens i
+      join public.recebimento_itens ri on ri.id = i.recebimento_item_id
+     where i.embalagem_id = new.id
+       and not exists (
+             select 1 from public.inspecoes_qualidade iq
+              where iq.recebimento_item_id = ri.id
+                and iq.status in ('aprovado', 'aprovado_com_ressalva'))
+     limit 1;
+    if found then
+      raise exception 'O lote % não foi aprovado na inspeção de qualidade — ele não pode virar produto acabado.', v_lote
+        using errcode = 'check_violation';
+    end if;
+
+    -- (4) Lote sem rendimento de defumação FINALIZADA. Cobre os três buracos de
+    -- uma vez — sem ficha de defumação, ficha só em rascunho, e peso final zero
+    -- —, e é o que impede a divisão por zero logo abaixo.
+    select ri.lote into v_lote
+      from public.embalagem_itens i
+      join public.recebimento_itens ri on ri.id = i.recebimento_item_id
+     where i.embalagem_id = new.id
+       and coalesce(public.fn_rendimento_defumacao(i.recebimento_item_id, i.empresa_id), 0) <= 0
+     limit 1;
+    if found then
+      raise exception 'O lote % não tem ficha de defumação finalizada com rendimento — sem o rendimento o custo do produto sairia errado. Finalize a defumação antes de finalizar a embalagem.', v_lote
+        using errcode = 'check_violation';
+    end if;
+
+    -- ---- O estoque ----
+    -- Uma linha por produto; o custo é somado ITEM A ITEM, cada um pelo seu
+    -- próprio lote (custo por quilo e rendimento daquele lote), e só então
+    -- arredondado. Ficha que consome dois lotes de custos diferentes produz o
+    -- custo dos dois, não a média deles.
+    insert into public.producoes (lote, data, produto_id, quantidade, custo_total, validade,
+                                  responsavel_id, peso_final_kg, origem, embalagem_id, empresa_id)
+    select new.lote, new.data, x.produto_id, x.quantidade, x.custo_total, x.validade,
+           new.responsavel_id, x.peso_kg, 'embalagem', new.id, new.empresa_id
+      from (
+        select i.produto_id,
+               sum(i.quantidade) as quantidade,
+               sum(i.peso_total_kg) as peso_kg,
+               round(sum(i.peso_total_kg
+                         / public.fn_rendimento_defumacao(i.recebimento_item_id, i.empresa_id)
+                         * ri.custo_unitario), 2) as custo_total,
+               -- A validade da linha de estoque é a MAIS CURTA entre os itens
+               -- daquele produto — mas só quando TODOS têm validade. Se um item
+               -- entrou sem validade, `min` o ignoraria e a linha prometeria
+               -- prazo para unidades que não têm nenhum; nesse caso a linha
+               -- nasce sem validade, e quem olhar vai atrás do item que falta.
+               case when count(*) filter (where i.validade is null) > 0
+                    then null else min(i.validade) end as validade
+          from public.embalagem_itens i
+          join public.recebimento_itens ri on ri.id = i.recebimento_item_id
+         where i.embalagem_id = new.id
+         group by i.produto_id
+      ) x;
   end if;
 
   -- Cancelar a ficha desfaz o estoque que ela criou — exatamente as linhas
@@ -482,11 +634,17 @@ commit;
 -- Derruba o que a migração criou. Nenhum dado de processo é perdido: as colunas
 -- de peso, quantidade e produto são anteriores a esta migração.
 --
--- Duas perdas reais, e assumidas: `embalagem_itens.validade` e
--- `producoes.embalagem_id` somem junto com as colunas. A validade volta a ser
--- calculável a partir da regra do produto (com o risco que a Fase 3 evita: a
--- regra pode ter mudado); o vínculo do estoque com a ficha, não — depois do
--- rollback, cancelar ficha deixa de desfazer estoque.
+-- Três perdas reais, e assumidas:
+--   • `embalagem_itens.validade` — volta a ser calculável a partir da regra do
+--     produto, com o risco que a Fase 3 evita: a regra pode ter mudado desde a
+--     impressão.
+--   • `producoes.embalagem_id` — não volta de jeito nenhum. Depois do rollback,
+--     cancelar ficha deixa de desfazer estoque.
+--   • `produtos.rastreado` — some junto com a marcação de QUAIS produtos
+--     estavam marcados. Reaplicar a migração devolve a coluna com todo mundo em
+--     `false`, e alguém vai ter que remarcar produto por produto. Se o rollback
+--     for planejado, salve a lista antes:
+--       select id, codigo, nome from produtos where rastreado;
 --
 -- A versão anterior do trigger (`trigger_embalagem_para_producao` e
 -- `trg_embalagem_items_to_producao` em `embalagem_itens`) NÃO é recriada aqui:
@@ -509,6 +667,7 @@ commit;
 -- drop function if exists public.fn_embalagem_cabecalho();
 -- drop function if exists public.fn_embalagens_bloquear_delete();
 -- drop function if exists public.fn_embalagem_gerar_producao();
+-- drop function if exists public.fn_rendimento_defumacao(uuid, uuid);
 --
 -- drop index if exists public.producoes_embalagem_idx;
 -- alter table public.producoes drop column if exists embalagem_id;
