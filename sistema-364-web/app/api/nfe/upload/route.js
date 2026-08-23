@@ -53,12 +53,15 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
+    // O CNPJ mora na pessoa jurídica (empregadores); a marca só aponta para ela.
+    // Marca sem vínculo cai em cnpjEmpresa vazio e segue sem a conferência, como
+    // já acontecia quando o cadastro da empresa não tinha CNPJ.
     const { data: empresa, error: errEmpresa } = await sb.from('empresas')
-      .select('cnpj').eq('id', empresaId).maybeSingle();
+      .select('empregador_id, empregadores(cnpj)').eq('id', empresaId).maybeSingle();
     if (errEmpresa) {
       return NextResponse.json({ error: 'Falha ao conferir o CNPJ da empresa: ' + errEmpresa.message }, { status: 500 });
     }
-    const cnpjEmpresa = String(empresa?.cnpj || '').replace(/\D/g, '');
+    const cnpjEmpresa = String(empresa?.empregadores?.cnpj || '').replace(/\D/g, '');
     // O CNPJ é opcional no cadastro da empresa. Sem ele não há com o que comparar,
     // e travar a importação por um campo de cadastro em branco pararia o
     // recebimento inteiro — então segue sem a conferência, como era antes.
