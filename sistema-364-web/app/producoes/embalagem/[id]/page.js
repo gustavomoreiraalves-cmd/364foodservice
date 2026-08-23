@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
 import { fmtDate } from '../../../../lib/format';
-import { buscarPorIdsEmBlocos } from '../../../../lib/producao';
+import { buscarPorIdsEmBlocos, CONSERVACOES } from '../../../../lib/producao';
 import { saldoDefumado, validadeDoItem, itemEmbalagemValido } from '../../../../lib/embalagem';
 import { inspecaoAprovada } from '../../../../lib/qualidade';
 import AppShell from '../../../../components/AppShell';
@@ -25,6 +25,12 @@ const STATUS_TAG = {
 const ITEM_VAZIO = {
   recebimento_item_id: '',
   produto_id: '',
+  // Não é coluna de `embalagem_itens` — só decide, no momento do lançamento,
+  // qual das regras de `produto_regras_validade` alimenta `validadeDoItem`
+  // quando o produto tem mais de uma permitida. Mesmo papel do `conservacao`
+  // de app/producoes/nova/page.js, mas sem persistir: uma vez calculada e
+  // gravada, a validade do item vive sozinha (ver validadeDoItem/adicionarItem).
+  conservacao: '',
   quantidade: '',
   peso_total_kg: '',
 };
@@ -57,6 +63,37 @@ function fmtKg(v) {
 
 function fmtUn(v) {
   return Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+}
+
+// `peso_total_kg` é nulável (ficha legada, anterior a esta tela) — "0 kg"
+// mentiria que o item já foi pesado. Mesma convenção de
+// app/producoes/defumacao/[id]/page.js (fmtKgOuTraco).
+function fmtKgOuTraco(v) {
+  return v === null || v === undefined || v === '' ? '—' : `${fmtKg(v)} kg`;
+}
+
+// Soma `dias` (pode ser negativo) a uma data `AAAA-MM-DD`, sem depender de
+// fuso — meio-dia local evita o dia anterior/seguinte por causa do horário
+// de verão. Usada para DESLOCAR a validade já gravada de um item quando o
+// cabeçalho da ficha é corrigido depois do lançamento (ver salvarCampo),
+// preservando o prazo originalmente calculado sem precisar saber de novo
+// qual regra gerou aquele prazo.
+function somarDias(dataIso, dias) {
+  if (!dataIso) return dataIso;
+  const d = new Date(`${dataIso}T12:00:00`);
+  if (isNaN(d)) return dataIso;
+  d.setDate(d.getDate() + dias);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// Diferença em dias inteiros entre duas datas `AAAA-MM-DD` (b - a).
+function diasEntre(dataA, dataB) {
+  if (!dataA || !dataB) return 0;
+  const a = new Date(`${dataA}T12:00:00`);
+  const b = new Date(`${dataB}T12:00:00`);
+  if (isNaN(a) || isNaN(b)) return 0;
+  return Math.round((b - a) / (24 * 3600 * 1000));
 }
 
 // error.message chega cru do Supabase — em inglês numa falha de rede, ou como
@@ -101,7 +138,14 @@ function Conteudo() {
   const [erroCampo, setErroCampo] = useState({});
 
   const [funcionarios, setFuncionarios] = useState([]);
-  const [produtos, setProdutos] = useState([]); // produtos.rastreado = true — só eles nascem pela ficha de embalagem
+  // Todos os produtos ativos da empresa — `rastreado` é "este produto só
+  // entra no estoque pela ficha de embalagem" (Task 4), não "só produto
+  // rastreado pode ser embalado": não há trava nenhuma nesse sentido no
+  // banco, e filtrar por ele aqui deixaria a ficha inoperante no dia em que
+  // a migração 30 subir (a coluna nasce `false` para todo produto já
+  // cadastrado). Produtos rastreados aparecem primeiro na lista — ver
+  // `produtosOrdenados`, abaixo do carregamento.
+  const [produtos, setProdutos] = useState([]);
   const [regras, setRegras] = useState([]); // produto_regras_validade da empresa
 
   const [lotesDisponiveis, setLotesDisponiveis] = useState([]); // recebimento_itens da empresa, com joins
@@ -118,6 +162,12 @@ function Conteudo() {
   const [salvandoItem, setSalvandoItem] = useState(false);
   const [removendoId, setRemovendoId] = useState('');
   const [erroRemover, setErroRemover] = useState('');
+  // Marcado só quando o item ficaria SEM validade mesmo depois de tentar a
+  // regra de conservação e o `validade_dias` do produto — exige confirmação
+  // explícita antes de gravar, porque depois de finalizar a imutabilidade
+  // impede corrigir (mesmo padrão do `confirmaSemPesoFinal` da ficha de
+  // defumação).
+  const [confirmaSemValidade, setConfirmaSemValidade] = useState(false);
 
   async function carregar() {
     if (!empresaAtual || !id) return;
@@ -141,12 +191,12 @@ function Conteudo() {
         .select('*, responsavel:funcionarios!embalagens_responsavel_id_fkey(nome)')
         .eq('id', id).eq('empresa_id', eid).maybeSingle(),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
-      // Só produto rastreado — a marcação que a atualização 30 introduz
-      // exatamente para isto: "produto que só entra no estoque pela ficha de
-      // embalagem" (comentário da migração). Os demais produtos não têm lote
-      // de origem nem validade calculada aqui; eles entram pela Produção
-      // Completa ou Interna.
-      supabase.from('produtos').select('id, nome, codigo, unidade').eq('empresa_id', eid).eq('rastreado', true).eq('ativo', true).order('nome'),
+      // TODOS os produtos ativos — não só `rastreado` (ver comentário no
+      // `useState` de `produtos`, acima). `validade_dias` entra na seleção
+      // porque é o fallback de validade quando o produto não tem nenhuma
+      // regra de conservação cadastrada (mesmo dado que
+      // app/producoes/completa/page.js já usa).
+      supabase.from('produtos').select('id, nome, codigo, unidade, rastreado, validade_dias').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('produto_regras_validade').select('*').eq('empresa_id', eid).eq('ativo', true),
       // Lotes de matéria-prima recebidos por esta empresa — mesma consulta
       // (sem recorte de período) e mesmo `order` de topo por data de
@@ -222,6 +272,48 @@ function Conteudo() {
     if (data) setFicha(prev => (prev ? { ...prev, status: data.status } : prev));
   }
 
+  // A data da ficha muda depois que itens já foram lançados (ex.: embalagem
+  // feita no fim do turno anterior, corrigida só no dia seguinte) — sem
+  // isso, os itens já lançados ficam com a validade calculada a partir da
+  // data ERRADA, propagada por `fn_embalagem_gerar_producao` até a etiqueta,
+  // sem como corrigir depois de finalizar (Important 2 da revisão).
+  //
+  // A correção DESLOCA a validade já gravada pelo mesmo número de dias que a
+  // data moveu, em vez de recalcular do zero com a regra do produto: a
+  // regra usada no lançamento (uma entre várias permitidas, ou o
+  // `validade_dias` de fallback) não fica gravada no item — só o resultado
+  // —, então não há como reconstruir qual delas valia. Deslocar preserva o
+  // prazo originalmente escolhido, qualquer que ele tenha sido, sem precisar
+  // saber de novo qual regra o gerou.
+  async function atualizarValidadeItensAposMudarData(dataAntiga, dataNova) {
+    const dias = diasEntre(dataAntiga, dataNova);
+    if (!dias) return;
+    const itensComValidade = itensDaFicha.filter(it => it.validade);
+    if (!itensComValidade.length) return;
+
+    const respostas = await Promise.all(itensComValidade.map(it => {
+      const novaValidade = somarDias(it.validade, dias);
+      return supabase.from('embalagem_itens')
+        .update({ validade: novaValidade })
+        .eq('id', it.id).eq('empresa_id', empresaAtual.id)
+        .select('id, validade')
+        .maybeSingle();
+    }));
+
+    setItensDaFicha(prev => prev.map(it => {
+      const resp = respostas.find((r, idx) => itensComValidade[idx].id === it.id);
+      return resp?.data ? { ...it, validade: resp.data.validade } : it;
+    }));
+
+    const falhou = respostas.find(r => r.error || !r.data);
+    if (falhou) {
+      // O cabeçalho já foi salvo (isto roda depois do sucesso do update de
+      // `data`) — não dá para desfazer isso, só avisar que a validade de
+      // algum item pode ter ficado desatualizada.
+      setErroCampo(prev => ({ ...prev, data: 'A data foi salva, mas não foi possível atualizar a validade de todos os itens já lançados — confira a lista de itens antes de continuar.' }));
+    }
+  }
+
   async function salvarCampo(campo) {
     if (!ficha || !empresaAtual || ficha.status !== 'rascunho') return;
     const valor = cabecalho[campo];
@@ -255,6 +347,9 @@ function Conteudo() {
       setErroCampo(prev => ({ ...prev, [campo]: 'Esta ficha não está mais disponível nesta empresa. Recarregue a página.' }));
       return;
     }
+    if (campo === 'data' && cabecalhoSalvo.data) {
+      await atualizarValidadeItensAposMudarData(cabecalhoSalvo.data, valor);
+    }
     setCabecalhoSalvo(prev => ({ ...prev, [campo]: valor }));
   }
 
@@ -281,19 +376,30 @@ function Conteudo() {
     return `${l.lote} · ${mp} · ${disponibilidade}`;
   }
 
-  // A regra de conservação que decide a validade deste produto. Um produto
-  // rastreado normalmente tem UMA regra permitida cadastrada (é assim que o
-  // produto embalado é armazenado) — mas o cadastro (app/produtos/page.js)
-  // permite configurar até três (ambiente/resfriado/congelado) para o mesmo
-  // produto, pensado para a Produção Interna, onde o operador escolhe o tipo
-  // na hora. Aqui não há esse seletor (fora do escopo desta ficha — ver
-  // brief da Task 5), então, havendo mais de uma regra permitida para o
-  // mesmo produto, a tela não adivinha qual vale: fica sem validade em vez
-  // de gravar uma validade calculada com a regra errada, que seria pior do
-  // que nenhuma.
-  function regraDoProduto(produtoId) {
-    const doProduto = regras.filter(r => r.produto_id === produtoId && r.permitido);
-    return doProduto.length === 1 ? doProduto[0] : null;
+  function regrasPermitidasDoProduto(produtoId) {
+    return regras.filter(r => r.produto_id === produtoId && r.permitido);
+  }
+
+  // A regra de conservação que decide a validade deste produto —
+  // `produto_regras_validade` permite até três por produto (ambiente/
+  // resfriado/congelado; `unique (produto_id, conservacao)`), e mais de uma
+  // permitida é cadastro NORMAL (ex.: um defumado a vácuo que aguenta tanto
+  // resfriado quanto congelado), não uma exceção a tratar como "sem
+  // validade". Uma única regra permitida é pré-selecionada sem exigir
+  // escolha; mais de uma exige que o formulário informe `conservacao`
+  // (seletor visível no form, mesmo padrão de app/producoes/nova/page.js) —
+  // ver a checagem em `adicionarItem`, que bloqueia o envio sem ela em vez
+  // de cair aqui sem escolha. Produto sem regra nenhuma cadastrada cai no
+  // `validade_dias` do cadastro do produto — o mesmo dado que
+  // app/producoes/completa/page.js usa —, para não entregar um resultado
+  // pior do que a tela que esta ficha substitui.
+  function regraParaItem(produto, conservacao) {
+    if (!produto) return null;
+    const permitidas = regrasPermitidasDoProduto(produto.id);
+    if (permitidas.length === 1) return permitidas[0];
+    if (permitidas.length > 1) return permitidas.find(r => r.conservacao === conservacao) || null;
+    const dias = Number(produto.validade_dias);
+    return dias > 0 ? { permitido: true, validade_valor: dias, validade_unidade: 'dias' } : null;
   }
 
   async function adicionarItem(e) {
@@ -301,6 +407,15 @@ function Conteudo() {
     if (!empresaAtual || salvandoItem || somenteLeitura) return;
     setErroItem('');
     setErroRemover(''); // banner de remoção de uma ação anterior não fica preso na tela
+
+    // Sem data não há o que calcular: validadeDoItem já devolve null nesse
+    // caso, mas deixar passar em silêncio gravaria o item sem validade por
+    // um motivo que nem aparece na tela. Trava aqui, antes de qualquer outra
+    // checagem — Important 2 da revisão.
+    if (!cabecalho.data) {
+      setErroItem('Informe a data da embalagem antes de lançar itens — ela é usada para calcular a validade.');
+      return;
+    }
 
     const lote = opcoesLote.find(l => l.id === novoItem.recebimento_item_id);
     if (!lote) {
@@ -331,13 +446,33 @@ function Conteudo() {
       return;
     }
 
+    // Mais de uma regra permitida para o produto exige que o operador
+    // escolha a conservação no formulário — não há como a tela adivinhar
+    // qual das regras vale (ver regraParaItem). Isto é diferente de "sem
+    // validade": aqui existe uma resposta certa, só falta escolher.
+    const permitidas = regrasPermitidasDoProduto(produto.id);
+    if (permitidas.length > 1 && !novoItem.conservacao) {
+      setErroItem('Escolha o tipo de conservação deste produto para calcular a validade.');
+      return;
+    }
+
     // Contrato da migração 30: a validade é calculada e GRAVADA aqui, ainda
     // em rascunho — a imutabilidade impede corrigir depois de finalizar, e o
     // trigger de finalização só propaga o que já está gravado no item, sem
     // calcular nada. Se o item for gravado sem validade, o produto acabado
     // nasce sem prazo.
-    const regra = regraDoProduto(produto.id);
+    const regra = regraParaItem(produto, novoItem.conservacao);
     const validade = validadeDoItem(cabecalho.data, regra);
+
+    // Só chega aqui sem validade quando o produto não tem regra nenhuma
+    // cadastrada E o `validade_dias` do cadastro também está zerado/ausente
+    // — não há mais nenhum dado para calcular a partir daí. É irreversível
+    // depois de finalizar (imutabilidade), então exige confirmação
+    // explícita em vez de gravar em silêncio.
+    if (!validade && !confirmaSemValidade) {
+      setErroItem('Este produto não tem regra de validade nem validade padrão cadastrada — marque a confirmação abaixo para gravar mesmo assim, sem validade.');
+      return;
+    }
 
     setSalvandoItem(true);
     const payload = {
@@ -368,6 +503,7 @@ function Conteudo() {
     setItensJaEmbalados(prev => [...prev, { ...data, embalagens: { status: 'rascunho' } }]);
     setItensDaFicha(prev => [...prev, data]);
     setNovoItem(ITEM_VAZIO);
+    setConfirmaSemValidade(false);
   }
 
   async function removerItem(itemId) {
@@ -398,10 +534,22 @@ function Conteudo() {
     return '—';
   }
 
+  // Produtos rastreados primeiro (é o caso comum desta ficha), mas todos
+  // aparecem — ver comentário no `useState` de `produtos`. `sort` estável do
+  // V8 preserva a ordem alfabética (já vinda do `order('nome')` da consulta)
+  // dentro de cada grupo.
+  const produtosOrdenados = [...produtos].sort((a, b) => (b.rastreado ? 1 : 0) - (a.rastreado ? 1 : 0));
+
   const produtoNovoItem = produtos.find(p => p.id === novoItem.produto_id);
-  const regraAoVivo = produtoNovoItem ? regraDoProduto(produtoNovoItem.id) : null;
-  const validadeAoVivo = produtoNovoItem && cabecalho ? validadeDoItem(cabecalho.data, regraAoVivo) : null;
-  const regrasDoProdutoNovoItem = produtoNovoItem ? regras.filter(r => r.produto_id === produtoNovoItem.id && r.permitido) : [];
+  const permitidasNovoItem = produtoNovoItem ? regrasPermitidasDoProduto(produtoNovoItem.id) : [];
+  const precisaEscolherConservacao = permitidasNovoItem.length > 1;
+  const regraAoVivo = produtoNovoItem ? regraParaItem(produtoNovoItem, novoItem.conservacao) : null;
+  const validadeAoVivo = produtoNovoItem && cabecalho?.data ? validadeDoItem(cabecalho.data, regraAoVivo) : null;
+  // Só pede confirmação quando NADA daria validade — nem regra de
+  // conservação, nem o `validade_dias` do cadastro. Enquanto falta escolher
+  // a conservação (produto com mais de uma regra permitida), o problema é
+  // outro — a tela pede a escolha, não a confirmação de "sem validade".
+  const precisaConfirmarSemValidade = !!(produtoNovoItem && cabecalho?.data && !precisaEscolherConservacao && !validadeAoVivo);
 
   const totalUnidades = itensDaFicha.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
   const totalPeso = itensDaFicha.reduce((s, i) => s + (Number(i.peso_total_kg) || 0), 0);
@@ -505,8 +653,8 @@ function Conteudo() {
 
         {!somenteLeitura && !produtos.length && (
           <div className="banner info" style={{ marginTop: 10 }}>
-            Nenhum produto está marcado como <b>rastreado</b> nesta empresa. Marque os produtos que nascem
-            desta ficha em <b>Produtos</b> (campo &quot;Produto rastreado&quot;) antes de lançar itens aqui.
+            Nenhum produto ativo cadastrado nesta empresa. Cadastre em <b>Produtos</b> antes de lançar
+            itens aqui.
           </div>
         )}
 
@@ -525,9 +673,11 @@ function Conteudo() {
             <div>
               <label>Produto</label>
               <select required value={novoItem.produto_id}
-                onChange={e => setNovoItem({ ...novoItem, produto_id: e.target.value })}>
+                onChange={e => setNovoItem({ ...novoItem, produto_id: e.target.value, conservacao: '' })}>
                 <option value="">Selecione…</option>
-                {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                {produtosOrdenados.map(p => (
+                  <option key={p.id} value={p.id}>{p.nome}{p.rastreado ? ' · rastreado' : ''}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -546,16 +696,57 @@ function Conteudo() {
           </form>
         )}
 
+        {/* Mais de uma regra permitida para o produto: o operador escolhe a
+            conservação, mesmo padrão de app/producoes/nova/page.js (botão
+            por conservação, com o prazo de cada uma já visível). Isto não é
+            um caso de "sem validade" — existe uma resposta certa, falta só
+            escolher. */}
+        {!somenteLeitura && produtoNovoItem && precisaEscolherConservacao && (
+          <div style={{ marginTop: 10 }}>
+            <label>Tipo de conservação deste produto</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+              {CONSERVACOES.map(c => {
+                const regraC = permitidasNovoItem.find(r => r.conservacao === c.id);
+                const ativa = novoItem.conservacao === c.id;
+                if (!regraC) return null; // só mostra as conservações realmente permitidas para este produto
+                return (
+                  <button key={c.id} type="button"
+                    className={'btn small' + (ativa ? '' : ' secondary')}
+                    onClick={() => setNovoItem({ ...novoItem, conservacao: c.id })}>
+                    {c.label}
+                    <span style={{ display: 'block', fontSize: 10.5, opacity: .8 }}>{regraC.validade_valor} {regraC.validade_unidade}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {!somenteLeitura && produtoNovoItem && (
           <p style={{ fontSize: 12.5, marginTop: 10 }}>
-            Validade prevista: <b>{validadeAoVivo ? fmtDate(validadeAoVivo) : '—'}</b>
-            {!validadeAoVivo && regrasDoProdutoNovoItem.length === 0 && (
-              <span className="muted"> — nenhuma regra de conservação cadastrada para este produto; o item será gravado sem validade.</span>
-            )}
-            {!validadeAoVivo && regrasDoProdutoNovoItem.length > 1 && (
-              <span className="muted"> — este produto tem mais de uma regra de conservação permitida; ajuste o cadastro para uma só antes de calcular a validade automaticamente.</span>
+            {!cabecalho.data ? (
+              <span className="muted">Informe a data da embalagem para calcular a validade.</span>
+            ) : (
+              <>
+                Validade prevista: <b>{validadeAoVivo ? fmtDate(validadeAoVivo) : '—'}</b>
+                {!validadeAoVivo && precisaEscolherConservacao && (
+                  <span className="muted"> — escolha o tipo de conservação acima.</span>
+                )}
+                {!validadeAoVivo && !precisaEscolherConservacao && (
+                  <span className="muted"> — este produto não tem regra de conservação nem validade padrão cadastrada; o item ficará sem validade.</span>
+                )}
+              </>
             )}
           </p>
+        )}
+
+        {!somenteLeitura && precisaConfirmarSemValidade && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 6, fontWeight: 400, fontSize: 12.5 }}>
+            <input type="checkbox" checked={confirmaSemValidade}
+              onChange={e => setConfirmaSemValidade(e.target.checked)}
+              style={{ marginTop: 2 }} />
+            <span>Estou ciente de que este item será gravado <b>sem validade</b> — depois de finalizar a ficha não será mais possível corrigir.</span>
+          </label>
         )}
 
         {erroItem && <div className="banner bad" style={{ marginTop: 10 }}>{erroItem}</div>}
@@ -569,9 +760,13 @@ function Conteudo() {
                 <span className="muted"> · lote {it.recebimento_itens?.lote || '—'}</span>
               </span>
               <span className="num">
-                {fmtUn(it.quantidade)} un · {fmtKg(it.peso_total_kg)} kg
+                {fmtUn(it.quantidade)} un · {fmtKgOuTraco(it.peso_total_kg)}
               </span>
-              <span className="num">{it.validade ? fmtDate(it.validade) : '—'}</span>
+              <span className="num">
+                Validade: {it.validade
+                  ? fmtDate(it.validade)
+                  : <span className="tag warn" title="Item sem validade calculada — confira o cadastro do produto">sem validade</span>}
+              </span>
               {!somenteLeitura && (
                 <button className="btn danger small" type="button"
                   disabled={removendoId === it.id}
