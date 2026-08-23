@@ -112,3 +112,21 @@ test('importarLoja: erro no detalhe de um pedido vira aviso e não aborta', asyn
   assert.match(r.avisos[0], /74941/);
   assert.equal(banco.gravados.pedidos.length, 2);
 });
+
+test('importarLoja: dia sem itens mantém o snapshot e vira aviso', async () => {
+  const cliente = clienteFalso();
+  let dia = null;
+  const setPeriodo = cliente.setPeriodo;
+  cliente.setPeriodo = async (de, ate) => { dia = de === ate ? de : null; return setPeriodo(de, ate); };
+  const produtos = cliente.produtosVendidos;
+  cliente.produtosVendidos = async () => (dia === '2026-08-22' ? [] : produtos());
+  const banco = bancoFalso();
+  const r = await importarLoja({ cliente, banco, loja: LOJA, de: '2026-08-21', ate: '2026-08-22' });
+
+  // o dia vazio não chega a substituirItensDia: apagar o snapshot bom por um
+  // 0 do Connect é pior que ficar com o dado de ontem
+  assert.deepEqual(banco.gravados.itensDia, [{ dia: '2026-08-21', n: 3 }]);
+  assert.equal(r.itensDia, 3);
+  assert.equal(r.avisos.length, 1);
+  assert.match(r.avisos[0], /2026-08-22/);
+});

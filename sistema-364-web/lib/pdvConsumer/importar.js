@@ -81,6 +81,13 @@ export async function importarLoja({ cliente, banco, loja, de, ate, log = () => 
   for (const dia of diasEntre(de, ate)) {
     await cliente.setPeriodo(dia, dia);
     const itens = await cliente.produtosVendidos();
+    // Lista vazia é ambígua: pode ser dia sem venda, mas também é o que o
+    // Connect devolve quando o relatório falha. Apagar um snapshot bom por
+    // causa disso é pior que manter o dado antigo — avisa e segue.
+    if (itens.length === 0) {
+      avisos.push(`itens ${dia}: Connect devolveu 0 itens; snapshot do dia mantido`);
+      continue;
+    }
     await banco.substituirItensDia(empresaId, dia, itens.map(i => normalizaItemDia(i, dia, empresaId)));
     r.itensDia += itens.length;
   }
