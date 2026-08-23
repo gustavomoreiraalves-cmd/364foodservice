@@ -65,6 +65,16 @@ function arg(nome, padrao) {
   return i >= 0 ? process.argv[i + 1] : padrao;
 }
 
+// Data de linha de comando: além do formato, o dia tem que existir de verdade.
+// `new Date('2026-02-30T00:00:00Z')` não dá erro — vira 2 de março —, então a
+// prova é o ida-e-volta: só vale a data que volta escrita igual. Exportada
+// para ter teste puro (tests/pdv-backup-importador.test.mjs).
+export function dataValida(d) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) return false;
+  const data = new Date(`${d}T00:00:00Z`);
+  return !Number.isNaN(data.getTime()) && data.toISOString().slice(0, 10) === d;
+}
+
 // ------------------------------------------------------------- Firebird
 
 function abrirFirebird(opcoes) {
@@ -244,9 +254,12 @@ function baixarBackup({ loja, diretorio, agora, log }) {
       fs.rmSync(caminho, { force: true });
       continue;
     }
+    // Distância nos DOIS sentidos: o relógio do PDV já apareceu adiantado, e um
+    // backup "do futuro" é tão suspeito quanto um de três dias atrás — em
+    // nenhum dos casos dá para confiar que é o arquivo de hoje.
     const horas = (agora.getTime() - data.getTime()) / MS_HORA;
-    if (horas > HORAS_LIMITE) {
-      tentativas.push(`${dia}: backup de ${data.toISOString()} (${horas.toFixed(1)} h atrás)`);
+    if (Math.abs(horas) > HORAS_LIMITE) {
+      tentativas.push(`${dia}: backup de ${data.toISOString()} (${horas.toFixed(1)} h de distância)`);
       fs.rmSync(caminho, { force: true });
       continue;
     }
@@ -339,8 +352,7 @@ async function main() {
   const ate = arg('--ate', hojeLocal);
   const somenteLoja = arg('--loja', null);
 
-  const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
-  if (!dataOk(de) || !dataOk(ate) || de > ate) {
+  if (!dataValida(de) || !dataValida(ate) || de > ate) {
     console.error('ERRO: --de/--ate precisam ser YYYY-MM-DD e --de <= --ate');
     process.exit(1);
   }
@@ -400,7 +412,9 @@ async function main() {
       console.log(`  ${dryRun ? '(dry-run, nada gravado) ' : ''}gravados: ${r.pedidos} pedidos, ${r.caixas} caixas, ${r.recebimentos} recebimentos, ${r.itensDia} itens/dia`);
       r.avisos.forEach(a => console.warn('  aviso: ' + a));
       const status = r.avisos.length ? 'parcial' : 'ok';
-      if (status === 'parcial') statusGeral = 'parcial';
+      // Uma loja parcial não pode apagar o erro de outra loja anterior: o
+      // código de saída da rodada tem que continuar sendo 2.
+      if (status === 'parcial' && statusGeral === 'ok') statusGeral = 'parcial';
       if (logId) {
         const { error } = await sb.from('pdv_importacoes').update({
           terminado_em: new Date().toISOString(), status,
