@@ -47,8 +47,8 @@ export function pedidoMudou(linha, existente) {
   const exclLinha = iso(dataConnect(linha.DataHoraExclusao));
   const exclBanco = existente.excluido_em ? new Date(existente.excluido_em).toISOString() : null;
   if (exclLinha !== exclBanco) return true;
-  const fechLinha = !!dataConnect(linha.DataHoraFechamento);
-  const fechBanco = !!existente.fechado_em;
+  const fechLinha = iso(dataConnect(linha.DataHoraFechamento));
+  const fechBanco = existente.fechado_em ? new Date(existente.fechado_em).toISOString() : null;
   return fechLinha !== fechBanco;
 }
 

@@ -46,6 +46,7 @@ test('pedidoMudou compara status, valor e exclusão', () => {
   assert.equal(pedidoMudou(linha, { status: 'Finalizado Pago', valor_total: 160.71, excluido_em: null, fechado_em: '2026-08-18T00:32:39.463+00:00' }), false);
   assert.equal(pedidoMudou(linha, { status: 'Em Aberto', valor_total: 160.71, excluido_em: null, fechado_em: null }), true);
   assert.equal(pedidoMudou(linha, { status: 'Finalizado Pago', valor_total: 100, excluido_em: null, fechado_em: '2026-08-18T00:32:39.463+00:00' }), true);
+  assert.equal(pedidoMudou(linha, { status: 'Finalizado Pago', valor_total: 160.71, excluido_em: null, fechado_em: '2026-08-18T00:40:00Z' }), true);
 });
 
 test('normalizaPedido monta pedido, itens e pagamentos para o banco', () => {
