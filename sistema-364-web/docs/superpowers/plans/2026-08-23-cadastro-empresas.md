@@ -26,8 +26,8 @@
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `supabase/atualizacao_30_empresas_pessoa_juridica.sql` | Colunas novas em `empregadores`, `empresas.empregador_id` + migração de dados, tabela `certificados_digitais` + RLS |
-| `tests/migracao-30/{fixture.sql,cenarios.sql,verificar.sh}` | Prova a migração num Postgres local: idempotência, vínculo das marcas, rollback |
+| `supabase/atualizacao_31_empresas_pessoa_juridica.sql` | Colunas novas em `empregadores`, `empresas.empregador_id` + migração de dados, tabela `certificados_digitais` + RLS |
+| `tests/migracao-31/{fixture.sql,cenarios.sql,verificar.sh}` | Prova a migração num Postgres local: idempotência, vínculo das marcas, rollback |
 | `lib/certificadoServer.js` | Chave, `cifrar`/`decifrar`, `inspecionarPfx`, `obterCertificadoAtivo` (server only) |
 | `tests/certificado.test.mjs` | Ida e volta da cifra, tag adulterada, leitura de pfx gerado por openssl |
 | `app/api/empresas/[id]/certificado/route.js` | POST (upload) / GET (status) / DELETE (desativar) do certificado de um empregador |
@@ -45,23 +45,23 @@
 
 ---
 
-### Task 1: Migração 30 — banco
+### Task 1: Migração 31 — banco
 
 **Files:**
-- Create: `supabase/atualizacao_30_empresas_pessoa_juridica.sql`
-- Create: `tests/migracao-30/fixture.sql`
-- Create: `tests/migracao-30/cenarios.sql`
-- Create: `tests/migracao-30/verificar.sh`
+- Create: `supabase/atualizacao_31_empresas_pessoa_juridica.sql`
+- Create: `tests/migracao-31/fixture.sql`
+- Create: `tests/migracao-31/cenarios.sql`
+- Create: `tests/migracao-31/verificar.sh`
 
 **Interfaces:**
 - Produces: colunas em `empregadores` (ver tabela abaixo), `empresas.empregador_id uuid`, tabela `certificados_digitais` com colunas `id, empregador_id, pfx_cifrado, senha_cifrada, cnpj_certificado, titular, emissor, numero_serie, valido_de, valido_ate, ativo, enviado_por, created_at`.
 
 - [ ] **Step 1: Escrever o fixture (esqueleto mínimo do banco real)**
 
-`tests/migracao-30/fixture.sql`:
+`tests/migracao-31/fixture.sql`:
 
 ```sql
--- Esqueleto mínimo para exercitar a atualização 30 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 31 num Postgres local.
 -- Reproduz o estado de produção: 4 marcas em `empresas` com só 2 CNPJs distintos
 -- e 1 empregador (Steakhouse) já cadastrado pelo módulo de ponto.
 create extension if not exists pgcrypto;
@@ -110,10 +110,10 @@ Repare que a Steakhouse em `empresas` tem o CNPJ **com máscara** de propósito:
 
 - [ ] **Step 2: Escrever os cenários (falham antes da migração existir)**
 
-`tests/migracao-30/cenarios.sql`:
+`tests/migracao-31/cenarios.sql`:
 
 ```sql
--- Exercita a atualização 30. Roda depois do fixture e da migração.
+-- Exercita a atualização 31. Roda depois do fixture e da migração.
 \set QUIET on
 set client_min_messages = warning;
 begin;
@@ -230,21 +230,21 @@ alter default privileges in schema public grant select on tables to authenticate
 
 - [ ] **Step 3: Escrever o runner**
 
-`tests/migracao-30/verificar.sh`:
+`tests/migracao-31/verificar.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# Exercita a atualização 30 (pessoa jurídica central + certificados) num Postgres
+# Exercita a atualização 31 (pessoa jurídica central + certificados) num Postgres
 # local descartável. Não toca em produção. Requer psql no PATH e servidor local.
 #
-# Uso: tests/migracao-30/verificar.sh
+# Uso: tests/migracao-31/verificar.sh
 set -euo pipefail
 export PGOPTIONS='-c client_min_messages=warning'
 
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 RAIZ="$(cd "$AQUI/../.." && pwd)"
 BANCO="${BANCO_TESTE_EMPRESAS:-empresas_test_364}"
-MIG="$RAIZ/supabase/atualizacao_30_empresas_pessoa_juridica.sql"
+MIG="$RAIZ/supabase/atualizacao_31_empresas_pessoa_juridica.sql"
 
 command -v psql >/dev/null || { echo "psql não encontrado no PATH"; exit 1; }
 pg_isready -q || { echo "nenhum Postgres local aceitando conexões"; exit 1; }
@@ -274,16 +274,16 @@ tabela=$(psql -tAq -d "$BANCO" -c "select count(*) from information_schema.table
 echo "OK: rollback desfaz a migração"
 ```
 
-`chmod +x tests/migracao-30/verificar.sh`.
+`chmod +x tests/migracao-31/verificar.sh`.
 
 - [ ] **Step 4: Rodar o runner e ver falhar**
 
-Run: `tests/migracao-30/verificar.sh`
+Run: `tests/migracao-31/verificar.sh`
 Expected: falha em `psql ... -f "$MIG"` com `No such file or directory`.
 
 - [ ] **Step 5: Escrever a migração**
 
-`supabase/atualizacao_30_empresas_pessoa_juridica.sql`:
+`supabase/atualizacao_31_empresas_pessoa_juridica.sql`:
 
 ```sql
 -- Cadastro central da pessoa jurídica + certificado digital A1.
@@ -323,7 +323,7 @@ alter table public.empregadores add column if not exists contador_telefone text;
 alter table public.empregadores add column if not exists observacoes text;
 alter table public.empregadores add column if not exists updated_at timestamptz not null default now();
 
-comment on column public.empregadores.endereco is 'Logradouro. Número, complemento e bairro têm colunas próprias (atualização 30).';
+comment on column public.empregadores.endereco is 'Logradouro. Número, complemento e bairro têm colunas próprias (atualização 31).';
 
 -- Normaliza antes do check: cadastro antigo pode ter máscara.
 update public.empregadores set cnpj = regexp_replace(cnpj, '\D', '', 'g') where cnpj ~ '\D';
@@ -415,14 +415,14 @@ Nota: o rollback **não** apaga as pessoas jurídicas criadas pela migração de
 
 - [ ] **Step 6: Rodar o runner até passar**
 
-Run: `tests/migracao-30/verificar.sh`
+Run: `tests/migracao-31/verificar.sh`
 Expected: `OK 1` … `OK 8`, depois `OK: rollback desfaz a migração`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add supabase/atualizacao_30_empresas_pessoa_juridica.sql tests/migracao-30
-git commit -m "feat(db): empregadores como pessoa jurídica central e certificados digitais (atualização 30)"
+git add supabase/atualizacao_31_empresas_pessoa_juridica.sql tests/migracao-31
+git commit -m "feat(db): empregadores como pessoa jurídica central e certificados digitais (atualização 31)"
 ```
 
 ---
@@ -959,7 +959,7 @@ export async function GET(request) {
 
 - [ ] **Step 3: Teste manual com curl contra o dev server**
 
-Não há banco local com a migração 30 aplicada ao dev server (`.env.local` aponta para produção e a migração ainda não foi aplicada lá — Task 8). Nesta task, valide só que o build compila e que a rota recusa sem token:
+Não há banco local com a migração 31 aplicada ao dev server (`.env.local` aponta para produção e a migração ainda não foi aplicada lá — Task 8). Nesta task, valide só que o build compila e que a rota recusa sem token:
 
 Run: `npm run build`
 Expected: build ok, rotas `/api/empresas/[id]/certificado` e `/api/empresas/certificados` listadas como `ƒ (Dynamic)`.
@@ -1096,7 +1096,7 @@ export function usePessoaJuridica() {
 }
 ```
 
-O join `empregadores(*)` depende da FK `empresas.empregador_id` (migração 30) — o PostgREST descobre sozinho. A tela de empresas chama `limparCachePessoaJuridica()` após salvar.
+O join `empregadores(*)` depende da FK `empresas.empregador_id` (migração 31) — o PostgREST descobre sozinho. A tela de empresas chama `limparCachePessoaJuridica()` após salvar.
 
 - [ ] **Step 5: Upload de NF-e**
 
@@ -1485,7 +1485,7 @@ Dois pontos a confirmar ao implementar:
 
 - [ ] **Step 3: Verificar no preview**
 
-A tela depende da migração 30 em produção (o `.env.local` aponta para lá). Se a Task 8 ainda não rodou, valide só `npm run verify` e a renderização do formulário vazio (abrir `/empresas` no preview; a lista mostra erro de coluna ausente, esperado). A verificação funcional completa fica na Task 8.
+A tela depende da migração 31 em produção (o `.env.local` aponta para lá). Se a Task 8 ainda não rodou, valide só `npm run verify` e a renderização do formulário vazio (abrir `/empresas` no preview; a lista mostra erro de coluna ausente, esperado). A verificação funcional completa fica na Task 8.
 
 Run: `npm run verify` → verde.
 
@@ -1549,7 +1549,7 @@ Expected: 4 marcas, 1 empregador, `0`.
 - [ ] **Step 2: Aplicar a migração (com ok do usuário)**
 
 ```bash
-psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/atualizacao_30_empresas_pessoa_juridica.sql
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/atualizacao_31_empresas_pessoa_juridica.sql
 ```
 
 Conferir:

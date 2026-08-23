@@ -35,7 +35,7 @@ alter table public.empregadores add column if not exists contador_telefone text;
 alter table public.empregadores add column if not exists observacoes text;
 alter table public.empregadores add column if not exists updated_at timestamptz not null default now();
 
-comment on column public.empregadores.endereco is 'Logradouro. Número, complemento e bairro têm colunas próprias (atualização 30).';
+comment on column public.empregadores.endereco is 'Logradouro. Número, complemento e bairro têm colunas próprias (atualização 31).';
 
 -- Normaliza antes do check: cadastro antigo pode ter máscara.
 update public.empregadores set cnpj = regexp_replace(cnpj, '\D', '', 'g') where cnpj ~ '\D';

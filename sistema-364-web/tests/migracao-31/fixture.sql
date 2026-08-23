@@ -1,4 +1,4 @@
--- Esqueleto mínimo para exercitar a atualização 30 num Postgres local.
+-- Esqueleto mínimo para exercitar a atualização 31 num Postgres local.
 -- Reproduz o estado de produção: 4 marcas em `empresas` com só 2 CNPJs distintos
 -- e 1 empregador (Steakhouse) já cadastrado pelo módulo de ponto.
 create extension if not exists pgcrypto;

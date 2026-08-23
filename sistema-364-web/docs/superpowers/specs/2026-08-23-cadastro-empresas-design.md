@@ -67,7 +67,7 @@ Fora (decidido explicitamente):
 
 ## Arquitetura
 
-### 1. Banco — `supabase/atualizacao_30_empresas_pessoa_juridica.sql`
+### 1. Banco — `supabase/atualizacao_31_empresas_pessoa_juridica.sql`
 
 **`empregadores` — novas colunas** (todas opcionais, `add column if not exists`):
 
@@ -284,7 +284,7 @@ impressão → usePessoaJuridica() → empresas.empregador_id → empregadores
 
 ## Entrega em ordem
 
-1. Migração 30 + aplicação em produção (com ok explícito, conforme regra de
+1. Migração 31 + aplicação em produção (com ok explícito, conforme regra de
    escrita no banco de produção).
 2. `lib/certificadoServer.js` + testes + `node-forge`.
 3. Rotas da API.
