@@ -28,16 +28,25 @@ export default function CertificadoA1({ empregadorId, resumoInicial, aoMudar }) 
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState('');
 
+  // Só acompanha o resumo (não mexe em mensagem): depois de um upload/remoção
+  // bem-sucedidos, `aoMudar` troca `resumoInicial.id` no pai, o que faria este
+  // efeito reexecutar e apagar a `mensagem` (inclusive o `aviso` do servidor
+  // para certificado ainda não vigente) antes do usuário conseguir lê-la.
+  useEffect(() => {
+    setResumo(resumoInicial || null);
+  }, [resumoInicial?.id]);
+
   // Troca de empresa em edição reaproveita esta instância (mesma posição na
   // árvore) — sem isto, arquivo/senha/mensagem digitados para uma empresa
   // vazariam para a próxima. Ver também `key={emEdicao.id}` em app/empresas/page.js,
   // que já força remontagem; este reset cobre o caso de a key não bastar.
+  // Depende só de `empregadorId` (não de `resumoInicial?.id`) para não apagar
+  // a mensagem quando o próprio envio muda o resumo da mesma empresa.
   useEffect(() => {
-    setResumo(resumoInicial || null);
     setArquivo(null);
     setSenha('');
     setMensagem('');
-  }, [resumoInicial?.id, empregadorId]);
+  }, [empregadorId]);
 
   async function enviar(e) {
     e.preventDefault();

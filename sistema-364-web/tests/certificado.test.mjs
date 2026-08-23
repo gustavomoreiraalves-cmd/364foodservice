@@ -23,11 +23,15 @@ function gerarPfx({ cn, cnpjOid, senha, dias = 365 }) {
     '[dn]', `CN=${cn}`,
     '[ext]', cnpjOid ? `subjectAltName=otherName:2.16.76.1.3.3;UTF8:${cnpjOid}` : 'basicConstraints=CA:FALSE',
   ].join('\n'));
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', String(dias),
-    '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-config', cfg]);
-  execFileSync('openssl', ['pkcs12', '-export', '-inkey', path.join(dir, 'k.pem'), '-in', path.join(dir, 'c.pem'),
-    '-out', path.join(dir, 'c.pfx'), '-passout', `pass:${senha}`]);
-  return fs.readFileSync(path.join(dir, 'c.pfx'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', String(dias),
+      '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-config', cfg], { stdio: 'pipe' });
+    execFileSync('openssl', ['pkcs12', '-export', '-inkey', path.join(dir, 'k.pem'), '-in', path.join(dir, 'c.pem'),
+      '-out', path.join(dir, 'c.pfx'), '-passout', `pass:${senha}`], { stdio: 'pipe' });
+    return fs.readFileSync(path.join(dir, 'c.pfx'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 test('cifrar/decifrar: ida e volta, e IV diferente a cada chamada', () => {

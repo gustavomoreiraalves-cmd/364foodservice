@@ -64,7 +64,7 @@ export function inspecionarPfx(buffer, senha) {
     p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, senha || '');
   } catch (e) {
     const msg = String(e?.message || e);
-    if (/Invalid password|MAC|authenticate|PKCS#12 MAC/i.test(msg)) throw new Error('Senha do certificado incorreta.');
+    if (/MAC could not be verified|Invalid password/i.test(msg)) throw new Error('Senha do certificado incorreta.');
     throw new Error('Arquivo não é um certificado PKCS#12 válido.');
   }
   const bags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] || [];

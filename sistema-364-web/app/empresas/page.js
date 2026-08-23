@@ -39,13 +39,16 @@ function Conteudo() {
   const [certificados, setCertificados] = useState({});
   const [loading, setLoading] = useState(true);
   const [mostrarInativos, setMostrarInativos] = useState(false);
+  const [erroCarga, setErroCarga] = useState('');
 
   async function carregar() {
     setLoading(true);
-    const [{ data: emps }, { data: mcs }] = await Promise.all([
+    const [{ data: emps, error: erroEmps }, { data: mcs, error: erroMcs }] = await Promise.all([
       supabase.from('empregadores').select('*').order('razao_social'),
       supabase.from('empresas').select('id, nome, empregador_id').order('nome'),
     ]);
+    const erro = erroEmps || erroMcs;
+    setErroCarga(erro ? 'Não foi possível carregar as empresas: ' + erro.message : '');
     setLista(emps || []);
     setMarcas(mcs || []);
     try {
@@ -61,10 +64,12 @@ function Conteudo() {
 
   // empregadores não tem empresa_id: o insert precisa do grupo, que vem da
   // empresa selecionada. `empresa_id: undefined` some no JSON e o PostgREST não vê.
+  // Na edição não reenviamos grupo_id: a empresa já tem o seu, e o valor aqui
+  // é só o da empresa atualmente selecionada no topo, que pode ser outra.
   function paraGravar(f) {
-    const grupo_id = empresaAtual?.grupo_id || empresas?.[0]?.grupo_id;
     const vazioVira = v => (typeof v === 'string' && v.trim() === '' ? null : v);
-    const saida = { ...f, grupo_id };
+    const saida = { ...f };
+    if (!editando) saida.grupo_id = empresaAtual?.grupo_id || empresas?.[0]?.grupo_id;
     for (const k of Object.keys(saida)) saida[k] = vazioVira(saida[k]);
     saida.cnpj = somenteDigitos(f.cnpj);
     saida.cep = somenteDigitos(f.cep) || null;
@@ -86,10 +91,11 @@ function Conteudo() {
       alert('Já existe uma empresa com este CNPJ.');
       return;
     }
-    // grupo_id vem da empresa selecionada no topo (ver paraGravar); se o
-    // contexto ainda está carregando ou não há nenhuma empresa, o insert cairia
-    // numa violação de NOT NULL em inglês — barra aqui com mensagem em português.
-    if (!(empresaAtual?.grupo_id || empresas?.[0]?.grupo_id)) {
+    // grupo_id só é enviado na criação (ver paraGravar); se o contexto ainda
+    // está carregando ou não há nenhuma empresa, o insert cairia numa violação
+    // de NOT NULL em inglês — barra aqui com mensagem em português. Na edição
+    // o grupo já está gravado na empresa, então não é preciso checar.
+    if (!editando && !(empresaAtual?.grupo_id || empresas?.[0]?.grupo_id)) {
       e.preventDefault();
       alert('Selecione uma empresa antes de cadastrar (grupo não identificado).');
       return;
@@ -206,6 +212,7 @@ function Conteudo() {
             <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} /> Mostrar inativas
           </label>
         </div>
+        {erroCarga && <p className="muted">{erroCarga}</p>}
         {loading ? <p className="muted">Carregando…</p> : (
           <div className="table-wrap">
             <table>
