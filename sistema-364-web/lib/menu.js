@@ -10,6 +10,7 @@ export const MENU = [
       { label: 'Fornecedores', href: '/fornecedores', modulo: 'fornecedores' },
       { label: 'Produtos', href: '/produtos', modulo: 'produtos' },
       { label: 'Matéria-prima / Insumos', href: '/materias-primas', modulo: 'produtos' },
+      { label: 'Empresas (CNPJ)', href: '/empresas', modulo: 'admin' },
     ],
   },
   {

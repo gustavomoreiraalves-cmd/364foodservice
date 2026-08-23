@@ -56,12 +56,20 @@ test('MENU: todo href tem uma page.js correspondente em app/', () => {
 });
 
 test('MENU: todo modulo citado existe em MODULOS', () => {
-  const validos = idsDePermissao();
+  // 'admin' é o módulo especial (lib/auth.js:7): não está em MODULOS, mas é válido.
+  const validos = [...idsDePermissao(), 'admin'];
   assert.ok(validos.length > 0, 'não consegui ler os ids de MODULOS');
   for (const item of todosItens(MENU)) {
     if (!item.modulo) continue;
     assert.ok(validos.includes(item.modulo), `modulo desconhecido: ${item.modulo}`);
   }
+});
+
+test('menuVisivel: Empresas (CNPJ) só aparece para admin', () => {
+  const semAdmin = todosItens(menuVisivel(['clientes'], false)).map(i => i.href);
+  assert.ok(!semAdmin.includes('/empresas'));
+  const comAdmin = todosItens(menuVisivel([], true)).map(i => i.href);
+  assert.ok(comAdmin.includes('/empresas'));
 });
 
 test('itemAtivo: exato distingue /producoes de /producoes/completa', () => {
