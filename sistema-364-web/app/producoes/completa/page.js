@@ -74,6 +74,19 @@ function Conteudo({ setFicha, setEtiqueta }) {
     const qtd = Number(form.quantidade);
     const itensFicha = fichasTec.filter(f => f.produto_id === form.produto_id);
 
+    // Produto rastreado (atualização 30, Fase 3 do controle de lote) só entra
+    // no estoque pela ficha de embalagem — ela é quem grava lote de origem,
+    // custo pelo rendimento da defumação e validade por regra de conservação.
+    // Deixar passar por aqui também faria o mesmo produto entrar no estoque
+    // por dois caminhos, e o erro só apareceria ao comparar o saldo com a
+    // câmara fria. A opção já vem desabilitada no <select> (com o motivo no
+    // próprio texto — sumir sem explicação gera chamado); este é o cinto e
+    // suspensório contra o valor chegar aqui por outro caminho.
+    if (produto?.rastreado) {
+      alert(`O produto "${produto.nome}" é rastreado — ele só pode ser lançado pela ficha de embalagem (aba Produções → Embalagem). Este formulário não pode lançá-lo.`);
+      return;
+    }
+
     if (!itensFicha.length) {
       alert('Este produto ainda não tem ficha técnica definida (aba Produtos). Cadastre antes de lançar produção.');
       return;
@@ -178,7 +191,15 @@ function Conteudo({ setFicha, setEtiqueta }) {
               <option value="">Selecione…</option>
               {produtos
                 .filter(p => p.ativo !== false || p.id === form.produto_id)
-                .map(p => <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>)}
+                .map(p => (
+                  // Produto rastreado aparece na lista, DESABILITADO, com o
+                  // motivo no próprio texto da opção — sumir sem explicação
+                  // gera chamado. Só entra no estoque pela ficha de
+                  // embalagem (Produções → Embalagem), atualização 30.
+                  <option key={p.id} value={p.id} disabled={p.rastreado}>
+                    {p.codigo} — {p.nome}{p.rastreado ? ' — rastreado, lance pela ficha de embalagem' : ''}
+                  </option>
+                ))}
             </select>
           </div>
           <div><label>Quantidade produzida</label><input type="number" step="0.001" required value={form.quantidade} onChange={e => setForm({ ...form, quantidade: e.target.value })} /></div>
