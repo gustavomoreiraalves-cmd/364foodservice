@@ -133,10 +133,10 @@ function Conteudo() {
         <SerieDiariaPdv dados={calc.dias} />
         <div className="table-wrap" style={{ marginTop: 14 }}>
           <table>
-            <thead><tr><th>Dia</th><th className="num">Mesa</th><th className="num">Delivery</th><th className="num">Total</th><th className="num">Pedidos</th><th className="num">Ticket</th></tr></thead>
+            <thead><tr><th>Dia</th><th className="num">Mesa</th><th className="num">Delivery</th><th className="num">Outro</th><th className="num">Total</th><th className="num">Pedidos</th><th className="num">Ticket</th></tr></thead>
             <tbody>
               {calc.dias.map(d => (
-                <tr key={d.dia}><td>{fmtDia(d.dia)}</td><td className="num">{fmtMoney(d.mesa)}</td><td className="num">{fmtMoney(d.delivery)}</td><td className="num">{fmtMoney(d.total)}</td><td className="num">{d.pedidos}</td><td className="num">{fmtMoney(d.ticket)}</td></tr>
+                <tr key={d.dia}><td>{fmtDia(d.dia)}</td><td className="num">{fmtMoney(d.mesa)}</td><td className="num">{fmtMoney(d.delivery)}</td><td className="num">{fmtMoney(d.outro)}</td><td className="num">{fmtMoney(d.total)}</td><td className="num">{d.pedidos}</td><td className="num">{fmtMoney(d.ticket)}</td></tr>
               ))}
             </tbody>
           </table>
