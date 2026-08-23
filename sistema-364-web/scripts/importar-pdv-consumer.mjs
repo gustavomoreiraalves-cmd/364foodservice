@@ -134,7 +134,9 @@ async function main() {
   if (!alvo.length) { console.error('Nenhuma loja ativa em pdv_lojas.'); process.exit(1); }
 
   console.log(`Importação PDV Consumer — ${de} a ${ate}${dryRun ? ' (dry-run)' : ''}`);
-  const cliente = criarClienteConnect({ cookie });
+  // PDV_PAUSA_MS: intervalo entre requisições ao painel. O Connect devolve 429
+  // quando o ritmo passa de ~3/s; 600 ms segura o limite sem esticar demais.
+  const cliente = criarClienteConnect({ cookie, pausaMs: Number(process.env.PDV_PAUSA_MS || 600) });
   const banco = dryRun ? bancoSeco() : bancoSupabase();
   let statusGeral = 'ok';
 

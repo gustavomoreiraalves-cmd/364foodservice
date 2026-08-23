@@ -40,19 +40,46 @@ function pareceLogin(resp, texto) {
   return /<form[^>]*autenticacao\/login/i.test(texto);
 }
 
-export function criarClienteConnect({ cookie, fetch = globalThis.fetch, base = 'https://connect.consumer.com.br', pausaMs = 300, dormir } = {}) {
+export function criarClienteConnect({ cookie, fetch = globalThis.fetch, base = 'https://connect.consumer.com.br', pausaMs = 300, dormir, timeoutMs = 60000 } = {}) {
   if (!cookie) throw new Error('CONSUMER_CONNECT_COOKIE não informado.');
   const esperar = dormir || (ms => new Promise(r => setTimeout(r, ms)));
+
+  // Pote de cookies: os filtros de loja e de período NÃO ficam na sessão do
+  // servidor — voltam como Set-Cookie (SelectedDbs, DateFilter) e precisam ir
+  // junto nas chamadas seguintes. Sem isso a lista ignora o filtro.
+  const pote = new Map();
+  for (const par of cookie.split(';')) {
+    const i = par.indexOf('=');
+    if (i > 0) pote.set(par.slice(0, i).trim(), par.slice(i + 1).trim());
+  }
+  const cookieAtual = () => [...pote].map(([k, v]) => `${k}=${v}`).join('; ');
+  function guardarCookies(resp) {
+    const lista = typeof resp.headers?.getSetCookie === 'function'
+      ? resp.headers.getSetCookie()
+      : [resp.headers?.get?.('set-cookie')].filter(Boolean);
+    for (const sc of lista) {
+      const par = sc.split(';')[0];
+      const i = par.indexOf('=');
+      if (i > 0) pote.set(par.slice(0, i).trim(), par.slice(i + 1).trim());
+    }
+  }
+
+  // O painel (IIS/Cloudflare) responde 405 a POST sem cara de navegador:
+  // User-Agent, Referer e Origin são obrigatórios, além do cookie.
   const cabecalhos = extra => ({
-    Cookie: cookie,
+    Cookie: cookieAtual(),
     'X-Requested-With': 'XMLHttpRequest',
     Accept: 'application/json, text/html, */*',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36',
+    Referer: base + '/',
+    Origin: base,
     ...extra,
   });
 
   async function chamar(caminho, { method = 'GET', body } = {}) {
     let ultimoErro;
-    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const MAX = 3;
+    for (let tentativa = 1; tentativa <= MAX; tentativa++) {
       if (pausaMs) await esperar(pausaMs);
       try {
         const resp = await fetch(base + caminho, {
@@ -61,10 +88,17 @@ export function criarClienteConnect({ cookie, fetch = globalThis.fetch, base = '
           body,
           redirect: 'follow',
         });
+        guardarCookies(resp);
         const texto = await resp.text();
         if (pareceLogin(resp, texto)) throw new SessaoExpiradaError();
         if (resp.ok) return texto;
         ultimoErro = new Error(`Connect ${method} ${caminho} respondeu ${resp.status}`);
+        if (resp.status === 429) {
+          // Limite de requisições do painel: espera o Retry-After (ou 15 s) e cresce a cada tentativa.
+          const retryAfter = Number(resp.headers?.get?.('retry-after')) || 0;
+          if (tentativa < MAX) await esperar(Math.max(retryAfter * 1000, 15000) * tentativa);
+          continue;
+        }
       } catch (e) {
         // Sessão expirada é definitivo: não adianta tentar de novo, escapa na hora.
         if (e instanceof SessaoExpiradaError) throw e;
@@ -72,7 +106,7 @@ export function criarClienteConnect({ cookie, fetch = globalThis.fetch, base = '
         // conta como tentativa falha, igual a uma resposta HTTP de erro.
         ultimoErro = e;
       }
-      if (tentativa < 3) await esperar(500 * tentativa);
+      if (tentativa < MAX) await esperar(500 * tentativa);
     }
     throw ultimoErro;
   }

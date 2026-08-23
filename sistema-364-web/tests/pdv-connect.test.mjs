@@ -15,7 +15,10 @@ function fetchFalso(respostas) {
       status: resp.status || 200,
       redirected: !!resp.redirected,
       url: resp.url || url,
-      headers: { get: h => (resp.headers || {})[h.toLowerCase()] || null },
+      headers: {
+        get: h => (resp.headers || {})[h.toLowerCase()] || null,
+        getSetCookie: () => resp.setCookie || [],
+      },
       text: async () => (typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body)),
     };
   };
@@ -31,6 +34,9 @@ test('setLoja e setPeriodo fazem POST com cookie e formato do painel', async () 
   assert.equal(f.chamadas[0].opts.method, 'POST');
   assert.equal(f.chamadas[0].opts.headers.Cookie, 'ASP.NET_SessionId=abc');
   assert.equal(f.chamadas[0].opts.headers['X-Requested-With'], 'XMLHttpRequest');
+  assert.match(f.chamadas[0].opts.headers['User-Agent'], /Mozilla/);
+  assert.equal(f.chamadas[0].opts.headers.Origin, 'https://connect.consumer.com.br');
+  assert.equal(f.chamadas[0].opts.headers.Referer, 'https://connect.consumer.com.br/');
   assert.equal(f.chamadas[0].opts.body, 'ids=-2147478159');
   assert.equal(decodeURIComponent(f.chamadas[1].opts.body), 'start=2026-08-20 00:00&end=2026-08-23 23:59');
 });
@@ -107,4 +113,33 @@ test('erro de rede persistente propaga depois de três tentativas', async () => 
   const c = criarClienteConnect({ cookie: 'x', fetch: f, pausaMs: 0, dormir: async () => {} });
   await assert.rejects(() => c.listar('/Financeiro/GetRecebimentos', COLUNAS.recebimentos), /ECONNRESET/);
   assert.equal(n, 3);
+});
+
+test('cookies devolvidos pelo painel (filtros) vão nas chamadas seguintes', async () => {
+  const f = fetchFalso({
+    '/QueryFilters/SetDateFilter': { body: 'True', setCookie: ['DateFilter=abc123; path=/; HttpOnly'] },
+    '/QueryFilters/SetDatabaseFilter': { body: 'True', setCookie: ['SelectedDbs=-2147478159; path=/'] },
+    '/Produtos/GetProdutosVendidos': { body: { data: [] } },
+  });
+  const c = criarClienteConnect({ cookie: 'ASP.NET_SessionId=s1; ConsumerConnectCookie103=auth', fetch: f, pausaMs: 0 });
+  await c.setPeriodo('2026-08-21', '2026-08-21');
+  await c.setLoja(-2147478159);
+  await c.produtosVendidos();
+  const enviado = f.chamadas[2].opts.headers.Cookie;
+  assert.match(enviado, /ASP\.NET_SessionId=s1/);
+  assert.match(enviado, /ConsumerConnectCookie103=auth/);
+  assert.match(enviado, /DateFilter=abc123/);
+  assert.match(enviado, /SelectedDbs=-2147478159/);
+  assert.doesNotMatch(enviado, /HttpOnly/);
+});
+
+test('429 espera o Retry-After e tenta de novo', async () => {
+  let n = 0;
+  const esperas = [];
+  const f = fetchFalso({ '/Pedidos/GetDetalhesPedido': () => { n++; return n === 1 ? { status: 429, headers: { 'retry-after': '2' }, body: '' } : { body: '<div>ok</div>' }; } });
+  const c = criarClienteConnect({ cookie: 'x', fetch: f, pausaMs: 0, dormir: async ms => { esperas.push(ms); } });
+  const html = await c.detalhe('/Pedidos/GetDetalhesPedido', 1);
+  assert.match(html, /ok/);
+  assert.equal(n, 2);
+  assert.ok(esperas.some(ms => ms >= 15000), 'esperou pelo menos 15 s após o 429');
 });
