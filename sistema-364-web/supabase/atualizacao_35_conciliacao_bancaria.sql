@@ -166,7 +166,11 @@ create policy "empresa_scoped_access" on public.conciliacao_vinculos for all
 -- O bucket 'recebimentos' foi criado com allowed_mime_types restrito (PDF,
 -- imagens e, desde a atualização 25, XML). O extrato em OFX e em CSV bate em
 -- "mime type is not supported" e o upload falha. Libera os dois aqui, mantendo
--- a lista anterior inteira.
+-- a lista anterior inteira. O catch-all 'application/octet-stream' fica de
+-- fora de propósito: a rota de upload sempre define o contentType explícito
+-- (application/x-ofx, text/csv ou application/pdf), e um catch-all só
+-- alargaria o que qualquer usuário autenticado pode gravar no bucket sem
+-- servir a nenhum caso real.
 --
 -- O guard existe porque o schema storage só existe no Supabase: o teste local
 -- (tests/migracao-35/) roda esta mesma migração num Postgres cru.
@@ -354,10 +358,15 @@ end $$;
 
 -- Desfaz: reabre só as parcelas que esta conciliação baixou, apaga os
 -- vínculos e, se a conta a pagar nasceu daqui, apaga a conta (o cascade
--- limpa parcela e vínculo).
+-- limpa parcela e vínculo). Se o lançamento é o pagamento de uma fatura (tem
+-- fatura_id), ele não tem vínculo próprio — quem baixou as parcelas foi
+-- fn_conciliar_pagamento_fatura nos vínculos das LINHAS da fatura. Aqui a
+-- gente reabre só as parcelas que aquele pagamento baixou e devolve
+-- baixou_parcela a false nesses vínculos, sem apagá-los: a compra continua
+-- conciliada, só o pagamento é desfeito.
 create or replace function public.fn_desfazer_conciliacao(p_lancamento_id uuid)
 returns jsonb language plpgsql as $$
-declare v_lanc record; v_reabertas int := 0;
+declare v_lanc record; v_reabertas int := 0; v_fatura_reabertas int := 0;
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
@@ -372,6 +381,23 @@ begin
 
   if v_lanc.conta_criada_id is not null then
     delete from public.contas_a_pagar where id = v_lanc.conta_criada_id;
+  end if;
+
+  if v_lanc.fatura_id is not null then
+    update public.contas_a_pagar_parcelas p
+       set status = 'Pendente', data_pagamento = null, forma_pagamento = null
+     where p.id in (select v.parcela_id from public.conciliacao_vinculos v
+                     join public.extrato_lancamentos l on l.id = v.lancamento_id
+                    where l.importacao_id = v_lanc.fatura_id and v.baixou_parcela);
+    get diagnostics v_fatura_reabertas = row_count;
+    v_reabertas := v_reabertas + v_fatura_reabertas;
+
+    update public.conciliacao_vinculos v
+       set baixou_parcela = false
+      from public.extrato_lancamentos l
+     where l.id = v.lancamento_id
+       and l.importacao_id = v_lanc.fatura_id
+       and v.baixou_parcela;
   end if;
 
   update public.extrato_lancamentos
@@ -391,7 +417,9 @@ end $$;
 create or replace function public.fn_conciliar_pagamento_fatura(
   p_lancamento_id uuid, p_fatura_id uuid, p_forcar boolean default false)
 returns jsonb language plpgsql as $$
-declare v_lanc record; v_fatura record; v_soma numeric(12,2); v_baixadas int := 0;
+declare
+  v_lanc record; v_fatura record; v_soma numeric(12,2);
+  v_baixadas int := 0; v_parcela_ids uuid[];
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
@@ -418,17 +446,28 @@ begin
       to_char(v_lanc.valor, 'FM999999990.00'), to_char(v_soma, 'FM999999990.00');
   end if;
 
-  update public.contas_a_pagar_parcelas p
-     set status = 'Pago', data_pagamento = v_lanc.data, forma_pagamento = 'Cartão de Crédito'
-   where p.status = 'Pendente'
-     and p.id in (select v.parcela_id from public.conciliacao_vinculos v
-                   join public.extrato_lancamentos l on l.id = v.lancamento_id
-                  where l.importacao_id = p_fatura_id);
-  get diagnostics v_baixadas = row_count;
+  -- Só marca baixou_parcela = true nos vínculos cuja parcela esta chamada
+  -- realmente virou Pendente -> Pago agora. Linha de fatura conciliada
+  -- contra parcela que já estava Pago antes fica de fora: senão o desfazer
+  -- reabriria uma baixa que este pagamento nunca fez (o mesmo erro que o
+  -- cenário 8 existe para impedir na conciliação de linha avulsa).
+  with baixadas as (
+    update public.contas_a_pagar_parcelas p
+       set status = 'Pago', data_pagamento = v_lanc.data, forma_pagamento = 'Cartão de Crédito'
+     where p.status = 'Pendente'
+       and p.id in (select v.parcela_id from public.conciliacao_vinculos v
+                     join public.extrato_lancamentos l on l.id = v.lancamento_id
+                    where l.importacao_id = p_fatura_id)
+    returning p.id
+  )
+  select count(*), coalesce(array_agg(id), array[]::uuid[])
+    into v_baixadas, v_parcela_ids
+    from baixadas;
 
   update public.conciliacao_vinculos v
      set baixou_parcela = true
-   where v.lancamento_id in (select id from public.extrato_lancamentos where importacao_id = p_fatura_id);
+   where v.lancamento_id in (select id from public.extrato_lancamentos where importacao_id = p_fatura_id)
+     and v.parcela_id = any(v_parcela_ids);
 
   update public.extrato_lancamentos
      set status = 'conciliado', fatura_id = p_fatura_id

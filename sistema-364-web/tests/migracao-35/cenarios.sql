@@ -360,3 +360,98 @@ begin
   if parc.status <> 'Pago' then raise exception 'FALHA 12: p_forcar não baixou'; end if;
   raise notice 'OK 12b: com p_forcar o pagamento parcial baixa as parcelas da fatura';
 end $$;
+
+-- Cenário 13: desfazer o pagamento da fatura devolve só a parcela que ele
+-- baixou; a parcela que já estava paga antes de conciliar continua intacta;
+-- as duas linhas seguem conciliadas (a compra não é desfeita, só o
+-- pagamento) e voltam a baixou_parcela = false.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-000000000005', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura3.pdf', 'pdf');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-000000000005', 'Insumos loja A', 'Custos Variáveis',
+          'aaaaaaaa-0000-0000-0000-000000000001', 250.00, :'empresa');
+insert into public.contas_a_pagar_parcelas (id, conta_a_pagar_id, numero, valor, vencimento, empresa_id)
+  values ('99999999-0000-0000-0000-000000000006', 'ffffffff-0000-0000-0000-000000000005',
+          1, 250.00, '2026-09-20', :'empresa');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-000000000006', 'Manutenção equipamento', 'Custos Fixos',
+          'aaaaaaaa-0000-0000-0000-000000000001', 80.00, :'empresa');
+insert into public.contas_a_pagar_parcelas
+  (id, conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento, forma_pagamento, empresa_id)
+  values ('99999999-0000-0000-0000-000000000007', 'ffffffff-0000-0000-0000-000000000006',
+          1, 80.00, '2026-08-01', 'Pago', '2026-07-30', 'Dinheiro', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000019', 'dddddddd-0000-0000-0000-000000000005',
+          :'empresa', '2026-09-03', 'LOJA A INSUMOS', 'LOJA A INSUMOS', 250.00, 'saida', 'hash-f5');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000020', 'dddddddd-0000-0000-0000-000000000005',
+          :'empresa', '2026-08-01', 'MANUTENCAO EQUIP', 'MANUTENCAO EQUIP', 80.00, 'saida', 'hash-f6');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000021', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-25', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 3',
+          330.00, 'saida', 'hash-f7');
+do $$
+declare pendente record; paga record; vinc1 record; vinc2 record; lanc record;
+begin
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000019',
+    '[{"parcela_id":"99999999-0000-0000-0000-000000000006","valor_aplicado":250.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000020',
+    '[{"parcela_id":"99999999-0000-0000-0000-000000000007","valor_aplicado":80.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Fixos');
+  perform public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000021',
+    'dddddddd-0000-0000-0000-000000000005', false);
+
+  -- prova que o pagamento só marcou baixou_parcela=true na linha que ele de
+  -- fato baixou, não na linha que já estava paga antes de conciliar
+  select * into vinc1 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000019';
+  if vinc1.baixou_parcela is not true then
+    raise exception 'FALHA 13: pagamento devia ter marcado baixou_parcela=true na linha pendente';
+  end if;
+  select * into vinc2 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000020';
+  if vinc2.baixou_parcela is not false then
+    raise exception 'FALHA 13: linha já paga antes não devia virar baixou_parcela=true';
+  end if;
+
+  perform public.fn_desfazer_conciliacao('eeeeeeee-0000-0000-0000-000000000021');
+
+  select * into pendente from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-000000000006';
+  if pendente.status <> 'Pendente' or pendente.data_pagamento is not null or pendente.forma_pagamento is not null then
+    raise exception 'FALHA 13: desfazer o pagamento não devolveu a parcela que ele baixou (status=%, data=%, forma=%)',
+      pendente.status, pendente.data_pagamento, pendente.forma_pagamento;
+  end if;
+
+  select * into paga from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-000000000007';
+  if paga.status <> 'Pago' or paga.data_pagamento <> '2026-07-30' or paga.forma_pagamento <> 'Dinheiro' then
+    raise exception 'FALHA 13: desfazer o pagamento mexeu na parcela que já estava paga antes (status=%, data=%, forma=%)',
+      paga.status, paga.data_pagamento, paga.forma_pagamento;
+  end if;
+
+  select * into vinc1 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000019';
+  if vinc1 is null then raise exception 'FALHA 13: vínculo da linha pendente sumiu — a compra devia continuar conciliada'; end if;
+  if vinc1.baixou_parcela is not false then
+    raise exception 'FALHA 13: baixou_parcela da linha pendente devia voltar a false';
+  end if;
+
+  select * into vinc2 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000020';
+  if vinc2 is null then raise exception 'FALHA 13: vínculo da linha já paga sumiu — a compra devia continuar conciliada'; end if;
+  if vinc2.baixou_parcela is not false then
+    raise exception 'FALHA 13: baixou_parcela da linha já paga devia continuar false';
+  end if;
+
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000021';
+  if lanc.status <> 'pendente' or lanc.fatura_id is not null then
+    raise exception 'FALHA 13: lançamento do pagamento devia voltar a pendente sem fatura_id (status=%, fatura_id=%)',
+      lanc.status, lanc.fatura_id;
+  end if;
+
+  raise notice 'OK 13: desfazer o pagamento da fatura devolve só o que ele baixou e preserva a parcela já paga antes';
+end $$;
