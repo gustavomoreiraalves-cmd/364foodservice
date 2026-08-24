@@ -25,6 +25,41 @@ export function bancoSupabase(sb) {
       if (itens.length) falhou((await sb.from('pdv_pedido_itens').insert(itens.map(i => ({ ...i, pedido_id: pedidoId })))).error, 'inserir itens');
       if (pagamentos.length) falhou((await sb.from('pdv_pagamentos').insert(pagamentos.map(p => ({ ...p, pedido_id: pedidoId })))).error, 'inserir pagamentos');
     },
+    // Caminho em lote da carga histórica: upsert de até 500 pedidos por
+    // requisição, depois delete+insert dos filhos também em lote. Mesmo
+    // resultado do gravarPedido um a um, com ~100x menos requisições.
+    async gravarPedidosLote(lista) {
+      if (!lista.length) return;
+      const porCodigo = new Map(lista.map(l => [l.pedido.codigo, l]));
+      const empresaId = lista[0].pedido.empresa_id;
+      const ids = new Map(); // codigo -> id
+      for (let i = 0; i < lista.length; i += 500) {
+        const fatia = lista.slice(i, i + 500).map(l => l.pedido);
+        const { data, error } = await sb.from('pdv_pedidos')
+          .upsert(fatia, { onConflict: 'empresa_id,codigo' }).select('id, codigo');
+        falhou(error, 'gravarPedidosLote upsert');
+        for (const r of data || []) ids.set(r.codigo, r.id);
+      }
+      const todosIds = [...ids.values()];
+      for (let i = 0; i < todosIds.length; i += 200) {
+        const fatia = todosIds.slice(i, i + 200);
+        falhou((await sb.from('pdv_pedido_itens').delete().in('pedido_id', fatia)).error, 'lote: apagar itens');
+        falhou((await sb.from('pdv_pagamentos').delete().in('pedido_id', fatia)).error, 'lote: apagar pagamentos');
+      }
+      const itens = [], pagamentos = [];
+      for (const [codigo, l] of porCodigo) {
+        const pedidoId = ids.get(codigo);
+        if (!pedidoId) throw new Error(`gravarPedidosLote: upsert não devolveu id do pedido ${codigo} (empresa ${empresaId})`);
+        for (const it of l.itens) itens.push({ ...it, pedido_id: pedidoId });
+        for (const pg of l.pagamentos) pagamentos.push({ ...pg, pedido_id: pedidoId });
+      }
+      for (let i = 0; i < itens.length; i += 500) {
+        falhou((await sb.from('pdv_pedido_itens').insert(itens.slice(i, i + 500))).error, 'lote: inserir itens');
+      }
+      for (let i = 0; i < pagamentos.length; i += 500) {
+        falhou((await sb.from('pdv_pagamentos').insert(pagamentos.slice(i, i + 500))).error, 'lote: inserir pagamentos');
+      }
+    },
     async caixasExistentes(empresaId, codigos) {
       const mapa = new Map();
       for (let i = 0; i < codigos.length; i += 500) {
@@ -58,10 +93,12 @@ export function bancoSupabase(sb) {
 }
 
 // Em --dry-run o banco só conta; nada é escrito.
+// (bancoSeco ganha o mesmo método de lote como no-op, abaixo.)
 export function bancoSeco() {
   return {
     async pedidosExistentes() { return new Map(); },
     async gravarPedido() {},
+    async gravarPedidosLote() {},
     async caixasExistentes() { return new Map(); },
     async gravarCaixa() {},
     async substituirRecebimentos() {},

@@ -172,6 +172,7 @@ export async function extrairLoja({ db, banco, loja, de, ate, log = () => {} }) 
   const itensPorPedido = agrupaPor(await consultar(db, SQL_ITENS, [inicio, fim]), 'CODIGOPEDIDO');
   const pagsPorPedido = agrupaPor(await consultar(db, SQL_PAGAMENTOS, [inicio, fim]), 'CODIGOPEDIDO');
   const existentes = await banco.pedidosExistentes(empresaId, linhasPedidos.map(l => Number(l.CODIGO)));
+  const paraGravar = [];
   for (const linhaPedido of linhasPedidos) {
     const codigo = Number(linhaPedido.CODIGO);
     try {
@@ -182,11 +183,38 @@ export async function extrairLoja({ db, banco, loja, de, ate, log = () => {} }) 
         empresaId,
       });
       if (!pedidoMudouFb(normalizado.pedido, existentes.get(codigo) || null)) continue;
-      await banco.gravarPedido(normalizado);
-      r.pedidos++;
+      paraGravar.push(normalizado);
     } catch (e) {
       // Um pedido problemático não pode derrubar a loja inteira (regra do v1).
       avisos.push(`pedido ${codigo}: ${e.message}`);
+    }
+  }
+  // Gravação em lote (~100x menos requisições que pedido a pedido — a carga
+  // histórica caía de horas para minutos). Se o lote falhar, cai para o
+  // caminho unitário para isolar o pedido problemático em aviso.
+  if (paraGravar.length && banco.gravarPedidosLote) {
+    try {
+      await banco.gravarPedidosLote(paraGravar);
+      r.pedidos += paraGravar.length;
+    } catch (e) {
+      avisos.push(`lote de pedidos falhou (${e.message}); regravando um a um`);
+      for (const normalizado of paraGravar) {
+        try {
+          await banco.gravarPedido(normalizado);
+          r.pedidos++;
+        } catch (e2) {
+          avisos.push(`pedido ${normalizado.pedido.codigo}: ${e2.message}`);
+        }
+      }
+    }
+  } else {
+    for (const normalizado of paraGravar) {
+      try {
+        await banco.gravarPedido(normalizado);
+        r.pedidos++;
+      } catch (e) {
+        avisos.push(`pedido ${normalizado.pedido.codigo}: ${e.message}`);
+      }
     }
   }
 
