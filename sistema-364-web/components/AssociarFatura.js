@@ -16,13 +16,16 @@ export default function AssociarFatura({ lancamento, empresaId, onMudou }) {
 
   async function abrir() {
     setOcupado(true);
-    const { data } = await supabase.from('extrato_importacoes')
-      .select('id, periodo_inicio, periodo_fim, total_lancamentos, conciliados, contas_bancarias(nome)')
-      .eq('empresa_id', empresaId).eq('tipo', 'fatura_cartao')
-      .order('created_at', { ascending: false }).limit(24);
-    setFaturas(data || []);
-    setOcupado(false);
-    setAberto(true);
+    try {
+      const { data } = await supabase.from('extrato_importacoes')
+        .select('id, periodo_inicio, periodo_fim, total_lancamentos, conciliados, contas_bancarias(nome)')
+        .eq('empresa_id', empresaId).eq('tipo', 'fatura_cartao')
+        .order('created_at', { ascending: false }).limit(24);
+      setFaturas(data || []);
+      setAberto(true);
+    } finally {
+      setOcupado(false);
+    }
   }
 
   async function associar(forcar = false) {
@@ -40,8 +43,7 @@ export default function AssociarFatura({ lancamento, empresaId, onMudou }) {
         // com confirmação explícita.
         if (!forcar && /não bate/i.test(j.error || '')) {
           if (confirm(`${j.error}\n\nBaixar as parcelas da fatura assim mesmo?`)) {
-            setOcupado(false);
-            return associar(true);
+            return await associar(true);
           }
           return;
         }
