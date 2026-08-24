@@ -275,6 +275,29 @@ Pendente: backup da Afya no Drive (rede da loja; aí é só preencher
 PDV; de-para item × produto para baixa de estoque; percentual de taxa por
 credenciadora (v2 grava líquido = bruto).
 
+### Conciliação bancária (migração 35) — entregue em 24/ago/2026
+
+- Importação de extrato e fatura em PDF (Claude API, modelo `claude-opus-5`
+  por padrão), OFX e CSV, com dedupe por `(empresa_id, hash_dedupe)` e
+  conferência aritmética do saldo — esta última só cobre PDF de fato, porque
+  OFX e CSV não trazem saldo inicial no arquivo.
+- Conciliação de saídas com as parcelas do contas a pagar, N:N, atômica em
+  funções Postgres; criação de conta a pagar direto da linha do extrato.
+- Aprendizado por padrão (`descricao_normalizada -> fornecedor + categoria`),
+  com confirmação em lote das sugestões.
+- Fatura de cartão linha a linha (concilia mas não baixa a parcela), com
+  baixa em lote no pagamento da fatura, pelo botão "Associar à fatura".
+- Limite de upload: 4 MB — teto da hospedagem (a Vercel corta o corpo da
+  requisição perto de 4,5 MB), não escolha do sistema.
+- Detalhes de operação em `docs/conciliacao-bancaria.md`.
+
+Fora desta entrega (fases seguintes, não implementadas):
+
+- Conciliação das entradas com recebimentos e com as vendas do PDV.
+- Importação automática de OFX por integração com o banco (hoje é upload manual).
+- Painel de divergências (saídas conciliadas fora do vencimento, fornecedor com
+  padrão instável).
+
 ## Próximos passos
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
