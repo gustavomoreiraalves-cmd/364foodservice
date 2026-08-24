@@ -114,3 +114,42 @@ test('MEMO ausente cai para NAME sem perder a linha', () => {
     + `</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
   assert.equal(parseOfx(semMemo).lancamentos[0].descricao, 'DEB AUT ENERGISA');
 });
+
+test('[REGRESSÃO] OFX 1.x: CHECKNUM vazio não come a transação seguinte', () => {
+  const OFX_1x_checknum_vazio = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+CHARSET:1252
+
+<OFX>
+<BANKMSGSRSV1><STMTTRNRS><STMTRS>
+<CURDEF>BRL
+<BANKACCTFROM><BANKID>756<ACCTID>12345-6<ACCTTYPE>CHECKING</BANKACCTFROM>
+<BANKTRANLIST><DTSTART>20260801000000[-3:BRT]<DTEND>20260831000000[-3:BRT]
+<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260810000000[-3:BRT]<TRNAMT>-750.00<FITID>2026081001<CHECKNUM>
+<MEMO>PIX ENVIADO BOI FORTE</STMTTRN>
+<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260812000000[-3:BRT]<TRNAMT>200.00<FITID>2026081202<MEMO>PIX RECEBIDO CLIENTE</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL><BALAMT>1200.00<DTASOF>20260831000000[-3:BRT]</LEDGERBAL>
+</STMTRS></STMTTRNRS></BANKMSGSRSV1>
+</OFX>`;
+  const r = parseOfx(OFX_1x_checknum_vazio);
+  assert.equal(r.lancamentos.length, 2, 'deve ter duas transações, não uma');
+  const [debito, credito] = r.lancamentos;
+  assert.equal(debito.descricao, 'PIX ENVIADO BOI FORTE', 'MEMO da primeira deve ser lido corretamente');
+  assert.equal(debito.documento, null, 'CHECKNUM vazio deve ser null, não [object Object]');
+  assert.equal(credito.tipo, 'entrada', 'segunda transação (crédito) não deve desaparecer');
+  assert.equal(credito.valor, 200, 'crédito de 200 deve estar intacto');
+});
+
+test('[REGRESSÃO] OFX 2.x: MEMO vazio não vira [object Object]', () => {
+  const OFX_2x_memo_vazio = `<?xml version="1.0" encoding="UTF-8"?><?OFX OFXHEADER="200" VERSION="211"?>`
+    + `<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>BRL</CURDEF><BANKTRANLIST>`
+    + `<DTSTART>20260801</DTSTART><DTEND>20260831</DTEND>`
+    + `<STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20260815</DTPOSTED><TRNAMT>-49.90</TRNAMT>`
+    + `<FITID>X1</FITID><MEMO></MEMO><NAME>TARIFA PACOTE SERVICOS</NAME></STMTTRN>`
+    + `</BANKTRANLIST><LEDGERBAL><BALAMT>950.10</BALAMT></LEDGERBAL>`
+    + `</STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+  const r = parseOfx(OFX_2x_memo_vazio);
+  assert.equal(r.lancamentos[0].descricao, 'TARIFA PACOTE SERVICOS', 'MEMO vazio deve cair para NAME, não virar [object Object]');
+});

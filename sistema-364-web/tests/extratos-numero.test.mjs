@@ -34,3 +34,13 @@ test('data ilegível devolve null', () => {
   assert.equal(dataIso('mês passado'), null);
   assert.equal(dataIso(''), null);
 });
+
+test('número negativo entre parênteses (formato de extrato)', () => {
+  assert.equal(numeroBr('(1.234,56)'), -1234.56);
+  assert.equal(numeroBr('(100.50)'), -100.50);
+});
+
+test('data dd/mm/aa com dois dígitos de ano', () => {
+  assert.equal(dataIso('10/08/26'), '2026-08-10');
+  assert.equal(dataIso('31/12/25'), '2025-12-31');
+});

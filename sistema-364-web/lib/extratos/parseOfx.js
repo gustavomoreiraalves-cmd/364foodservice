@@ -23,27 +23,53 @@ function tokenizar(texto) {
 }
 
 function montar(tokens) {
+  // Primeira passada: identifica quais nomes aparecem como FECHAMENTO
+  const nomesFechados = new Set();
+  for (const t of tokens) {
+    if (t.tipo === 'fecha') nomesFechados.add(t.nome);
+  }
+
   const raiz = {};
-  const pilha = [raiz];
+  const pilha = [{ no: raiz, nome: 'ROOT' }]; // Guarda nome junto para validar desempilhamento
+
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    const pai = pilha[pilha.length - 1];
+    const paiInfo = pilha[pilha.length - 1];
+    const pai = paiInfo.no;
+
     if (t.tipo === 'abre') {
       const proximo = tokens[i + 1];
+
+      // Caso 1: próximo é texto → folha
       if (proximo && proximo.tipo === 'texto') {
         pai[t.nome] = proximo.valor;
         i++;
         // Na 2.x a folha fecha; na 1.x não. Consome o fechamento se vier.
         if (tokens[i + 1]?.tipo === 'fecha' && tokens[i + 1].nome === t.nome) i++;
-      } else {
+      }
+      // Caso 2: próximo é fechamento com o MESMO nome → folha vazia
+      else if (proximo && proximo.tipo === 'fecha' && proximo.nome === t.nome) {
+        pai[t.nome] = '';
+        i++; // Consome o fechamento
+      }
+      // Caso 3: consulta conjunto de fechamentos
+      else if (nomesFechados.has(t.nome)) {
+        // É agregado: nome aparece como fechamento em algum lugar
         const no = {};
         if (pai[t.nome] === undefined) pai[t.nome] = no;
         else if (Array.isArray(pai[t.nome])) pai[t.nome].push(no);
         else pai[t.nome] = [pai[t.nome], no];
-        pilha.push(no);
+        pilha.push({ no, nome: t.nome });
+      } else {
+        // É folha vazia: nome não aparece como fechamento (1.x sem fechamento)
+        pai[t.nome] = '';
       }
-    } else if (t.tipo === 'fecha' && pilha.length > 1) {
-      pilha.pop();
+    } else if (t.tipo === 'fecha') {
+      // Desempilhamento checado: só desempilha se o topo corresponde
+      if (pilha.length > 1 && paiInfo.nome === t.nome) {
+        pilha.pop();
+      }
+      // Se não corresponde, ignora o fechamento
     }
   }
   return raiz;
