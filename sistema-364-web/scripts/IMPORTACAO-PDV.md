@@ -17,12 +17,19 @@ Há dois caminhos, escolhidos por loja em `pdv_lojas.origem`:
 
 ## Como funciona
 
-O PDV da Steakhouse gera todo dia um backup `gbak` do `CONSUMER.FDB` e sobe
-para a pasta pública "Backup Consumer" do Drive da conta steakhouse364. É um
-arquivo por dia da semana (`domingo.fbconsumer` … `sábado.fbconsumer`, ~365 MB),
-sempre sobrescrito no MESMO file id — por isso a configuração é um mapa
-dia → file id em `pdv_lojas.drive_arquivos` (semeado pela migração 33), e não
-uma listagem de pasta (que exigiria credencial do Google).
+O PDV de cada loja gera todo dia um backup `gbak` do `CONSUMER.FDB` e sobe
+para uma pasta do Drive compartilhada por link, uma por CNPJ:
+"Consumer Backup-37.541.736/0001-87" (Steakhouse, ~365 MB por arquivo) e
+"Consumer Backup-60.361.009/0001-50" (Afya, ~4 MB). É um arquivo por dia da
+semana (`domingo.fbconsumer` … `sábado.fbconsumer`), sempre sobrescrito no
+MESMO file id — por isso a configuração é um mapa dia → file id em
+`pdv_lojas.drive_arquivos` (Steakhouse semeada pela migração 33, Afya pela 37),
+e não uma listagem de pasta (que exigiria credencial do Google).
+
+O upload da Afya é irregular: em 24/08/2026 só os arquivos de segunda-feira e
+o `BkpManual` eram do dia; os outros dias tinham semanas ou meses. A conferência
+de 48 h do passo 2 reprova esses arquivos velhos, então a rodada diária dela só
+fica confiável quando o PDV subir o backup todo dia.
 
 Cada rodada de `scripts/importar-pdv-backup.mjs`, por loja:
 
@@ -92,6 +99,10 @@ para refazer, não quatro anos. Um mês que falha interrompe a loja — recomece
 pelo mês do erro com `--de`/`--ate`. A rodada leva bastante tempo; melhor rodar
 em uma sessão que possa ficar aberta.
 
+Feito: Steakhouse desde 2022-03-14 (75.228 pedidos) e Afya desde 2026-02-01
+(3.029 pedidos, R$ 216 mil), esta em 24/08/2026 com `--de 2022-01-01` — os 49
+meses anteriores à abertura da loja passam vazios em segundos.
+
 ## Agendar (cron, 14:00)
 
 O upload do backup do dia chega por volta das 13h30.
@@ -152,9 +163,9 @@ apagados e regravados, e o que vier do backup não tem `percentual_taxa`.
 
 # Plano B — painel Consumer Connect (scraping)
 
-Continua funcionando para lojas com `pdv_lojas.origem = 'painel'` (hoje só a
-Afya, desativada até o backup dela subir para o Drive). É lento e o painel
-devolve 429 com facilidade — use só se o backup estiver indisponível.
+Continua funcionando para lojas com `pdv_lojas.origem = 'painel'` (hoje
+nenhuma: Steakhouse e Afya leem do backup). É lento e o painel devolve 429 com
+facilidade — use só se o backup estiver indisponível.
 
 ## Pegar o cookie da sessão
 
