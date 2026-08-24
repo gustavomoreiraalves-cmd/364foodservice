@@ -101,6 +101,34 @@ function janelaFirebird(de, ate) {
   return [`${de} 00:00:00`, `${somaDias(ate, 1)} 00:00:00`];
 }
 
+// Uma rodada com janela grande (a carga histórica vai de 2022) é fatiada em
+// pedaços de um mês. Dois motivos:
+//
+// - `extrairLoja` carrega a janela inteira na memória (pedidos, itens,
+//   pagamentos, recebimentos e o agregado de itens/dia).
+// - `substituirRecebimentos` APAGA a janela antes de reinserir, e não há
+//   transação: uma falha no meio de quatro anos deixaria os recebimentos
+//   históricos apagados e só em parte regravados. Com o corte mensal, o
+//   estrago possível é de um mês.
+//
+// Até `limiteDias` corridos a janela vai inteira, para a rodada diária não
+// virar duas por causa de uma virada de mês.
+export function janelasMensais(de, ate, limiteDias = 31) {
+  const dias = (Date.parse(`${ate}T00:00:00Z`) - Date.parse(`${de}T00:00:00Z`)) / 86400000 + 1;
+  if (dias <= limiteDias) return [{ de, ate }];
+  const janelas = [];
+  let inicio = de;
+  while (inicio <= ate) {
+    const d = new Date(`${inicio}T00:00:00Z`);
+    // Dia 0 do mês seguinte é o último dia deste mês.
+    const fimDoMes = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    const fim = fimDoMes < ate ? fimDoMes : ate;
+    janelas.push({ de: inicio, ate: fim });
+    inicio = somaDias(fim, 1);
+  }
+  return janelas;
+}
+
 function agrupaPor(linhas, coluna) {
   const mapa = new Map();
   for (const l of linhas) {
@@ -198,9 +226,14 @@ export async function extrairLoja({ db, banco, loja, de, ate, log = () => {} }) 
   r.recebimentos = daJanela.length;
 
   // ---- itens vendidos por dia ----
-  // Diferente do v1: aqui a lista vazia não é ambígua (o backup ou tem o dia
-  // inteiro ou nenhum pedido), então o dia sem venda é gravado como vazio
-  // mesmo — é o que apaga um snapshot de um dia que foi todo cancelado.
+  // Diferente do v1: aqui a lista vazia não é falha de relatório, é dia sem
+  // venda mesmo — por isso o dia vazio é gravado vazio, que é o que apaga o
+  // snapshot de um dia todo cancelado.
+  //
+  // O dia DO PRÓPRIO BACKUP é sempre parcial: o arquivo é gerado por volta das
+  // 13h30, então o snapshot de hoje sai com meio dia de venda. Não é problema
+  // porque a janela padrão (D-3) reprocessa o dia por mais três rodadas: o
+  // backup de amanhã já contém o dia de hoje inteiro e substitui o parcial.
   const porDia = new Map();
   for (const item of itensDiaFb(await consultar(db, SQL_ITENS_DIA, [inicio, fim]), empresaId)) {
     if (!porDia.has(item.dia)) porDia.set(item.dia, []);
@@ -245,7 +278,15 @@ function baixarBackup({ loja, diretorio, agora, log }) {
     if (!fileId) { tentativas.push(`${dia}: sem file id em pdv_lojas.drive_arquivos`); continue; }
     const caminho = path.join(diretorio, `${dia}.fbconsumer`);
     log(`  baixando o backup de ${dia} do Drive...`);
-    baixar(urlDownload(fileId), caminho);
+    try {
+      baixar(urlDownload(fileId), caminho);
+    } catch (e) {
+      // Rede caiu, 404, quota: também vale tentar o arquivo de ontem em vez de
+      // derrubar a loja no primeiro tropeço.
+      tentativas.push(`${dia}: download falhou (${e.message})`);
+      fs.rmSync(caminho, { force: true });
+      continue;
+    }
     const tamanho = fs.statSync(caminho).size;
     const data = dataDoCabecalhoGbak(lerCabecalho(caminho));
     if (!data) {
@@ -369,7 +410,12 @@ async function main() {
     .eq('ativo', true).eq('origem', 'backup');
   falhou(error, 'pdv_lojas');
   const alvo = somenteLoja ? lojas.filter(l => String(l.id_connect) === String(somenteLoja)) : lojas;
-  if (!alvo.length) { console.error("Nenhuma loja ativa com origem='backup' em pdv_lojas."); process.exit(1); }
+  if (!alvo.length) {
+    console.error(somenteLoja
+      ? `Nenhuma loja ativa com origem='backup' e id_connect ${somenteLoja}. Ativas hoje: ${lojas.map(l => l.id_connect).join(', ') || 'nenhuma'}.`
+      : "Nenhuma loja ativa com origem='backup' em pdv_lojas.");
+    process.exit(1);
+  }
 
   console.log(`Importação PDV via backup Firebird — ${de} a ${ate}${dryRun ? ' (dry-run)' : ''}`);
   const banco = dryRun ? bancoSeco() : bancoSupabase(sb);
@@ -408,7 +454,20 @@ async function main() {
         encoding: 'UTF8',
       });
 
-      const r = await extrairLoja({ db, banco, loja, de, ate, log: m => console.log(m) });
+      // Uma restauração por loja; a janela é que se divide (ver
+      // `janelasMensais`). Um pedaço que falhar interrompe a loja — seguir
+      // adiante deixaria buracos silenciosos no meio do histórico.
+      const janelas = janelasMensais(de, ate);
+      const r = { pedidos: 0, caixas: 0, recebimentos: 0, itensDia: 0, avisos: [] };
+      for (const [i, janela] of janelas.entries()) {
+        if (janelas.length > 1) console.log(`  janela ${janela.de}..${janela.ate} (${i + 1}/${janelas.length})...`);
+        const parcial = await extrairLoja({ db, banco, loja, de: janela.de, ate: janela.ate, log: m => console.log(m) });
+        r.pedidos += parcial.pedidos;
+        r.caixas += parcial.caixas;
+        r.recebimentos += parcial.recebimentos;
+        r.itensDia += parcial.itensDia;
+        r.avisos.push(...parcial.avisos);
+      }
       console.log(`  ${dryRun ? '(dry-run, nada gravado) ' : ''}gravados: ${r.pedidos} pedidos, ${r.caixas} caixas, ${r.recebimentos} recebimentos, ${r.itensDia} itens/dia`);
       r.avisos.forEach(a => console.warn('  aviso: ' + a));
       const status = r.avisos.length ? 'parcial' : 'ok';

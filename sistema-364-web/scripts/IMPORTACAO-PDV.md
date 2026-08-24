@@ -29,7 +29,10 @@ Cada rodada de `scripts/importar-pdv-backup.mjs`, por loja:
 1. Descobre o dia da semana em Porto Velho e baixa o arquivo daquele dia
    (`curl`, direto para um diretório temporário do `mkdtemp`).
 2. Lê os primeiros 4 KB e confere a data que o `gbak` grava no cabeçalho
-   ("Sun Aug 23 09:20:09 2026", hora local). Se o backup tiver mais de 48 h,
+   ("Sun Aug 23 09:20:09 2026", hora local). A data tem que estar a menos de
+   48 h de agora **nos dois sentidos** — um arquivo velho é backup que não
+   subiu, e um arquivo "do futuro" é relógio errado no PDV; nos dois casos não
+   dá para confiar que é o dia certo. Fora da faixa (ou se o download falhar),
    tenta o arquivo de ontem; se nenhum servir, a loja falha com aviso claro.
 3. Garante o docker (`colima status` → `colima start` quando parado) e sobe um
    container `firebirdsql/firebird:5` **efêmero**, com nome único, senha
@@ -60,19 +63,34 @@ por substituição da janela. Rodar de novo nunca duplica.
 ## Rodar
 
 ```bash
-npm run importar-pdv-backup                          # últimos 3 dias
-npm run importar-pdv-backup -- --de 2026-08-01       # desde 1º de agosto
-npm run importar-pdv-backup -- --dry-run             # só conta, não grava
-npm run importar-pdv-backup -- --loja -2147478159    # só a Steakhouse
-npm run importar-pdv-backup -- --de 2022-03-14       # carga histórica (demora)
+npm run importar-pdv-backup                                  # janela padrão
+npm run importar-pdv-backup -- --de 2026-08-01               # desde 1º de agosto
+npm run importar-pdv-backup -- --de 2026-08-01 --ate 2026-08-10
+npm run importar-pdv-backup -- --dry-run                     # só conta, não grava
+npm run importar-pdv-backup -- --loja -2147478159            # só a Steakhouse
+npm run importar-pdv-backup -- --de 2022-03-14               # carga histórica
 ```
 
 Saída: contadores por loja e `Fim: ok | parcial | erro` (código de saída 2 no
-erro). A janela padrão é D-3 até hoje (`PDV_JANELA_DIAS`).
+erro). A janela padrão vai de D-3 até hoje, **inclusive as duas pontas** — são
+quatro dias corridos (`PDV_JANELA_DIAS` muda o D-3). `--de` e `--ate` são
+`YYYY-MM-DD` e também entram inteiros na janela.
 
 Variáveis opcionais: `PDV_FB_PORTA` (padrão 3050, porta local do container),
 `PDV_FB_IMAGEM`, `PDV_GBAK_TIMEOUT_S` (padrão 1800),
 `PDV_DOWNLOAD_TIMEOUT_S` (padrão 1800).
+
+### Carga histórica
+
+Um comando só, `--de 2022-03-14` (o primeiro pedido da base), sem `--ate`.
+Janela de mais de 31 dias é **fatiada em pedaços de um mês automaticamente**: o
+backup é restaurado uma vez por loja e cada mês é processado contra o mesmo
+container, com log `janela 2022-03-14..2022-03-31 (1/54)`. Isso segura o uso de
+memória e, principalmente, limita o estrago de uma falha no meio: os
+recebimentos são apagados e regravados por janela, então o pior caso é um mês
+para refazer, não quatro anos. Um mês que falha interrompe a loja — recomece
+pelo mês do erro com `--de`/`--ate`. A rodada leva bastante tempo; melhor rodar
+em uma sessão que possa ficar aberta.
 
 ## Agendar (cron, 14:00)
 
@@ -119,14 +137,16 @@ conferido no 1561 (R$ 7.902,13) e no 1562 (R$ 10.273,94).
 
 | Sintoma | O que é |
 |---|---|
-| `nenhum backup recente (< 48 h) no Drive` | O PDV não subiu o arquivo (loja fechada, rede caiu) ou o link da pasta deixou de ser público. A janela é reprocessada na rodada seguinte, então um dia perdido se corrige sozinho. |
+| `nenhum backup recente (< 48 h) no Drive` (a mensagem lista o que cada tentativa achou: download falhou, arquivo não é gbak, ou a distância em horas) | O PDV não subiu o arquivo (loja fechada, rede caiu) ou o link da pasta deixou de ser público. A janela é reprocessada na rodada seguinte, então um dia perdido se corrige sozinho. |
 | `o arquivo baixado ... não é um backup gbak` | O Drive devolveu HTML: quota de download estourada ou arquivo sem permissão pública. |
 | `docker não respondeu (colima start?)` | VM do colima não subiu. Rode `colima start` na mão e veja o erro. |
 | `Firebird não abriu a porta 3050 a tempo` | Porta ocupada por outro container Firebird (`docker ps`), ou imagem baixando ainda. `PDV_FB_PORTA` troca a porta. |
 
 Diferenças conhecidas em relação ao painel: `valor_liquido` dos recebimentos
 vem igual ao bruto e `percentual_taxa` fica nulo (o backup não traz a taxa da
-credenciadora).
+credenciadora). Atenção: rodar o v2 sobre um período que o v1 já tinha
+preenchido **zera a taxa** daquele período — os recebimentos da janela são
+apagados e regravados, e o que vier do backup não tem `percentual_taxa`.
 
 ---
 
