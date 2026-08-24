@@ -21,7 +21,7 @@
 - **`valor` de lançamento é sempre positivo**; o sinal vive em `tipo` (`'saida'` | `'entrada'`).
 - **Datas** em `YYYY-MM-DD` (string), como o resto do projeto (`lib/format.js`).
 - **Testes**: `npm test` roda `node --test tests/*.test.mjs` — arquivos novos vão na raiz de `tests/`, não em subpasta. Teste de migração vai em `tests/migracao-35/` e roda por `tests/migracao-35/verificar.sh`.
-- **Nenhuma dependência npm nova.** Claude API é `fetch`; o parser OFX é escrito à mão (o `fast-xml-parser` não lê OFX 1.x, que é SGML).
+- **Nenhuma dependência npm nova, com uma exceção declarada na Task 7:** o SDK oficial `@anthropic-ai/sdk` entra para a chamada da Claude API — HTTP à mão perderia retry automático de 429/5xx e os tipos de erro, e isso é caro numa rota que importa dinheiro. O parser OFX continua escrito à mão (o `fast-xml-parser` não lê OFX 1.x, que é SGML).
 - **Env nova**: `ANTHROPIC_API_KEY` (obrigatória para PDF) e `EXTRATO_IA_MODELO` (opcional, default `claude-sonnet-5`).
 - **Commits**: um por task, prefixo `feat:`/`test:`/`docs:` conforme o conteúdo.
 
@@ -2151,35 +2151,59 @@ git commit -m "feat(financeiro): parser CSV com detecção de colunas e fallback
 **Files:**
 - Create: `lib/extratos/extrairPdf.js`
 - Create: `tests/extratos-extrair-pdf.test.mjs`
+- Modify: `package.json` (dependência nova `@anthropic-ai/sdk`)
 
 **Interfaces:**
 - Consumes: `dataIso` de `lib/extratos/numero.js`.
 - Produces:
-  - `MODELO_PADRAO = 'claude-sonnet-5'`
-  - `FERRAMENTA` (definição da tool exportada para o teste conferir o schema)
-  - `montarCorpo({ base64, tipo, modelo }) -> object` (corpo da requisição)
-  - `async extrairPdf({ base64, tipo, apiKey, modelo, fetchImpl }) -> ExtratoLido` — mesmo shape das tasks 5 e 6. `fetchImpl` existe só para o teste; em produção usa o `fetch` global.
+  - `MODELO_PADRAO = 'claude-opus-5'`
+  - `FERRAMENTA` (definição da tool, exportada para o teste conferir o schema)
+  - `montarPedido({ base64, tipo, modelo }) -> object` (o corpo do pedido, sem o cliente)
+  - `async extrairPdf({ base64, tipo, apiKey, modelo, cliente }) -> ExtratoLido` — mesmo shape das tasks 5 e 6. `cliente` existe só para o teste injetar um dublê; em produção o módulo constrói o cliente do SDK.
 - Nota: este módulo não importa `next/server` nem o cliente Supabase — continua testável por `node --test`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+**Decisões que divergem do resto do plano** (tomadas depois de consultar a referência da API):
 
-Cria `tests/extratos-extrair-pdf.test.mjs`:
+1. **Usa o SDK oficial `@anthropic-ai/sdk`, não `fetch` cru.** A restrição global "nenhuma dependência npm nova" vale para todo o resto da feature, mas não aqui: chamar a API por HTTP à mão perde retry automático de 429 e 5xx, tipos de erro e cabeçalhos corretos. Numa rota que importa dinheiro, o retry sozinho já paga a dependência.
+2. **Modelo padrão `claude-opus-5`.** Extração de extrato é trabalho sensível a acerto: uma linha lida errado vira lançamento errado no financeiro. O override por env (`EXTRATO_IA_MODELO`) continua existindo para quem quiser trocar.
+3. **Fallback de recusa ligado.** Se o modelo recusar a leitura por política, a API refaz o pedido no modelo de fallback dentro da mesma chamada. `stop_reason: 'refusal'` na resposta final vira erro em português, em vez de "não achei a ferramenta na resposta".
+
+- [ ] **Step 1: Instalar o SDK**
+
+```bash
+npm install @anthropic-ai/sdk
+```
+
+- [ ] **Step 2: Escrever os testes que falham**
+
+Cria `tests/extratos-extrair-pdf.test.mjs`. O dublê do cliente implementa só o que o módulo usa: `beta.messages.create`.
 
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extrairPdf, montarCorpo, MODELO_PADRAO } from '../lib/extratos/extrairPdf.js';
+import { extrairPdf, montarPedido, MODELO_PADRAO } from '../lib/extratos/extrairPdf.js';
 
-function respostaFalsa(input) {
+// Dublê do cliente: implementa só beta.messages.create, que é tudo que o módulo usa.
+function clienteFalso(resposta, capturar) {
   return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      content: [
-        { type: 'text', text: 'Li o extrato.' },
-        { type: 'tool_use', name: 'registrar_extrato', input },
-      ],
-    }),
+    beta: {
+      messages: {
+        create: async pedido => {
+          if (capturar) capturar(pedido);
+          return resposta;
+        },
+      },
+    },
+  };
+}
+
+function respostaComFerramenta(input) {
+  return {
+    stop_reason: 'tool_use',
+    content: [
+      { type: 'text', text: 'Li o extrato.' },
+      { type: 'tool_use', name: 'registrar_extrato', input },
+    ],
   };
 }
 
@@ -2189,37 +2213,37 @@ const EXTRATO_IA = {
   saldo_inicial: 500,
   saldo_final: 1200,
   lancamentos: [
-    { data: '2026-08-10', descricao: 'PIX ENVIADO BOI FORTE', valor: -750, documento: '123' },
-    { data: '2026-08-12', descricao: 'PIX RECEBIDO CLIENTE', valor: 200, documento: null },
+    { data: '2026-08-10', descricao: 'PIX ENVIADO BOI FORTE', valor: -750, tipo: 'saida', documento: '123' },
+    { data: '2026-08-12', descricao: 'PIX RECEBIDO CLIENTE', valor: 200, tipo: 'entrada', documento: null },
   ],
 };
 
-test('corpo da requisição manda o PDF e força a ferramenta', () => {
-  const corpo = montarCorpo({ base64: 'QUJD', tipo: 'extrato' });
-  assert.equal(corpo.model, MODELO_PADRAO);
-  assert.equal(corpo.tool_choice.type, 'tool');
-  assert.equal(corpo.tool_choice.name, 'registrar_extrato');
-  const doc = corpo.messages[0].content.find(c => c.type === 'document');
+test('pedido manda o PDF como documento e força a ferramenta', () => {
+  const pedido = montarPedido({ base64: 'QUJD', tipo: 'extrato' });
+  assert.equal(pedido.model, MODELO_PADRAO);
+  assert.equal(pedido.tool_choice.type, 'tool');
+  assert.equal(pedido.tool_choice.name, 'registrar_extrato');
+  const doc = pedido.messages[0].content.find(c => c.type === 'document');
   assert.equal(doc.source.type, 'base64');
   assert.equal(doc.source.media_type, 'application/pdf');
   assert.equal(doc.source.data, 'QUJD');
 });
 
-test('modelo pode ser trocado por parâmetro', () => {
-  assert.equal(montarCorpo({ base64: 'x', tipo: 'extrato', modelo: 'claude-opus-5' }).model,
-    'claude-opus-5');
+test('modelo padrão é o mais capaz, e pode ser trocado por parâmetro', () => {
+  assert.equal(MODELO_PADRAO, 'claude-opus-5');
+  assert.equal(montarPedido({ base64: 'x', tipo: 'extrato', modelo: 'claude-sonnet-5' }).model,
+    'claude-sonnet-5');
 });
 
 test('fatura pede o total da fatura no prompt', () => {
-  const corpo = montarCorpo({ base64: 'x', tipo: 'fatura_cartao' });
-  const texto = corpo.messages[0].content.find(c => c.type === 'text').text;
+  const pedido = montarPedido({ base64: 'x', tipo: 'fatura_cartao' });
+  const texto = pedido.messages[0].content.find(c => c.type === 'text').text;
   assert.match(texto, /fatura/i);
 });
 
 test('lê a resposta da ferramenta e normaliza sinal em tipo', async () => {
   const r = await extrairPdf({
-    base64: 'x', tipo: 'extrato', apiKey: 'k',
-    fetchImpl: async () => respostaFalsa(EXTRATO_IA),
+    base64: 'x', tipo: 'extrato', cliente: clienteFalso(respostaComFerramenta(EXTRATO_IA)),
   });
   assert.equal(r.periodoInicio, '2026-08-01');
   assert.equal(r.saldoInicial, 500);
@@ -2231,13 +2255,13 @@ test('lê a resposta da ferramenta e normaliza sinal em tipo', async () => {
   assert.equal(r.lancamentos[1].tipo, 'entrada');
 });
 
-test('tipo explícito da IA vence o sinal (extrato que lista valor sempre positivo)', async () => {
+test('sinal decide o tipo quando a IA não preenche o campo', async () => {
   const r = await extrairPdf({
-    base64: 'x', tipo: 'extrato', apiKey: 'k',
-    fetchImpl: async () => respostaFalsa({
+    base64: 'x', tipo: 'extrato',
+    cliente: clienteFalso(respostaComFerramenta({
       ...EXTRATO_IA,
-      lancamentos: [{ data: '2026-08-10', descricao: 'TARIFA', valor: 49.9, tipo: 'saida' }],
-    }),
+      lancamentos: [{ data: '2026-08-10', descricao: 'TARIFA', valor: -49.9 }],
+    })),
   });
   assert.equal(r.lancamentos[0].tipo, 'saida');
   assert.equal(r.lancamentos[0].valor, 49.9);
@@ -2245,14 +2269,14 @@ test('tipo explícito da IA vence o sinal (extrato que lista valor sempre positi
 
 test('linha sem data legível é descartada sem derrubar a importação', async () => {
   const r = await extrairPdf({
-    base64: 'x', tipo: 'extrato', apiKey: 'k',
-    fetchImpl: async () => respostaFalsa({
+    base64: 'x', tipo: 'extrato',
+    cliente: clienteFalso(respostaComFerramenta({
       ...EXTRATO_IA,
       lancamentos: [
-        { data: 'sei lá', descricao: 'RUIM', valor: -10 },
-        { data: '2026-08-10', descricao: 'BOM', valor: -10 },
+        { data: 'sei lá', descricao: 'RUIM', valor: -10, tipo: 'saida' },
+        { data: '2026-08-10', descricao: 'BOM', valor: -10, tipo: 'saida' },
       ],
-    }),
+    })),
   });
   assert.equal(r.lancamentos.length, 1);
   assert.equal(r.lancamentos[0].descricao, 'BOM');
@@ -2260,46 +2284,57 @@ test('linha sem data legível é descartada sem derrubar a importação', async 
 
 test('sem chave da API o erro diz o que configurar', async () => {
   await assert.rejects(
-    () => extrairPdf({ base64: 'x', tipo: 'extrato', apiKey: '', fetchImpl: async () => ({}) }),
+    () => extrairPdf({ base64: 'x', tipo: 'extrato', apiKey: '' }),
     /ANTHROPIC_API_KEY/);
 });
 
-test('erro HTTP da API vira mensagem legível com o status', async () => {
+test('recusa do modelo vira erro em português, não "ferramenta não veio"', async () => {
   await assert.rejects(
     () => extrairPdf({
-      base64: 'x', tipo: 'extrato', apiKey: 'k',
-      fetchImpl: async () => ({ ok: false, status: 429, text: async () => 'rate limited' }),
+      base64: 'x', tipo: 'extrato',
+      cliente: clienteFalso({ stop_reason: 'refusal', stop_details: { category: 'other' }, content: [] }),
     }),
-    /429/);
+    /recus/i);
 });
 
 test('resposta sem tool_use é erro explícito', async () => {
   await assert.rejects(
     () => extrairPdf({
-      base64: 'x', tipo: 'extrato', apiKey: 'k',
-      fetchImpl: async () => ({ ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: 'não consegui' }] }) }),
+      base64: 'x', tipo: 'extrato',
+      cliente: clienteFalso({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'não consegui' }] }),
     }),
     /não consegui ler o PDF|não devolveu/i);
+});
+
+test('resposta truncada por max_tokens é erro, não extrato pela metade', async () => {
+  await assert.rejects(
+    () => extrairPdf({
+      base64: 'x', tipo: 'extrato',
+      cliente: clienteFalso({
+        stop_reason: 'max_tokens',
+        content: [{ type: 'tool_use', name: 'registrar_extrato', input: EXTRATO_IA }],
+      }),
+    }),
+    /longo demais|truncad/i);
 });
 
 test('nenhum lançamento extraído é erro (PDF errado, página em branco)', async () => {
   await assert.rejects(
     () => extrairPdf({
-      base64: 'x', tipo: 'extrato', apiKey: 'k',
-      fetchImpl: async () => respostaFalsa({ ...EXTRATO_IA, lancamentos: [] }),
+      base64: 'x', tipo: 'extrato',
+      cliente: clienteFalso(respostaComFerramenta({ ...EXTRATO_IA, lancamentos: [] })),
     }),
     /nenhum lançamento/i);
 });
 ```
 
-- [ ] **Step 2: Rodar e confirmar que falha**
+- [ ] **Step 3: Rodar e confirmar que falha**
 
 ```bash
 node --test tests/extratos-extrair-pdf.test.mjs 2>&1 | tail -10
 ```
 
-- [ ] **Step 3: Escrever `lib/extratos/extrairPdf.js`**
+- [ ] **Step 4: Escrever `lib/extratos/extrairPdf.js`**
 
 ```js
 // Extrato em PDF é o formato que o colaborador tem na mão, e é o pior de
@@ -2309,11 +2344,11 @@ node --test tests/extratos-extrair-pdf.test.mjs 2>&1 | tail -10
 //
 // Custo: um extrato de ~10 páginas sai por centavos. É mais barato que manter
 // seis parsers de PDF.
+import Anthropic from '@anthropic-ai/sdk';
 import { dataIso } from './numero.js';
 
-export const MODELO_PADRAO = 'claude-sonnet-5';
-const ENDPOINT = 'https://api.anthropic.com/v1/messages';
-const VERSAO_API = '2023-06-01';
+export const MODELO_PADRAO = 'claude-opus-5';
+const BETA_FALLBACK = 'server-side-fallback-2026-07-01';
 
 export const FERRAMENTA = {
   name: 'registrar_extrato',
@@ -2358,10 +2393,14 @@ function instrucao(tipo) {
       + `saldo_final quando o extrato mostrar os dois.`;
 }
 
-export function montarCorpo({ base64, tipo, modelo }) {
+export function montarPedido({ base64, tipo, modelo }) {
   return {
     model: modelo || MODELO_PADRAO,
     max_tokens: 16000,
+    // Recusa por política refaz o pedido no modelo de fallback dentro da mesma
+    // chamada, em vez de devolver um extrato vazio para o colaborador.
+    betas: [BETA_FALLBACK],
+    fallbacks: 'default',
     tools: [FERRAMENTA],
     tool_choice: { type: 'tool', name: FERRAMENTA.name },
     messages: [{
@@ -2395,29 +2434,47 @@ function normalizar(lidos) {
   return lancamentos;
 }
 
-export async function extrairPdf({ base64, tipo, apiKey, modelo, fetchImpl }) {
-  if (!apiKey) {
+// Traduz erro do SDK para uma frase que o colaborador entende. Usa as classes
+// tipadas do SDK — nunca comparar texto de mensagem de erro.
+function erroLegivel(e) {
+  if (e instanceof Anthropic.AuthenticationError) {
+    return new Error('A chave da Anthropic foi recusada. Confira ANTHROPIC_API_KEY.');
+  }
+  if (e instanceof Anthropic.RateLimitError) {
+    return new Error('A leitura automática atingiu o limite de uso. Tente de novo em alguns minutos, '
+      + 'ou importe o extrato em OFX.');
+  }
+  if (e instanceof Anthropic.APIError) {
+    return new Error(`A leitura do PDF falhou (HTTP ${e.status}). ${String(e.message).slice(0, 200)}`);
+  }
+  return e;
+}
+
+export async function extrairPdf({ base64, tipo, apiKey, modelo, cliente }) {
+  const chave = apiKey ?? process.env.ANTHROPIC_API_KEY;
+  if (!cliente && !chave) {
     throw new Error('Configure ANTHROPIC_API_KEY para importar extrato em PDF '
       + '(OFX e CSV funcionam sem ela).');
   }
-  const http = fetchImpl || fetch;
-  const resposta = await http(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': VERSAO_API,
-    },
-    body: JSON.stringify(montarCorpo({ base64, tipo, modelo })),
-  });
+  const ia = cliente || new Anthropic({ apiKey: chave });
 
-  if (!resposta.ok) {
-    const detalhe = (await resposta.text().catch(() => '')).slice(0, 300);
-    throw new Error(`A leitura do PDF falhou (HTTP ${resposta.status}). ${detalhe}`);
+  let resposta;
+  try {
+    resposta = await ia.beta.messages.create(montarPedido({ base64, tipo, modelo }));
+  } catch (e) {
+    throw erroLegivel(e);
   }
 
-  const corpo = await resposta.json();
-  const ferramenta = (corpo.content || []).find(
+  if (resposta.stop_reason === 'refusal') {
+    throw new Error('A leitura automática deste PDF foi recusada. Importe o extrato em OFX '
+      + 'pelo internet banking.');
+  }
+  if (resposta.stop_reason === 'max_tokens') {
+    throw new Error('Este extrato é longo demais para uma leitura só e veio truncado. '
+      + 'Exporte um período menor, ou importe em OFX.');
+  }
+
+  const ferramenta = (resposta.content || []).find(
     c => c.type === 'tool_use' && c.name === FERRAMENTA.name);
   if (!ferramenta?.input) {
     throw new Error('Não consegui ler o PDF: a leitura não devolveu os lançamentos. '
@@ -2444,16 +2501,18 @@ export async function extrairPdf({ base64, tipo, apiKey, modelo, fetchImpl }) {
 }
 ```
 
-- [ ] **Step 4: Rodar e confirmar que passa**
+- [ ] **Step 5: Rodar e confirmar que passa**
 
 ```bash
 npm test 2>&1 | tail -20
 ```
 
-- [ ] **Step 5: Commit**
+Nenhum teste chama a API de verdade — todos injetam `cliente`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add lib/extratos/extrairPdf.js tests/extratos-extrair-pdf.test.mjs
+git add lib/extratos/extrairPdf.js tests/extratos-extrair-pdf.test.mjs package.json package-lock.json
 git commit -m "feat(financeiro): extração de extrato em PDF pela Claude API"
 ```
 
