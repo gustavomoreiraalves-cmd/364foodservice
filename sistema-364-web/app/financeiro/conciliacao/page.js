@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { fmtMoney, fmtDate } from '../../../lib/format';
 import { signedUrlExtrato } from '../../../lib/storage';
+import { chamarApi } from '../../../lib/extratos/cliente';
 import AppShell from '../../../components/AppShell';
 import ImportarExtrato from '../../../components/ImportarExtrato';
+import AcoesConciliacao from '../../../components/AcoesConciliacao';
 import { useEmpresaAtual } from '../../../lib/empresa';
 
 const TAG_IMPORTACAO = {
@@ -32,6 +34,8 @@ function Conteudo() {
   const { empresaAtual } = useEmpresaAtual();
   const [contas, setContas] = useState([]);
   const [importacoes, setImportacoes] = useState([]);
+  const [fornecedores, setFornecedores] = useState([]);
+  const [funcionarios, setFuncionarios] = useState([]);
   const [selecionada, setSelecionada] = useState(null);
   const [lancamentos, setLancamentos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,17 +45,22 @@ function Conteudo() {
   async function carregarBase() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       supabase.from('contas_bancarias').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('extrato_importacoes')
         .select('*, contas_bancarias(nome, instituicao, tipo)')
         .eq('empresa_id', empresaAtual.id).order('created_at', { ascending: false }).limit(30),
+      supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id)
+        .eq('ativo', true).order('nome'),
     ]);
     if (r2.error) console.error(r2.error);
     setContas(r1.data || []);
     setImportacoes(r2.data || []);
+    setFornecedores(r3.data || []);
+    setFuncionarios(r4.data || []);
     setLoading(false);
-    return r2.data || [];
+    return r2.data || [];   // aposImportar e recarregar dependem deste retorno
   }
 
   async function carregarLancamentos(importacaoId) {
@@ -183,6 +192,33 @@ function Conteudo() {
               Mostrar entradas (não conciliadas nesta fase)
             </label>
           </div>
+          {(() => {
+            const sugeridos = visiveis.filter(l => l.status === 'sugerido');
+            if (!sugeridos.length) return null;
+            return (
+              <div className="banner info" style={{ marginTop: 10 }}>
+                {sugeridos.length} lançamento(s) já vieram com sugestão do sistema.
+                <button className="btn small" style={{ marginLeft: 10 }}
+                  onClick={async () => {
+                    if (!confirm(`Confirmar as ${sugeridos.length} sugestões?`)) return;
+                    const r = await chamarApi('/api/financeiro/conciliacao', {
+                      method: 'POST',
+                      body: JSON.stringify({ acao: 'confirmar-lote',
+                        lancamentoIds: sugeridos.map(l => l.id) }),
+                    });
+                    const j = await r.json();
+                    if (!r.ok) { alert(j.error || 'Não foi possível confirmar em lote.'); return; }
+                    await recarregar();
+                    if (j.falhas?.length) {
+                      alert(`${j.confirmados} confirmado(s). ${j.falhas.length} ficaram de fora:\n`
+                        + j.falhas.map(f => '· ' + f.erro).join('\n'));
+                    }
+                  }}>
+                  Confirmar {sugeridos.length} sugestões
+                </button>
+              </div>
+            );
+          })()}
           <div className="table-wrap" style={{ marginTop: 10 }}>
             <table>
               <thead>
@@ -203,14 +239,9 @@ function Conteudo() {
                       </span>
                     </td>
                     <td>
-                      {/* Task 12 monta as ações aqui */}
-                      {l.status === 'sugerido' && l.parcela_sugerida && (
-                        <span className="muted">
-                          {l.parcela_sugerida.contas_a_pagar?.fornecedores?.nome} ·{' '}
-                          {fmtMoney(l.parcela_sugerida.valor)} · vence{' '}
-                          {fmtDate(l.parcela_sugerida.vencimento)}
-                        </span>
-                      )}
+                      <AcoesConciliacao lancamento={l} empresaId={empresaAtual?.id}
+                        fornecedores={fornecedores} funcionarios={funcionarios}
+                        onMudou={recarregar} />
                     </td>
                   </tr>
                 ))}
