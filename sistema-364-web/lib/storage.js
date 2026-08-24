@@ -86,3 +86,12 @@ export async function removerAnexosContaAPagar(paths) {
   if (!validos.length) return;
   await supabase.storage.from(BUCKET).remove(validos);
 }
+
+// ---------- FINANCEIRO: arquivos de extrato e fatura ----------
+// O upload é feito pela rota (service role), não pelo browser — aqui só a
+// leitura, para a tela abrir o arquivo importado.
+export async function signedUrlExtrato(path, segundos = 300) {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, segundos);
+  if (error) throw error;
+  return data.signedUrl;
+}

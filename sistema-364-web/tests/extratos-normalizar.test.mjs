@@ -57,3 +57,28 @@ test('FITID do OFX manda no hash — dois débitos iguais no mesmo dia não coli
   assert.notEqual(a, b);
   assert.notEqual(a, hashDedupe(base));
 });
+
+test('ocorrência diferencia duas linhas idênticas sem FITID (duas tarifas iguais no mesmo dia, PDF/CSV)', () => {
+  const base = {
+    contaBancariaId: 'c1', data: '2026-08-10', valor: 50, descricaoNormalizada: 'TARIFA MANUTENCAO CONTA',
+  };
+  const primeira = hashDedupe({ ...base, ocorrencia: 0 });
+  const segunda = hashDedupe({ ...base, ocorrencia: 1 });
+  assert.notEqual(primeira, segunda);
+});
+
+test('ocorrência não interfere quando há FITID — o banco já identifica a transação', () => {
+  const base = {
+    contaBancariaId: 'c1', data: '2026-08-10', valor: 50,
+    descricaoNormalizada: 'TARIFA MANUTENCAO CONTA', fitid: 'X1',
+  };
+  assert.equal(hashDedupe({ ...base, ocorrencia: 0 }), hashDedupe({ ...base, ocorrencia: 1 }));
+  assert.equal(hashDedupe({ ...base, ocorrencia: 7 }), hashDedupe(base));
+});
+
+test('omitir ocorrência equivale a ocorrência 0 — hash sem o campo continua estável', () => {
+  const base = {
+    contaBancariaId: 'c1', data: '2026-08-10', valor: 50, descricaoNormalizada: 'TARIFA MANUTENCAO CONTA',
+  };
+  assert.equal(hashDedupe(base), hashDedupe({ ...base, ocorrencia: 0 }));
+});
