@@ -38,6 +38,10 @@ wheels/
 .coverage
 htmlcov/
 
+# Certificados digitais e chaves — NUNCA versionar
+*.p12
+*.pfx
+
 # Node & Next.js
 node_modules/
 .next/
