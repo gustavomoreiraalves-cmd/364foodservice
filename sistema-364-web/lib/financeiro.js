@@ -2,7 +2,7 @@ import { hoje } from './format.js';
 
 export const CATEGORIAS_CONTA = ['Custos Fixos', 'Custos Diretos', 'Custos Variáveis', 'Investimentos'];
 
-export const FORMAS_PAGAMENTO = ['Pix', 'Boleto', 'Transferência', 'Dinheiro'];
+export const FORMAS_PAGAMENTO = ['Pix', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão de Crédito'];
 
 function somarDias(dataStr, dias) {
   const d = new Date(dataStr);
