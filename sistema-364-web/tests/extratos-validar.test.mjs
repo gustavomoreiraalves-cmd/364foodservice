@@ -42,3 +42,12 @@ test('fatura: total confere com a soma das linhas', () => {
 test('fatura sem total informado não alerta', () => {
   assert.equal(validarFatura({ total: null, lancamentos: [{ valor: 1, tipo: 'saida' }] }).ok, true);
 });
+
+test('fatura com estorno (entrada): compras menos estorno bate com o total', () => {
+  const linhas = [
+    { valor: 300, tipo: 'saida' },
+    { valor: 100, tipo: 'saida' },
+    { valor: 50, tipo: 'entrada' },
+  ];
+  assert.equal(validarFatura({ total: 350, lancamentos: linhas }).ok, true);
+});

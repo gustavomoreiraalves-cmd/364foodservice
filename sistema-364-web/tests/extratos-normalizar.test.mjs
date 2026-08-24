@@ -45,7 +45,7 @@ test('hash é estável e separa lançamentos diferentes', () => {
 
 test('valor entra no hash com dois decimais fixos', () => {
   const base = { contaBancariaId: 'c1', data: '2026-08-10', descricaoNormalizada: 'X' };
-  assert.equal(hashDedupe({ ...base, valor: 750 }), hashDedupe({ ...base, valor: 750.0 }));
+  assert.equal(hashDedupe({ ...base, valor: 750.001 }), hashDedupe({ ...base, valor: 750.004 }));
 });
 
 test('FITID do OFX manda no hash — dois débitos iguais no mesmo dia não colidem', () => {

@@ -29,7 +29,8 @@ export function validarExtrato({ saldoInicial, saldoFinal, lancamentos }) {
 
 export function validarFatura({ total, lancamentos }) {
   if (total == null) return { ok: true, alerta: null };
-  const somaLinhas = (lancamentos || []).reduce((t, l) => t + Number(l.valor), 0);
+  const somaLinhas = (lancamentos || []).reduce(
+    (t, l) => t + (l.tipo === 'entrada' ? -Number(l.valor) : Number(l.valor)), 0);
   const diferenca = Math.abs(somaLinhas - Number(total));
   if (diferenca <= TOLERANCIA) return { ok: true, alerta: null };
   return {

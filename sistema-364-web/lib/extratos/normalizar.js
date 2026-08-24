@@ -6,7 +6,7 @@ const LIMITE = 120;
 
 export function normalizarDescricao(descricao) {
   return String(descricao ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '') // tira acento (marcas combinantes)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // tira acento (marcas combinantes)
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, ' ')                      // pontuação vira espaço
     .split(' ')
