@@ -34,7 +34,13 @@ export const MENU = [
       { label: 'Vendas Burguer (iFood)', href: '/vendas/burguer', modulo: 'pedidos' },
     ],
   },
-  { tipo: 'link', id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', modulo: 'financeiro' },
+  {
+    tipo: 'grupo', id: 'financeiro', label: 'Financeiro', ic: '◈', itens: [
+      { label: 'Contas a Pagar', href: '/financeiro/contas-a-pagar', modulo: 'financeiro' },
+      { label: 'Conciliação Bancária', href: '/financeiro/conciliacao', modulo: 'financeiro' },
+      { label: 'Contas Bancárias', href: '/financeiro/contas-bancarias', modulo: 'financeiro' },
+    ],
+  },
   {
     tipo: 'grupo', id: 'rh', label: 'RH', ic: '◔', itens: [
       { label: 'Painel do gestor', href: '/ponto/painel', modulo: 'ponto' },
