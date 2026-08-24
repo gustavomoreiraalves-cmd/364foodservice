@@ -264,10 +264,16 @@ recebimentos com taxa/líquido e itens vendidos por dia. Tela em
 Vendas → Vendas PDV. Spec em `docs/superpowers/specs/2026-08-23-importacao-vendas-consumer-design.md`,
 operação em `scripts/IMPORTACAO-PDV.md`.
 
-Pendente: aplicar a migração 32 em produção; copiar o cookie de sessão e
-rodar a carga inicial (`scripts/IMPORTACAO-PDV.md`); agendar o cron 05:00;
-alimentar `/grupo` com a receita do PDV; de-para item × produto para baixa
-de estoque; duração real do cookie (medir na primeira semana).
+Atualização 23/08 (v2): a fonte principal virou o **backup Firebird diário**
+do PDV no Drive (spec `2026-08-23-importacao-pdv-backup-design.md`): migrações
+32–34 em produção, importador `npm run importar-pdv-backup` com cron 14:00,
+carga histórica desde 2022, números conferidos ao centavo contra o painel.
+O scraping do painel ficou como plano B documentado (sem cron).
+
+Pendente: backup da Afya no Drive (rede da loja; aí é só preencher
+`pdv_lojas.drive_arquivos` e reativar); alimentar `/grupo` com a receita do
+PDV; de-para item × produto para baixa de estoque; percentual de taxa por
+credenciadora (v2 grava líquido = bruto).
 
 ## Próximos passos
 
