@@ -11,27 +11,32 @@ export const runtime = 'nodejs';
 async function carregarLancamento(sb, user, isAdmin, lancamentoId) {
   if (!lancamentoId) throw new Error('Informe o lançamento.');
   const { data: lanc } = await sb.from('extrato_lancamentos')
-    .select('id, empresa_id, descricao, importacao_id, parcela_sugerida_id, valor, '
-      + 'padrao_id, extrato_importacoes!inner(tipo)')
+    .select('id, empresa_id, descricao, importacao_id, parcela_sugerida_id, valor, padrao_id')
     .eq('id', lancamentoId).maybeSingle();
   if (!lanc) throw new Error('Lançamento não encontrado.');
   await garantirEmpresa(sb, user, isAdmin, lanc.empresa_id);
-  return lanc;
-}
 
-// O embed !inner normalmente devolve objeto (relação N:1), mas blindar contra
-// as duas formas evita que a forma de pagamento degrade em silêncio se o
-// formato do embed mudar algum dia — sem isso, tipo vira undefined, uma linha
-// de fatura de cartão é tratada como extrato comum e sai com a forma de
-// pagamento errada, sem erro nenhum avisando.
-function comoObjeto(valor) {
-  return Array.isArray(valor) ? (valor[0] || null) : valor;
+  // Consulta à parte em vez de embed: extrato_lancamentos tem DUAS FKs para
+  // extrato_importacoes (importacao_id e fatura_id), o que torna um embed
+  // ambíguo para o PostgREST (erro de "mais de uma relação encontrada") sem
+  // uma dica de qual FK usar — e a dica depende do nome da constraint/coluna
+  // continuar estável, uma dependência a mais que este caminho sem teste
+  // automatizado não tem como pegar se quebrar. Uma consulta extra por ação
+  // é barata e falha de um jeito visível.
+  const { data: importacao, error: erroImportacao } = await sb.from('extrato_importacoes')
+    .select('tipo').eq('id', lanc.importacao_id).maybeSingle();
+  if (erroImportacao) {
+    throw new Error('Não consegui identificar o tipo da importação deste lançamento: ' + erroImportacao.message);
+  }
+  lanc.importacaoTipo = importacao?.tipo ?? null;
+
+  return lanc;
 }
 
 // Linha de fatura de cartão sempre nasce como Cartão de Crédito; no extrato
 // bancário a forma sai do texto do próprio lançamento.
 function formaPara(lanc) {
-  return comoObjeto(lanc.extrato_importacoes)?.tipo === 'fatura_cartao'
+  return lanc.importacaoTipo === 'fatura_cartao'
     ? 'Cartão de Crédito'
     : inferirFormaPagamento(lanc.descricao);
 }
