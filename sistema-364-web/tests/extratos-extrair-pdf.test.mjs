@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import Anthropic from '@anthropic-ai/sdk';
 import { extrairPdf, montarPedido, MODELO_PADRAO } from '../lib/extratos/extrairPdf.js';
 
 // Dublê do cliente: implementa só beta.messages.create, que é tudo que o módulo usa.
@@ -11,6 +12,20 @@ function clienteFalso(resposta, capturar) {
           if (capturar) capturar(pedido);
           return resposta;
         },
+      },
+    },
+  };
+}
+
+// Dublê que rejeita — para exercitar o mapeamento de erro do SDK (erroLegivel),
+// que só roda quando beta.messages.create lança. As instâncias usadas nos testes
+// abaixo são classes reais do SDK (não um Error cru fingindo ser erro de API),
+// porque erroLegivel distingue por instanceof.
+function clienteQueRejeita(erro) {
+  return {
+    beta: {
+      messages: {
+        create: async () => { throw erro; },
       },
     },
   };
@@ -144,4 +159,35 @@ test('nenhum lançamento extraído é erro (PDF errado, página em branco)', asy
       cliente: clienteFalso(respostaComFerramenta({ ...EXTRATO_IA, lancamentos: [] })),
     }),
     /nenhum lançamento/i);
+});
+
+test('erro de autenticação do SDK vira mensagem sobre a chave', async () => {
+  const erro = new Anthropic.AuthenticationError(
+    401, { message: 'invalid x-api-key' }, 'invalid x-api-key', undefined, 'authentication_error');
+  await assert.rejects(
+    () => extrairPdf({ base64: 'x', tipo: 'extrato', cliente: clienteQueRejeita(erro) }),
+    /ANTHROPIC_API_KEY/);
+});
+
+test('erro de limite de uso do SDK vira mensagem que sugere OFX', async () => {
+  const erro = new Anthropic.RateLimitError(
+    429, { message: 'rate limited' }, 'rate limited', undefined, 'rate_limit_error');
+  await assert.rejects(
+    () => extrairPdf({ base64: 'x', tipo: 'extrato', cliente: clienteQueRejeita(erro) }),
+    /limite de uso/i);
+});
+
+test('erro genérico da API do SDK vira mensagem com o status HTTP', async () => {
+  const erro = new Anthropic.InternalServerError(
+    500, { message: 'internal server error' }, 'internal server error', undefined, 'api_error');
+  await assert.rejects(
+    () => extrairPdf({ base64: 'x', tipo: 'extrato', cliente: clienteQueRejeita(erro) }),
+    /HTTP 500/);
+});
+
+test('erro que não é da API do SDK atravessa sem virar mensagem genérica', async () => {
+  const erro = new TypeError('cannot read properties of undefined');
+  await assert.rejects(
+    () => extrairPdf({ base64: 'x', tipo: 'extrato', cliente: clienteQueRejeita(erro) }),
+    err => err === erro);
 });
