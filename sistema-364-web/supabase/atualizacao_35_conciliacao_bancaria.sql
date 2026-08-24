@@ -177,16 +177,278 @@ begin
        set allowed_mime_types = array[
              'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic',
              'application/xml', 'text/xml',
-             'application/x-ofx', 'text/csv', 'text/plain', 'application/octet-stream'
+             'application/x-ofx', 'text/csv', 'text/plain'
            ]
      where id = 'recebimentos';
   end if;
+end $$;
+
+-- ---------- FUNÇÕES DE CONCILIAÇÃO ----------
+-- Por que função no banco e não código na rota: conciliar mexe em três
+-- tabelas (vínculo, parcela, padrão) e não pode ficar pela metade se cair no
+-- meio. Aqui é uma transação só. As rotas chamam por RPC.
+--
+-- Todas rodam como security invoker (default): a rota usa service role e já
+-- conferiu a empresa com garantirEmpresa(), e as funções revalidam a empresa
+-- de cada parcela contra a do lançamento.
+
+-- Recalcula contadores e status da importação. Uma importação está concluída
+-- quando não sobra saída pendente nem sugerida.
+create or replace function public.fn_recalcular_importacao(p_importacao_id uuid)
+returns void language plpgsql as $$
+declare v_total int; v_conciliados int; v_abertos int;
+begin
+  select count(*) filter (where tipo = 'saida'),
+         count(*) filter (where tipo = 'saida' and status = 'conciliado'),
+         count(*) filter (where tipo = 'saida' and status in ('pendente','sugerido'))
+    into v_total, v_conciliados, v_abertos
+    from public.extrato_lancamentos where importacao_id = p_importacao_id;
+
+  update public.extrato_importacoes
+     set total_lancamentos = (select count(*) from public.extrato_lancamentos
+                               where importacao_id = p_importacao_id),
+         conciliados = coalesce(v_conciliados, 0),
+         status = case when status = 'erro' then 'erro'
+                       when coalesce(v_abertos, 0) = 0 then 'concluida'
+                       else 'aguardando_conciliacao' end
+   where id = p_importacao_id;
+end $$;
+
+-- Grava o aprendizado. Mesmo fornecedor: soma um uso. Fornecedor diferente:
+-- sobrescreve e volta a 1 — a última confirmação do colaborador é a verdade.
+create or replace function public.fn_registrar_padrao(
+  p_empresa_id uuid, p_padrao text, p_fornecedor_id uuid, p_categoria_conta text)
+returns uuid language plpgsql as $$
+declare v_id uuid;
+begin
+  if p_fornecedor_id is null or coalesce(trim(p_padrao), '') = '' then return null; end if;
+  insert into public.conciliacao_padroes
+    (empresa_id, padrao, fornecedor_id, categoria_conta, usos, ultimo_uso)
+    values (p_empresa_id, p_padrao, p_fornecedor_id, p_categoria_conta, 1, now())
+  on conflict (empresa_id, padrao) do update
+    set fornecedor_id = excluded.fornecedor_id,
+        categoria_conta = coalesce(excluded.categoria_conta, public.conciliacao_padroes.categoria_conta),
+        usos = case when public.conciliacao_padroes.fornecedor_id = excluded.fornecedor_id
+                    then public.conciliacao_padroes.usos + 1 else 1 end,
+        ultimo_uso = now()
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- Concilia um lançamento com uma ou mais parcelas.
+-- p_parcelas: [{"parcela_id":"<uuid>","valor_aplicado":123.45}, ...]
+-- Parcela ainda Pendente é baixada (baixou_parcela = true). Parcela já Paga é
+-- só vinculada — inclusive o caso da linha de fatura de cartão, que espera o
+-- pagamento da fatura para baixar.
+create or replace function public.fn_conciliar_lancamento(
+  p_lancamento_id uuid,
+  p_parcelas jsonb,
+  p_forma_pagamento text default null,
+  p_fornecedor_id uuid default null,
+  p_categoria_conta text default null)
+returns jsonb language plpgsql as $$
+declare
+  v_lanc record; v_parc record; v_item jsonb;
+  v_baixou boolean; v_padrao_id uuid; v_baixadas int := 0; v_vinculadas int := 0;
+  v_ehFatura boolean;
+begin
+  select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
+  if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
+  if v_lanc.tipo <> 'saida' then
+    raise exception 'Só saídas são conciliadas nesta fase (este lançamento é uma entrada).';
+  end if;
+  if v_lanc.status = 'conciliado' then
+    raise exception 'Este lançamento já está conciliado. Desfaça antes de conciliar de novo.';
+  end if;
+  if p_parcelas is null or jsonb_array_length(p_parcelas) = 0 then
+    raise exception 'Informe pelo menos uma parcela.';
+  end if;
+
+  -- Linha de fatura de cartão não baixa parcela: a compra ainda não saiu do
+  -- caixa. Quem baixa é fn_conciliar_pagamento_fatura.
+  select tipo = 'fatura_cartao' into v_ehFatura
+    from public.extrato_importacoes where id = v_lanc.importacao_id;
+
+  for v_item in select * from jsonb_array_elements(p_parcelas) loop
+    select * into v_parc from public.contas_a_pagar_parcelas
+      where id = (v_item->>'parcela_id')::uuid for update;
+    if v_parc is null then raise exception 'Parcela % não encontrada.', v_item->>'parcela_id'; end if;
+    if v_parc.empresa_id <> v_lanc.empresa_id then
+      raise exception 'Parcela de outra empresa não pode ser conciliada aqui.';
+    end if;
+
+    v_baixou := (v_parc.status = 'Pendente') and not coalesce(v_ehFatura, false);
+    if v_baixou then
+      update public.contas_a_pagar_parcelas
+         set status = 'Pago', data_pagamento = v_lanc.data,
+             forma_pagamento = coalesce(p_forma_pagamento, forma_pagamento)
+       where id = v_parc.id;
+      v_baixadas := v_baixadas + 1;
+    end if;
+
+    insert into public.conciliacao_vinculos
+      (lancamento_id, parcela_id, valor_aplicado, baixou_parcela, empresa_id)
+      values (p_lancamento_id, v_parc.id,
+              coalesce((v_item->>'valor_aplicado')::numeric, v_parc.valor),
+              v_baixou, v_lanc.empresa_id)
+    on conflict (lancamento_id, parcela_id) do nothing;
+    v_vinculadas := v_vinculadas + 1;
+  end loop;
+
+  v_padrao_id := public.fn_registrar_padrao(v_lanc.empresa_id, v_lanc.descricao_normalizada,
+                                            p_fornecedor_id, p_categoria_conta);
+
+  update public.extrato_lancamentos
+     set status = 'conciliado', padrao_id = coalesce(v_padrao_id, padrao_id)
+   where id = p_lancamento_id;
+
+  perform public.fn_recalcular_importacao(v_lanc.importacao_id);
+  return jsonb_build_object('vinculadas', v_vinculadas, 'baixadas', v_baixadas);
+end $$;
+
+-- Saída sem conta a pagar: cria conta + parcela única já paga + vínculo, e
+-- guarda a conta em conta_criada_id para o desfazer poder apagá-la.
+create or replace function public.fn_criar_conta_e_conciliar(
+  p_lancamento_id uuid,
+  p_descricao text,
+  p_categoria_conta text,
+  p_fornecedor_id uuid,
+  p_responsavel_id uuid default null,
+  p_forma_pagamento text default null)
+returns jsonb language plpgsql as $$
+declare v_lanc record; v_conta_id uuid; v_parcela_id uuid; v_padrao_id uuid;
+begin
+  select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
+  if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
+  if v_lanc.tipo <> 'saida' then raise exception 'Só saídas viram conta a pagar aqui.'; end if;
+  if v_lanc.status = 'conciliado' then raise exception 'Este lançamento já está conciliado.'; end if;
+  if p_fornecedor_id is null then raise exception 'Escolha o fornecedor.'; end if;
+
+  insert into public.contas_a_pagar
+    (descricao, categoria_conta, fornecedor_id, valor_total, responsavel_id, empresa_id)
+    values (coalesce(nullif(trim(p_descricao), ''), v_lanc.descricao), p_categoria_conta,
+            p_fornecedor_id, v_lanc.valor, p_responsavel_id, v_lanc.empresa_id)
+    returning id into v_conta_id;
+
+  insert into public.contas_a_pagar_parcelas
+    (conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento, forma_pagamento, empresa_id)
+    values (v_conta_id, 1, v_lanc.valor, v_lanc.data, 'Pago', v_lanc.data,
+            p_forma_pagamento, v_lanc.empresa_id)
+    returning id into v_parcela_id;
+
+  insert into public.conciliacao_vinculos
+    (lancamento_id, parcela_id, valor_aplicado, baixou_parcela, empresa_id)
+    values (p_lancamento_id, v_parcela_id, v_lanc.valor, true, v_lanc.empresa_id);
+
+  v_padrao_id := public.fn_registrar_padrao(v_lanc.empresa_id, v_lanc.descricao_normalizada,
+                                            p_fornecedor_id, p_categoria_conta);
+
+  update public.extrato_lancamentos
+     set status = 'conciliado', conta_criada_id = v_conta_id,
+         padrao_id = coalesce(v_padrao_id, padrao_id)
+   where id = p_lancamento_id;
+
+  perform public.fn_recalcular_importacao(v_lanc.importacao_id);
+  return jsonb_build_object('conta_id', v_conta_id, 'parcela_id', v_parcela_id);
+end $$;
+
+-- Desfaz: reabre só as parcelas que esta conciliação baixou, apaga os
+-- vínculos e, se a conta a pagar nasceu daqui, apaga a conta (o cascade
+-- limpa parcela e vínculo).
+create or replace function public.fn_desfazer_conciliacao(p_lancamento_id uuid)
+returns jsonb language plpgsql as $$
+declare v_lanc record; v_reabertas int := 0;
+begin
+  select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
+  if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
+
+  update public.contas_a_pagar_parcelas p
+     set status = 'Pendente', data_pagamento = null, forma_pagamento = null
+   where p.id in (select v.parcela_id from public.conciliacao_vinculos v
+                   where v.lancamento_id = p_lancamento_id and v.baixou_parcela);
+  get diagnostics v_reabertas = row_count;
+
+  delete from public.conciliacao_vinculos where lancamento_id = p_lancamento_id;
+
+  if v_lanc.conta_criada_id is not null then
+    delete from public.contas_a_pagar where id = v_lanc.conta_criada_id;
+  end if;
+
+  update public.extrato_lancamentos
+     set status = case when tipo = 'entrada' then 'ignorado'
+                       when parcela_sugerida_id is not null then 'sugerido'
+                       else 'pendente' end,
+         conta_criada_id = null, fatura_id = null
+   where id = p_lancamento_id;
+
+  perform public.fn_recalcular_importacao(v_lanc.importacao_id);
+  return jsonb_build_object('reabertas', v_reabertas);
+end $$;
+
+-- Pagamento da fatura no extrato bancário: baixa em lote todas as parcelas
+-- vinculadas às linhas daquela fatura. p_forcar libera o caso de pagamento
+-- parcial/rotativo, onde o débito não bate com a soma conciliada.
+create or replace function public.fn_conciliar_pagamento_fatura(
+  p_lancamento_id uuid, p_fatura_id uuid, p_forcar boolean default false)
+returns jsonb language plpgsql as $$
+declare v_lanc record; v_fatura record; v_soma numeric(12,2); v_baixadas int := 0;
+begin
+  select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
+  if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
+  if v_lanc.tipo <> 'saida' then raise exception 'O pagamento da fatura é uma saída.'; end if;
+  if v_lanc.status = 'conciliado' then raise exception 'Este lançamento já está conciliado.'; end if;
+
+  select * into v_fatura from public.extrato_importacoes where id = p_fatura_id;
+  if v_fatura is null then raise exception 'Fatura não encontrada.'; end if;
+  if v_fatura.tipo <> 'fatura_cartao' then raise exception 'A importação escolhida não é uma fatura.'; end if;
+  if v_fatura.empresa_id <> v_lanc.empresa_id then
+    raise exception 'Fatura de outra empresa.';
+  end if;
+
+  select coalesce(sum(v.valor_aplicado), 0) into v_soma
+    from public.conciliacao_vinculos v
+    join public.extrato_lancamentos l on l.id = v.lancamento_id
+   where l.importacao_id = p_fatura_id;
+
+  if v_soma = 0 then
+    raise exception 'Nenhuma linha desta fatura foi conciliada ainda — concilie as compras antes de baixar o pagamento.';
+  end if;
+  if abs(v_soma - v_lanc.valor) > 0.01 and not coalesce(p_forcar, false) then
+    raise exception 'O débito de % não bate com a soma conciliada da fatura (%). Confirme para baixar assim mesmo.',
+      to_char(v_lanc.valor, 'FM999999990.00'), to_char(v_soma, 'FM999999990.00');
+  end if;
+
+  update public.contas_a_pagar_parcelas p
+     set status = 'Pago', data_pagamento = v_lanc.data, forma_pagamento = 'Cartão de Crédito'
+   where p.status = 'Pendente'
+     and p.id in (select v.parcela_id from public.conciliacao_vinculos v
+                   join public.extrato_lancamentos l on l.id = v.lancamento_id
+                  where l.importacao_id = p_fatura_id);
+  get diagnostics v_baixadas = row_count;
+
+  update public.conciliacao_vinculos v
+     set baixou_parcela = true
+   where v.lancamento_id in (select id from public.extrato_lancamentos where importacao_id = p_fatura_id);
+
+  update public.extrato_lancamentos
+     set status = 'conciliado', fatura_id = p_fatura_id
+   where id = p_lancamento_id;
+
+  perform public.fn_recalcular_importacao(v_lanc.importacao_id);
+  perform public.fn_recalcular_importacao(p_fatura_id);
+  return jsonb_build_object('baixadas', v_baixadas, 'soma_fatura', v_soma);
 end $$;
 
 commit;
 
 -- ---------- ROLLBACK ----------
 -- begin;
+-- drop function if exists public.fn_conciliar_pagamento_fatura(uuid, uuid, boolean);
+-- drop function if exists public.fn_desfazer_conciliacao(uuid);
+-- drop function if exists public.fn_criar_conta_e_conciliar(uuid, text, text, uuid, uuid, text);
+-- drop function if exists public.fn_conciliar_lancamento(uuid, jsonb, text, uuid, text);
+-- drop function if exists public.fn_registrar_padrao(uuid, text, uuid, text);
+-- drop function if exists public.fn_recalcular_importacao(uuid);
 -- drop table if exists public.conciliacao_vinculos;
 -- drop table if exists public.extrato_lancamentos;
 -- drop table if exists public.conciliacao_padroes;
