@@ -15,6 +15,7 @@
     "importar-pdv": "node scripts/importar-pdv-consumer.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@supabase/supabase-js": "^2.45.0",
     "@vladmandic/face-api": "^1.7.15",
     "cheerio": "^1.2.0",
