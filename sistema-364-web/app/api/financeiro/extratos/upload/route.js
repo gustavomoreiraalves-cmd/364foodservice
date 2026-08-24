@@ -6,7 +6,12 @@ import { processarImportacao } from '../../../../../lib/extratosServer';
 export const runtime = 'nodejs';
 export const maxDuration = 300; // PDF grande passa por leitura de IA
 
-const LIMITE = 10 * 1024 * 1024; // teto do bucket 'recebimentos'
+// Teto de PLATAFORMA, não capricho nosso: a Vercel corta o corpo de uma função
+// serverless em ~4,5 MB, então um limite de 10 MB nunca seria alcançado — a
+// requisição levaria 413 da própria Vercel antes de chegar aqui, e o
+// colaborador veria um erro de infraestrutura sem instrução nenhuma. Não
+// subir isso de volta para o teto do bucket sem checar o limite do runtime.
+const LIMITE = 4 * 1024 * 1024;
 const TIPOS = ['extrato', 'fatura_cartao'];
 
 // POST multipart: arquivo, empresaId, contaBancariaId, tipo
@@ -37,7 +42,10 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Anexe o arquivo do extrato.' }, { status: 400 });
   }
   if (arquivo.size > LIMITE) {
-    return NextResponse.json({ error: 'Arquivo acima de 10 MB. Exporte um período menor.' }, { status: 400 });
+    return NextResponse.json({
+      error: 'Arquivo acima de 4 MB. Exporte um período menor, ou envie o extrato em OFX — '
+        + 'bem mais leve que PDF.',
+    }, { status: 400 });
   }
 
   try {

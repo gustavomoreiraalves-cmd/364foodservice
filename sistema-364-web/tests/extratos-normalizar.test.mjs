@@ -76,7 +76,13 @@ test('ocorrência não interfere quando há FITID — o banco já identifica a t
   assert.equal(hashDedupe({ ...base, ocorrencia: 7 }), hashDedupe(base));
 });
 
-test('omitir ocorrência equivale a ocorrência 0 — hash sem o campo continua estável', () => {
+test('omitir ocorrência equivale a passar ocorrência 0 (o default do parâmetro)', () => {
+  // Prova só a fiação do default — NÃO prova (e não podia provar) que o hash
+  // bate com o de antes desta correção: a chave antiga era
+  // "conta|data|valor|descricao" e a nova é sempre "...|descricao|N", com ou
+  // sem `ocorrencia` explícito. São strings diferentes, hashes diferentes.
+  // Sem consequência prática porque a tabela é nova e não há hash gravado
+  // com o esquema antigo — mas o nome do teste não pode alegar o contrário.
   const base = {
     contaBancariaId: 'c1', data: '2026-08-10', valor: 50, descricaoNormalizada: 'TARIFA MANUTENCAO CONTA',
   };

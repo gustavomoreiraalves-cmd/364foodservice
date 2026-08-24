@@ -41,21 +41,50 @@ async function lerArquivo({ formato, buffer, tipo }) {
   return lido;
 }
 
-// Parcelas pendentes achatadas no shape que o motor de sugestão espera.
+// O embed !inner normalmente devolve objeto (relação N:1), mas blindar contra
+// as duas formas evita que o aprendizado degrade em silêncio se o formato do
+// embed mudar algum dia — sem isso, fornecedorId vira null sem erro nenhum e
+// as sugestões simplesmente param de desempatar por fornecedor, sem avisar.
+function comoObjeto(valor) {
+  return Array.isArray(valor) ? (valor[0] || null) : valor;
+}
+
+// Parcelas pendentes achatadas no shape que o motor de sugestão espera, menos
+// as que já foram sugeridas por um lançamento ainda aberto ('pendente' ou
+// 'sugerido') de QUALQUER importação — inclusive de outra. Sem essa exclusão,
+// duas importações diferentes (a conta corrente e a fatura do cartão, por
+// exemplo) podem sugerir a mesma parcela cada uma para o seu próprio débito;
+// confirmando as duas, a função do banco não deixa baixar a parcela duas
+// vezes, mas cria os dois vínculos e concilia os dois lançamentos — uma saída
+// real fica contabilizada contra nada, em silêncio. Lançamento já conciliado
+// não precisa entrar nessa exclusão: a parcela dele já não é mais 'Pendente',
+// então nem chega na consulta abaixo.
 async function parcelasPendentes(sb, empresaId) {
   const { data, error } = await sb.from('contas_a_pagar_parcelas')
     .select('id, valor, vencimento, contas_a_pagar!inner(fornecedor_id)')
     .eq('empresa_id', empresaId).eq('status', 'Pendente');
   if (error) throw new Error('Não consegui ler as parcelas em aberto: ' + error.message);
-  return (data || []).map(p => ({
-    id: p.id, valor: Number(p.valor), vencimento: p.vencimento,
-    fornecedorId: p.contas_a_pagar?.fornecedor_id || null,
-  }));
+
+  const { data: reservadas, error: erroReservadas } = await sb.from('extrato_lancamentos')
+    .select('parcela_sugerida_id').eq('empresa_id', empresaId)
+    .in('status', ['pendente', 'sugerido']).not('parcela_sugerida_id', 'is', null);
+  if (erroReservadas) {
+    throw new Error('Não consegui conferir as sugestões em aberto: ' + erroReservadas.message);
+  }
+  const jaReservadas = new Set((reservadas || []).map(l => l.parcela_sugerida_id));
+
+  return (data || [])
+    .filter(p => !jaReservadas.has(p.id))
+    .map(p => ({
+      id: p.id, valor: Number(p.valor), vencimento: p.vencimento,
+      fornecedorId: comoObjeto(p.contas_a_pagar)?.fornecedor_id || null,
+    }));
 }
 
 async function mapaDePadroes(sb, empresaId) {
-  const { data } = await sb.from('conciliacao_padroes')
+  const { data, error } = await sb.from('conciliacao_padroes')
     .select('id, padrao, fornecedor_id, categoria_conta').eq('empresa_id', empresaId);
+  if (error) throw new Error('Não consegui ler os padrões de conciliação aprendidos: ' + error.message);
   const mapa = new Map();
   for (const p of data || []) {
     mapa.set(p.padrao, { id: p.id, fornecedorId: p.fornecedor_id, categoriaConta: p.categoria_conta });
@@ -146,11 +175,22 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
     const novas = inseridas?.length || 0;
     const sugeridas = (inseridas || []).filter(l => l.status === 'sugerido').length;
 
-    await sb.from('extrato_importacoes').update({
+    // supabase-js não lança em erro de escrita — devolve { error }. Sem essa
+    // checagem, uma falha aqui some em silêncio: periodo_inicio, periodo_fim
+    // e, principalmente, o `alerta` (o único aviso de que o extrato não
+    // fecha) desapareceriam sem o catch rodar, e a rota devolveria o resumo
+    // de sucesso mesmo assim.
+    const { error: erroAtualizarImportacao } = await sb.from('extrato_importacoes').update({
       periodo_inicio: lido.periodoInicio, periodo_fim: lido.periodoFim,
       alerta: conferencia.alerta, status: 'aguardando_conciliacao',
     }).eq('id', importacaoId);
-    await sb.rpc('fn_recalcular_importacao', { p_importacao_id: importacaoId });
+    if (erroAtualizarImportacao) {
+      throw new Error('Não consegui atualizar o resumo da importação: ' + erroAtualizarImportacao.message);
+    }
+    const { error: erroRecalcular } = await sb.rpc('fn_recalcular_importacao', { p_importacao_id: importacaoId });
+    if (erroRecalcular) {
+      throw new Error('Não consegui recalcular os totais da importação: ' + erroRecalcular.message);
+    }
 
     return {
       importacaoId, total: linhas.length, novas, duplicadas: linhas.length - novas,
