@@ -455,3 +455,177 @@ begin
 
   raise notice 'OK 13: desfazer o pagamento da fatura devolve só o que ele baixou e preserva a parcela já paga antes';
 end $$;
+
+-- ================= FRONTEIRA DE EMPRESA (fornecedor/responsável) =================
+-- fn_criar_conta_e_conciliar e fn_registrar_padrao recebem p_fornecedor_id e
+-- p_responsavel_id do corpo da requisição HTTP e não conferiam a que empresa
+-- eles pertencem — um usuário do financeiro numa empresa do grupo podia
+-- apontar para o cadastro de outra. Fornecedor e funcionário abaixo são da
+-- empresa 'outra' (:'outra'), a mesma que o cenário 4 já usa para RLS.
+insert into public.fornecedores (id, empresa_id, nome, cnpj)
+  values ('aaaaaaaa-0000-0000-0000-000000000099', :'outra', 'Fornecedor de Outra Empresa', '99999999000199');
+insert into public.funcionarios (id, empresa_id, nome)
+  values ('bbbbbbbb-0000-0000-0000-000000000099', :'outra', 'Funcionário de Outra Empresa');
+
+-- Cenário 14: criar conta com fornecedor de outra empresa é recusado, e nada
+-- fica gravado — nem conta, nem parcela, nem vínculo.
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000022', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-18', 'TAXA MANUTENCAO CONTA', 'TAXA MANUTENCAO CONTA', 35.00, 'saida', 'hash-g1');
+do $$
+declare
+  n_contas_antes int; n_contas_depois int;
+  n_parcelas_antes int; n_parcelas_depois int;
+  n_vinculos_antes int; n_vinculos_depois int;
+  lanc record;
+begin
+  select count(*) into n_contas_antes from public.contas_a_pagar;
+  select count(*) into n_parcelas_antes from public.contas_a_pagar_parcelas;
+  select count(*) into n_vinculos_antes from public.conciliacao_vinculos;
+
+  begin
+    perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000022',
+      'Taxa de manutenção', 'Custos Fixos', 'aaaaaaaa-0000-0000-0000-000000000099',
+      null, 'Débito Automático');
+    raise exception 'FALHA 14: criou conta com fornecedor de outra empresa';
+  exception when others then
+    if sqlerrm like 'FALHA 14%' then raise; end if;
+  end;
+
+  select count(*) into n_contas_depois from public.contas_a_pagar;
+  select count(*) into n_parcelas_depois from public.contas_a_pagar_parcelas;
+  select count(*) into n_vinculos_depois from public.conciliacao_vinculos;
+  if n_contas_depois <> n_contas_antes or n_parcelas_depois <> n_parcelas_antes
+     or n_vinculos_depois <> n_vinculos_antes then
+    raise exception 'FALHA 14: rejeitou mas deixou rastro (contas %->%, parcelas %->%, vínculos %->%)',
+      n_contas_antes, n_contas_depois, n_parcelas_antes, n_parcelas_depois, n_vinculos_antes, n_vinculos_depois;
+  end if;
+
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000022';
+  if lanc.status = 'conciliado' then
+    raise exception 'FALHA 14: lançamento ficou conciliado mesmo com a exceção';
+  end if;
+
+  raise notice 'OK 14: fornecedor de outra empresa é recusado ao criar conta e nada fica gravado';
+end $$;
+
+-- Cenário 15: criar conta com responsável de outra empresa é recusado
+-- (fornecedor é válido, isolando que quem barrou foi o responsável).
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000023', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-19', 'TAXA EXTRATO PAPEL', 'TAXA EXTRATO PAPEL', 12.00, 'saida', 'hash-g2');
+do $$
+declare lanc record;
+begin
+  begin
+    perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000023',
+      'Taxa de extrato', 'Custos Fixos', 'aaaaaaaa-0000-0000-0000-000000000001',
+      'bbbbbbbb-0000-0000-0000-000000000099', 'Débito Automático');
+    raise exception 'FALHA 15: criou conta com responsável de outra empresa';
+  exception when others then
+    if sqlerrm like 'FALHA 15%' then raise; end if;
+  end;
+
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000023';
+  if lanc.status = 'conciliado' then
+    raise exception 'FALHA 15: lançamento ficou conciliado mesmo com responsável de outra empresa';
+  end if;
+  if exists (select 1 from public.contas_a_pagar where descricao = 'Taxa de extrato') then
+    raise exception 'FALHA 15: conta foi criada mesmo com responsável de outra empresa';
+  end if;
+  raise notice 'OK 15: responsável de outra empresa é recusado ao criar conta';
+end $$;
+
+-- Cenário 16: responsável nulo continua funcionando — ele é opcional, a
+-- conferência nova não pode transformá-lo em obrigatório.
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000024', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-20', 'TAXA TED ENVIADA', 'TAXA TED ENVIADA', 18.50, 'saida', 'hash-g3');
+do $$
+declare lanc record; conta record;
+begin
+  perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000024',
+    'TED enviada', 'Custos Fixos', 'aaaaaaaa-0000-0000-0000-000000000001',
+    null, 'Transferência');
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000024';
+  if lanc.status <> 'conciliado' or lanc.conta_criada_id is null then
+    raise exception 'FALHA 16: responsável nulo devia continuar funcionando';
+  end if;
+  select * into conta from public.contas_a_pagar where id = lanc.conta_criada_id;
+  if conta.responsavel_id is not null then
+    raise exception 'FALHA 16: responsavel_id devia ficar nulo';
+  end if;
+  raise notice 'OK 16: responsável nulo continua sendo aceito ao criar conta';
+end $$;
+
+-- Cenário 17: fn_registrar_padrao com fornecedor de outra empresa não
+-- levanta exceção — ela é ignorada, mesmo tratamento do fornecedor nulo — e
+-- por isso conciliar com esse fornecedor (só para fins de aprendizado) não
+-- aborta a baixa real da parcela, que já é protegida por conta própria.
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-000000000007', 'Frete emergencial', 'Custos Diretos',
+          'aaaaaaaa-0000-0000-0000-000000000001', 60.00, :'empresa');
+insert into public.contas_a_pagar_parcelas (id, conta_a_pagar_id, numero, valor, vencimento, empresa_id)
+  values ('99999999-0000-0000-0000-000000000008', 'ffffffff-0000-0000-0000-000000000007',
+          1, 60.00, '2026-08-22', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000025', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-22', 'FRETE EXPRESSO XYZ', 'FRETE EXPRESSO XYZ', 60.00, 'saida', 'hash-g4');
+do $$
+declare v_ret uuid; lanc record; parc record;
+begin
+  v_ret := public.fn_registrar_padrao('11111111-1111-1111-1111-111111111111',
+    'PADRAO TESTE OUTRA EMPRESA', 'aaaaaaaa-0000-0000-0000-000000000099', 'Custos Diretos');
+  if v_ret is not null then
+    raise exception 'FALHA 17: fn_registrar_padrao devolveu id para fornecedor de outra empresa';
+  end if;
+  if exists (select 1 from public.conciliacao_padroes where padrao = 'PADRAO TESTE OUTRA EMPRESA') then
+    raise exception 'FALHA 17: padrão foi gravado com fornecedor de outra empresa';
+  end if;
+
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000025',
+    '[{"parcela_id":"99999999-0000-0000-0000-000000000008","valor_aplicado":60.00}]'::jsonb,
+    'Pix', 'aaaaaaaa-0000-0000-0000-000000000099', 'Custos Diretos');
+
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-000000000008';
+  if parc.status <> 'Pago' then
+    raise exception 'FALHA 17: fornecedor de outra empresa (só para aprendizado) travou a baixa da parcela';
+  end if;
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000025';
+  if lanc.status <> 'conciliado' then
+    raise exception 'FALHA 17: lançamento devia ficar conciliado mesmo sem aprender o padrão';
+  end if;
+  if exists (select 1 from public.conciliacao_padroes where padrao = 'FRETE EXPRESSO XYZ') then
+    raise exception 'FALHA 17: aprendeu padrão com fornecedor de outra empresa';
+  end if;
+
+  raise notice 'OK 17: fornecedor de outra empresa não vira padrão, mas não trava a conciliação';
+end $$;
+
+-- Cenário 18 (controle): fornecedor e responsável da própria empresa
+-- continuam passando — prova que a conferência nova não fechou demais.
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000026', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-23', 'TAXA MENSALIDADE CARTAO', 'TAXA MENSALIDADE CARTAO', 25.00, 'saida', 'hash-g5');
+do $$
+declare lanc record; conta record;
+begin
+  perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000026',
+    'Mensalidade cartão', 'Custos Fixos', 'aaaaaaaa-0000-0000-0000-000000000001',
+    'bbbbbbbb-0000-0000-0000-000000000001', 'Débito Automático');
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000026';
+  if lanc.status <> 'conciliado' or lanc.conta_criada_id is null then
+    raise exception 'FALHA 18: fornecedor e responsável da própria empresa deviam passar';
+  end if;
+  select * into conta from public.contas_a_pagar where id = lanc.conta_criada_id;
+  if conta.fornecedor_id <> 'aaaaaaaa-0000-0000-0000-000000000001'
+     or conta.responsavel_id <> 'bbbbbbbb-0000-0000-0000-000000000001' then
+    raise exception 'FALHA 18: fornecedor/responsável gravados não batem com os informados';
+  end if;
+  raise notice 'OK 18: fornecedor e responsável da própria empresa continuam sendo aceitos';
+end $$;

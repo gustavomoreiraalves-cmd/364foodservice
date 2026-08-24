@@ -194,7 +194,9 @@ end $$;
 --
 -- Todas rodam como security invoker (default): a rota usa service role e já
 -- conferiu a empresa com garantirEmpresa(), e as funções revalidam a empresa
--- de cada parcela contra a do lançamento.
+-- de cada id que recebem de fora (parcela, fatura, fornecedor, responsável)
+-- contra a do lançamento — nenhum deles é confiado só porque veio no corpo
+-- da requisição.
 
 -- Recalcula contadores e status da importação. Uma importação está concluída
 -- quando não sobra saída pendente nem sugerida.
@@ -220,12 +222,24 @@ end $$;
 
 -- Grava o aprendizado. Mesmo fornecedor: soma um uso. Fornecedor diferente:
 -- sobrescreve e volta a 1 — a última confirmação do colaborador é a verdade.
+-- Fornecedor de outra empresa é ignorado, mesmo tratamento do fornecedor
+-- nulo: esta função só alimenta uma sugestão futura, não grava obrigação
+-- financeira nenhuma, e ela é chamada de dentro de fn_conciliar_lancamento e
+-- fn_criar_conta_e_conciliar — levantar exceção aqui abortaria a
+-- conciliação inteira por causa de um id que só serve de dica. Quem faz
+-- valer a fronteira de empresa de verdade, com exceção, é
+-- fn_criar_conta_e_conciliar (grava a obrigação) e a checagem de parcela em
+-- fn_conciliar_lancamento (baixa a obrigação existente).
 create or replace function public.fn_registrar_padrao(
   p_empresa_id uuid, p_padrao text, p_fornecedor_id uuid, p_categoria_conta text)
 returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
   if p_fornecedor_id is null or coalesce(trim(p_padrao), '') = '' then return null; end if;
+  if not exists (select 1 from public.fornecedores
+                  where id = p_fornecedor_id and empresa_id = p_empresa_id) then
+    return null;
+  end if;
   insert into public.conciliacao_padroes
     (empresa_id, padrao, fornecedor_id, categoria_conta, usos, ultimo_uso)
     values (p_empresa_id, p_padrao, p_fornecedor_id, p_categoria_conta, 1, now())
@@ -312,6 +326,9 @@ end $$;
 
 -- Saída sem conta a pagar: cria conta + parcela única já paga + vínculo, e
 -- guarda a conta em conta_criada_id para o desfazer poder apagá-la.
+-- Fornecedor e responsável chegam da requisição, então revalida os dois
+-- contra a empresa do lançamento antes de gravar — senão a conta a pagar
+-- nasceria com FK apontando para o cadastro de outra empresa do grupo.
 create or replace function public.fn_criar_conta_e_conciliar(
   p_lancamento_id uuid,
   p_descricao text,
@@ -327,6 +344,15 @@ begin
   if v_lanc.tipo <> 'saida' then raise exception 'Só saídas viram conta a pagar aqui.'; end if;
   if v_lanc.status = 'conciliado' then raise exception 'Este lançamento já está conciliado.'; end if;
   if p_fornecedor_id is null then raise exception 'Escolha o fornecedor.'; end if;
+  if not exists (select 1 from public.fornecedores
+                  where id = p_fornecedor_id and empresa_id = v_lanc.empresa_id) then
+    raise exception 'Fornecedor de outra empresa.';
+  end if;
+  if p_responsavel_id is not null and not exists (
+       select 1 from public.funcionarios
+        where id = p_responsavel_id and empresa_id = v_lanc.empresa_id) then
+    raise exception 'Responsável de outra empresa.';
+  end if;
 
   insert into public.contas_a_pagar
     (descricao, categoria_conta, fornecedor_id, valor_total, responsavel_id, empresa_id)
