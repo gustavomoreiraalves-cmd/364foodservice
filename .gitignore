@@ -41,6 +41,26 @@ htmlcov/
 # Certificados digitais e chaves — NUNCA versionar
 *.p12
 *.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+*.der
+
+# Documentos financeiros e fiscais reais — extratos, faturas, NF-e baixadas.
+# Contêm dados bancarios e PII de terceiros; ficam so na maquina/Drive.
+docs/extratos/
+docs/faturas/
+extratos/
+*.ofx
+*.ofc
+*.qfx
+*.retorno
+*.RET
+
+# Exceção: sistema-364-web/lib/extratos/ contém código de parsing, não dados
+!sistema-364-web/lib/extratos/
+!sistema-364-web/lib/extratos/**
 
 # Node & Next.js
 node_modules/
