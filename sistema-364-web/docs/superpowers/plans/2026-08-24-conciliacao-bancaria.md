@@ -3889,8 +3889,11 @@ export default function AssociarFatura({ lancamento, empresaId, onMudou }) {
         // com confirmação explícita.
         if (!forcar && /não bate/i.test(j.error || '')) {
           if (confirm(`${j.error}\n\nBaixar as parcelas da fatura assim mesmo?`)) {
-            setOcupado(false);
-            return associar(true);
+            // `await` aqui não é enfeite: sem ele, o `finally` desta chamada
+            // roda antes de a requisição forçada responder e reabilita o botão
+            // no meio da escrita, que é a janela onde um clique duplo dispara
+            // uma segunda chamada sem `forcar`.
+            return await associar(true);
           }
           return;
         }
