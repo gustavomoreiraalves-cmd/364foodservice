@@ -368,6 +368,28 @@ export async function restaurarNoContainer({ nome, porta, senha, arquivo, log })
     '-e', `FIREBIRD_ROOT_PASSWORD=${senha}`,
     '-p', `127.0.0.1:${porta}:3050`, IMAGEM], { stdio: ['ignore', 'ignore', 'inherit'] });
   await esperarPorta(porta, 120000);
+  // A porta abrir não significa que o entrypoint já criou o SYSDBA com a
+  // senha passada — há uma janela em que o gbak falha com "user name and
+  // password are not defined". Prova de vida com autenticação antes de
+  // restaurar, com tentativas espaçadas.
+  // O isql abaixo aponta para um alias que nem existe ("employee"): se a
+  // resposta for erro de arquivo, o login FUNCIONOU (falhou depois de
+  // autenticar); só "user name and password are not defined" significa que o
+  // SYSDBA ainda não está pronto.
+  for (let tentativa = 1; ; tentativa++) {
+    let stderrTexto = '';
+    try {
+      execFileSync('docker', ['exec', nome, 'isql',
+        '-user', 'SYSDBA', '-password', senha, '-q', 'employee', '-ch', 'UTF8'],
+        { input: 'quit;', stdio: ['pipe', 'ignore', 'pipe'], timeout: 15000 });
+      break;
+    } catch (e) {
+      stderrTexto = String(e.stderr || e.message || '');
+      if (!/user name and password/i.test(stderrTexto)) break; // autenticou (ou outro erro que o gbak vai reportar melhor)
+      if (tentativa >= 12) throw new Error('Firebird do container não aceitou login em 60 s');
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
   execFileSync('docker', ['cp', arquivo, `${nome}:/tmp/backup.fbk`], { stdio: ['ignore', 'ignore', 'inherit'] });
   log('  restaurando com gbak (alguns minutos)...');
   execFileSync('docker', ['exec', nome, 'gbak', '-c', '-user', 'SYSDBA', '-password', senha,
