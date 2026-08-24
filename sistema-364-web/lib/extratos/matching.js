@@ -38,9 +38,9 @@ export function candidatosParaLancamento(lancamento, parcelas, padrao) {
 
   let candidatos = [];
   for (const p of parcelas) {
-    if (!valorCasa(lancamento.valor, p.valor)) continue;
+    if (!p || !valorCasa(lancamento.valor, p.valor)) continue;
     const dias = diferencaDias(lancamento.data, p.vencimento);
-    if (Math.abs(dias) > JANELA_DIAS) continue;
+    if (Number.isNaN(dias) || Math.abs(dias) > JANELA_DIAS) continue;
     candidatos.push({ parcela: p, dias });
   }
 
@@ -74,7 +74,7 @@ export function escolherSugestao(lancamento, parcelas, padrao) {
   const candidatos = candidatosParaLancamento(lancamento, parcelas, padrao);
   if (!candidatos.length) return null;
   const [primeiro, segundo] = candidatos;
-  if (primeiro.score < LIMIAR_SUGESTAO) return null;
+  if (!Number.isFinite(primeiro.score) || primeiro.score < LIMIAR_SUGESTAO) return null;
   if (segundo && primeiro.score - segundo.score < MARGEM_SUGESTAO) return null;
   return { parcelaId: primeiro.parcelaId, score: primeiro.score };
 }

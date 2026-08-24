@@ -91,3 +91,28 @@ test('candidato distante da data não alcança o limiar sozinho', () => {
   const r = escolherSugestao(saida, [parcela('p1', 750, '2026-08-17')], null);
   assert.equal(r, null, 'vencimento a 7 dias sem padrão é fraco demais para sugerir');
 });
+
+test('vencimento ilegível não vira candidato nem sugestão', () => {
+  const r = candidatosParaLancamento(saida, [parcela('p1', 750, 'data-inválida')], null);
+  assert.equal(r.length, 0, 'data ilegível deve descartar o candidato');
+  const sugestao = escolherSugestao(saida, [parcela('p1', 750, 'data-inválida')], null);
+  assert.equal(sugestao, null, 'data ilegível não deve gerar sugestão');
+});
+
+test('lancamento.data ilegível não vira candidato nem sugestão', () => {
+  const lancamentoInvalido = { ...saida, data: 'data-inválida' };
+  const r = candidatosParaLancamento(lancamentoInvalido, [parcela('p1', 750, '2026-08-10')], null);
+  assert.equal(r.length, 0, 'data de lançamento ilegível deve descartar o candidato');
+  const sugestao = escolherSugestao(lancamentoInvalido, [parcela('p1', 750, '2026-08-10')], null);
+  assert.equal(sugestao, null, 'data de lançamento ilegível não deve gerar sugestão');
+});
+
+test('elemento null no meio da lista de parcelas não derruba a função', () => {
+  const r = candidatosParaLancamento(saida, [
+    null,
+    parcela('p1', 750, '2026-08-10'),
+    undefined,
+  ], null);
+  assert.equal(r.length, 1, 'candidato válido deve ser encontrado mesmo com null/undefined na lista');
+  assert.equal(r[0].parcelaId, 'p1');
+});
