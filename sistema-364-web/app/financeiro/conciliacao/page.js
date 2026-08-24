@@ -7,6 +7,7 @@ import { chamarApi } from '../../../lib/extratos/cliente';
 import AppShell from '../../../components/AppShell';
 import ImportarExtrato from '../../../components/ImportarExtrato';
 import AcoesConciliacao from '../../../components/AcoesConciliacao';
+import AssociarFatura from '../../../components/AssociarFatura';
 import { useEmpresaAtual } from '../../../lib/empresa';
 
 const TAG_IMPORTACAO = {
@@ -41,6 +42,7 @@ function Conteudo() {
   const [loading, setLoading] = useState(true);
   const [filtroStatus, setFiltroStatus] = useState('');
   const [mostrarEntradas, setMostrarEntradas] = useState(false);
+  const [confirmandoLote, setConfirmandoLote] = useState(false);
 
   async function carregarBase() {
     if (!empresaAtual) return;
@@ -198,23 +200,28 @@ function Conteudo() {
             return (
               <div className="banner info" style={{ marginTop: 10 }}>
                 {sugeridos.length} lançamento(s) já vieram com sugestão do sistema.
-                <button className="btn small" style={{ marginLeft: 10 }}
+                <button className="btn small" style={{ marginLeft: 10 }} disabled={confirmandoLote}
                   onClick={async () => {
                     if (!confirm(`Confirmar as ${sugeridos.length} sugestões?`)) return;
-                    const r = await chamarApi('/api/financeiro/conciliacao', {
-                      method: 'POST',
-                      body: JSON.stringify({ acao: 'confirmar-lote',
-                        lancamentoIds: sugeridos.map(l => l.id) }),
-                    });
-                    const j = await r.json();
-                    if (!r.ok) { alert(j.error || 'Não foi possível confirmar em lote.'); return; }
-                    await recarregar();
-                    if (j.falhas?.length) {
-                      alert(`${j.confirmados} confirmado(s). ${j.falhas.length} ficaram de fora:\n`
-                        + j.falhas.map(f => '· ' + f.erro).join('\n'));
+                    setConfirmandoLote(true);
+                    try {
+                      const r = await chamarApi('/api/financeiro/conciliacao', {
+                        method: 'POST',
+                        body: JSON.stringify({ acao: 'confirmar-lote',
+                          lancamentoIds: sugeridos.map(l => l.id) }),
+                      });
+                      const j = await r.json();
+                      if (!r.ok) { alert(j.error || 'Não foi possível confirmar em lote.'); return; }
+                      await recarregar();
+                      if (j.falhas?.length) {
+                        alert(`${j.confirmados} confirmado(s). ${j.falhas.length} ficaram de fora:\n`
+                          + j.falhas.map(f => '· ' + f.erro).join('\n'));
+                      }
+                    } finally {
+                      setConfirmandoLote(false);
                     }
                   }}>
-                  Confirmar {sugeridos.length} sugestões
+                  {confirmandoLote ? 'Confirmando…' : `Confirmar ${sugeridos.length} sugestões`}
                 </button>
               </div>
             );
@@ -242,6 +249,11 @@ function Conteudo() {
                       <AcoesConciliacao lancamento={l} empresaId={empresaAtual?.id}
                         fornecedores={fornecedores} funcionarios={funcionarios}
                         onMudou={recarregar} />
+                      {selecionada.tipo === 'extrato' && l.tipo === 'saida'
+                        && l.status !== 'conciliado' && (
+                        <AssociarFatura lancamento={l} empresaId={empresaAtual?.id}
+                          onMudou={recarregar} />
+                      )}
                     </td>
                   </tr>
                 ))}
