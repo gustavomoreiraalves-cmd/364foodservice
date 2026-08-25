@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
+import ContaBancariaModal from '../../../components/ContaBancariaModal';
 import { useEmpresaAtual } from '../../../lib/empresa';
 
 // Sugestões, não a lista fechada: o campo é texto livre. Cartão de crédito é o
@@ -28,6 +29,7 @@ function Conteudo() {
   const [form, setForm] = useState(VAZIO());
   const [salvando, setSalvando] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editando, setEditando] = useState(null);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -134,7 +136,8 @@ function Conteudo() {
               )}
               {lista.map(c => (
                 <tr key={c.id}>
-                  <td>{c.nome}</td>
+                  <td onClick={() => setEditando(c)} title="Clique para editar esta conta"
+                    style={{ cursor: 'pointer', textDecoration: 'underline' }}>{c.nome}</td>
                   <td>{c.instituicao}</td>
                   <td>{c.tipo === 'cartao_credito' ? 'Cartão de crédito' : 'Conta corrente'}</td>
                   <td>{c.agencia || '—'}</td>
@@ -153,6 +156,15 @@ function Conteudo() {
           </table>
         </div>
       </div>
+
+      {editando && (
+        <ContaBancariaModal
+          conta={editando}
+          sugestoes={instituicoesSugeridas}
+          aoSalvar={() => { setEditando(null); carregar(); }}
+          aoCancelar={() => setEditando(null)}
+        />
+      )}
     </>
   );
 }

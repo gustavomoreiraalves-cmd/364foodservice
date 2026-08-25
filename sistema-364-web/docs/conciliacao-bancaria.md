@@ -42,6 +42,15 @@ confirmação antes de baixar qualquer parcela.
 Tela: **Financeiro › Conciliação Bancária**. Antes do primeiro arquivo,
 cadastre a conta (ou o cartão) em **Financeiro › Contas Bancárias**.
 
+Para corrigir uma conta já cadastrada, clique no **nome** dela na tabela: abre
+uma janela de edição com os mesmos campos. Ligar e desligar a conta continua
+no botão Desativar/Reativar da própria linha.
+
+Trocar o **tipo** de uma conta que já tem importações é permitido e não mexe no
+que já passou — as importações guardam o próprio tipo, e o que já foi conciliado
+fica como está. O que muda é só dali para a frente: a conta passa a aparecer no
+outro seletor na hora de importar. A janela avisa isso quando você troca.
+
 O campo Instituição aceita qualquer texto. Ele sugere os seis bancos do grupo
 — Sicoob, Cresol, Sicredi, Banco do Brasil, Santander e Bradesco — mais tudo
 que você já cadastrou antes nessa empresa, mas você pode digitar outro nome à
