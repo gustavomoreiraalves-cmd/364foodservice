@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo } from '../../../../../lib/pontoServer';
+import { garantirEmpresa } from '../../../../../lib/autorizacao';
 import { validarConfiguracaoEmissao, serieConflita, MODELOS_EMISSAO, AMBIENTES_EMISSAO } from '../../../../../lib/emissaoFiscal';
 import { cifrarCsc } from '../../../../../lib/fiscalSecretServer';
 
 export const runtime = 'nodejs';
 
 async function empresaOu404(sb, id) {
-  const { data } = await sb.from('empresas').select('id, empregador_id').eq('id', id).maybeSingle();
+  const { data, error } = await sb.from('empresas').select('id, empregador_id').eq('id', id).maybeSingle();
+  // Erro de banco vira exceção (500 lá no chamador) em vez de virar silenciosamente
+  // "Empresa não encontrada" (404) — mesmo raciocínio de certificadoValido() abaixo.
+  if (error) throw new Error(`Falha ao verificar empresa: ${error.message}`);
   return data || null;
 }
 
@@ -43,6 +47,9 @@ async function montarResposta(sb, empresa) {
     const numeracao = (numeracoes || []).find(n => n.modelo === c.modelo && n.ambiente === c.ambiente && n.serie === c.serie);
     return {
       modelo: c.modelo, ativo: c.ativo, ambiente: c.ambiente, serie: c.serie,
+      // csc_id não é segredo (só o token é) — precisa voltar pra tela poder
+      // reexibir o campo "Identificador do CSC" já preenchido.
+      cscId: c.csc_id,
       cscConfigurado: Boolean(c.csc_token_cifrado),
       ultimoNumero: numeracao ? numeracao.ultimo_numero : null,
     };
@@ -51,11 +58,16 @@ async function montarResposta(sb, empresa) {
 }
 
 export async function GET(request, { params }) {
-  const { sb, erro } = await autorizarModulo(request, 'fiscal');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'fiscal');
   if (erro) return erro;
-  const empresa = await empresaOu404(sb, params.id);
-  if (!empresa) return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
   try {
+    await garantirEmpresa(sb, user, isAdmin, params.id);
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
+  try {
+    const empresa = await empresaOu404(sb, params.id);
+    if (!empresa) return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
     return NextResponse.json(await montarResposta(sb, empresa));
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -63,9 +75,19 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
-  const { sb, erro } = await autorizarModulo(request, 'fiscal');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'fiscal');
   if (erro) return erro;
-  const empresa = await empresaOu404(sb, params.id);
+  try {
+    await garantirEmpresa(sb, user, isAdmin, params.id);
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
+  let empresa;
+  try {
+    empresa = await empresaOu404(sb, params.id);
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
   if (!empresa) return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
   if (!empresa.empregador_id) {
     return NextResponse.json({ error: 'Esta marca não tem pessoa jurídica vinculada. Vincule em /empresas antes.' }, { status: 400 });
@@ -126,12 +148,23 @@ export async function PUT(request, { params }) {
     const linha = {
       empresa_id: empresa.id, modelo: entrada.modelo, ambiente: entrada.ambiente,
       ativo: Boolean(entrada.ativo), serie: entrada.serie,
-      csc_id: entrada.modelo === '65' ? (entrada.cscId || null) : null,
     };
-    // CSC token só é recifrado se veio valor novo — campo vazio no PUT
-    // mantém o cifrado atual, mesmo comportamento do certificado A1.
+    // CSC ID e CSC token só são regravados se vier valor novo — campo vazio no
+    // PUT mantém o valor atual, mesmo comportamento do certificado A1. Omitir a
+    // chave do objeto (em vez de mandar null) é o que faz o upsert não tocar na
+    // coluna: com onConflict, uma chave ausente do payload preserva o valor já
+    // gravado na linha em conflito.
+    if (entrada.modelo === '65' && entrada.cscId) {
+      linha.csc_id = entrada.cscId;
+    }
     if (entrada.modelo === '65' && entrada.cscToken) {
-      linha.csc_token_cifrado = cifrarCsc(Buffer.from(entrada.cscToken, 'utf8'));
+      try {
+        linha.csc_token_cifrado = cifrarCsc(Buffer.from(entrada.cscToken, 'utf8'));
+      } catch (e) {
+        // Chave ausente/malformada (CSC_ENCRYPTION_KEY): a mensagem já diz o
+        // que configurar — não deixamos virar exceção não tratada (500 opaco).
+        return NextResponse.json({ error: e.message }, { status: 500 });
+      }
     }
 
     const { error } = await sb.from('empresas_emissao_fiscal')

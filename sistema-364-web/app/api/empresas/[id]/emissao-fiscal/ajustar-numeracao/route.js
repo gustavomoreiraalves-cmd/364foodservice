@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo } from '../../../../../../lib/pontoServer';
+import { garantirEmpresa } from '../../../../../../lib/autorizacao';
 import { podeAjustarNumero } from '../../../../../../lib/emissaoFiscal';
 
 export const runtime = 'nodejs';
 
 export async function POST(request, { params }) {
-  const { sb, user, erro } = await autorizarModulo(request, 'fiscal');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'fiscal');
   if (erro) return erro;
+
+  try {
+    await garantirEmpresa(sb, user, isAdmin, params.id);
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
 
   const { data: empresa, error: erroEmpresa } = await sb.from('empresas')
     .select('id, empregador_id').eq('id', params.id).maybeSingle();
