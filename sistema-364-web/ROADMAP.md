@@ -279,8 +279,8 @@ credenciadora (v2 grava líquido = bruto).
 
 - Importação de extrato e fatura em PDF (Claude API, modelo `claude-opus-5`
   por padrão), OFX e CSV, com dedupe por `(empresa_id, hash_dedupe)` e
-  conferência aritmética do saldo — esta última só cobre PDF de fato, porque
-  OFX e CSV não trazem saldo inicial no arquivo.
+  conferência aritmética (saldo do extrato, total da fatura) — só cobre PDF
+  de fato, porque OFX e CSV não trazem esses números no arquivo.
 - Conciliação de saídas com as parcelas do contas a pagar, N:N, atômica em
   funções Postgres; criação de conta a pagar direto da linha do extrato.
 - Aprendizado por padrão (`descricao_normalizada -> fornecedor + categoria`),

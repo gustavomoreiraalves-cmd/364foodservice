@@ -17,10 +17,22 @@ export default function AssociarFatura({ lancamento, empresaId, onMudou }) {
   async function abrir() {
     setOcupado(true);
     try {
+      // 100 (não 24) e ordenado pelo período de cada fatura, não por quando
+      // foi importada: o colaborador procura "a fatura de agosto", e com
+      // vários cartões um limite baixo ordenado por created_at esgotava em
+      // poucos meses — a fatura mais antiga sumia da lista sem aviso nenhum,
+      // e esse dropdown é o único caminho da tela para baixar o pagamento.
+      // nullsFirst:false joga fatura sem período preenchido (extração que não
+      // achou a data) para o fim, não para o topo; created_at desempata.
+      // Sem filtro por cartão de propósito: o débito do pagamento vem do
+      // extrato da conta corrente e não carrega qual cartão foi pago — cada
+      // opção mostra o nome da conta para o colaborador escolher à mão.
       const { data } = await supabase.from('extrato_importacoes')
         .select('id, periodo_inicio, periodo_fim, total_lancamentos, conciliados, contas_bancarias(nome)')
         .eq('empresa_id', empresaId).eq('tipo', 'fatura_cartao')
-        .order('created_at', { ascending: false }).limit(24);
+        .order('periodo_fim', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(100);
       setFaturas(data || []);
       setAberto(true);
     } finally {
