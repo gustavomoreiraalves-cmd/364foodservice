@@ -645,7 +645,8 @@ function FichaTecnica({
         <div>
           <label htmlFor="ft-qtd">Quantidade por unidade</label>
           <input id="ft-qtd" type="number" step="0.001" required value={item.quantidade}
-                 onChange={e => setItem({ ...item, quantidade: e.target.value })} />
+                 onChange={e => setItem({ ...item, quantidade: e.target.value })}
+                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onAdicionar(); } }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end' }}>
           <button className="btn secondary" type="button" onClick={onAdicionar}>Adicionar</button>
@@ -682,7 +683,8 @@ function FichaTecnica({
                 {f.permitido && (
                   <>
                     <input type="number" min="1" style={{ width: 78 }} placeholder="Prazo" value={f.valor}
-                           onChange={e => setF({ valor: e.target.value })} aria-label="Prazo de validade" />
+                           onChange={e => setF({ valor: e.target.value })} aria-label="Prazo de validade"
+                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onSalvarRegra(c.id); } }} />
                     <select value={f.unidade} onChange={e => setF({ unidade: e.target.value })}
                             style={{ width: 92 }} aria-label="Unidade do prazo">
                       <option value="dias">dias</option><option value="horas">horas</option>
