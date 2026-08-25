@@ -6,7 +6,7 @@ import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import Icone from '../../components/Icone';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { camposDoFormulario, mensagemAoAlternarAtivo } from '../../lib/cadastro';
+import { camposDoFormulario, mensagemAoAlternarAtivo, camposParaDuplicar } from '../../lib/cadastro';
 import ProdutoFiscal from '../../components/ProdutoFiscal';
 import ConfiguracaoFiscalModal from '../../components/ConfiguracaoFiscalModal';
 import { pendenciasFiscaisProduto } from '../../lib/fiscal';
@@ -91,6 +91,8 @@ function Conteudo() {
   const [regrasTributarias, setRegrasTributarias] = useState([]);
   const [cfops, setCfops] = useState([]);
   const [configAberta, setConfigAberta] = useState(null); // { grupoId } ou { grupoId: null } para nova
+  const [duplicarAberto, setDuplicarAberto] = useState(false);
+  const [duplicarFichaDe, setDuplicarFichaDe] = useState(null);
   const [fiscalDisponivel, setFiscalDisponivel] = useState(false);
   const [usuarios, setUsuarios] = useState({});
   // Sem esta trava, `proximoCodigoProduto` lê a contagem antes de qualquer
@@ -194,6 +196,17 @@ function Conteudo() {
     setAba('geral');
   }
 
+  function duplicar(origem, opcoes) {
+    const vazio = { ...PROD_VAZIO, ...PROD_FISCAL_VAZIO };
+    const campos = camposParaDuplicar(origem, vazio, Object.keys(PROD_FISCAL_VAZIO), opcoes);
+    setFormProd(campos);
+    setSelecionado(null);
+    setCriando(true);
+    setAba('geral');
+    setDuplicarFichaDe(opcoes.ficha ? origem.id : null);
+    setDuplicarAberto(false);
+  }
+
   function fechar() {
     setSelecionado(null);
     setCriando(false);
@@ -242,6 +255,21 @@ function Conteudo() {
       }
       if (error) { alert('Erro ao salvar: ' + error.message); return; }
       await carregar();
+      if (novoId && duplicarFichaDe) {
+        const origemItens = fichas.filter(f => f.produto_id === duplicarFichaDe);
+        if (origemItens.length) {
+          await supabase.from('ficha_tecnica').insert(
+            origemItens.map(f => ({
+              produto_id: novoId,
+              materia_prima_id: f.materia_prima_id,
+              quantidade: f.quantidade,
+              empresa_id: empresaAtual.id,
+            }))
+          );
+          await carregar();
+        }
+        setDuplicarFichaDe(null);
+      }
       // Depois de criar, o produto continua aberto: quem cadastrou quase sempre
       // vai direto preencher a ficha técnica e o bloco fiscal.
       if (novoId) { setSelecionado(novoId); setCriando(false); }
@@ -540,6 +568,9 @@ function Conteudo() {
               <div className="modal-foot">
                 {produtoSelecionado && (
                   <>
+                    <button className="btn secondary small" type="button" onClick={() => setDuplicarAberto(true)}>
+                      <Icone nome="copiar" tamanho={13} /> Duplicar
+                    </button>
                     <button className="btn secondary small" type="button"
                             onClick={() => alternarAtivo(produtoSelecionado)}>
                       {produtoSelecionado.ativo === false ? 'Reativar' : 'Desativar'}
@@ -578,6 +609,14 @@ function Conteudo() {
           }}
         />
       )}
+
+      {duplicarAberto && produtoSelecionado && (
+        <DuplicarProdutoModal
+          produto={produtoSelecionado}
+          onFechar={() => setDuplicarAberto(false)}
+          onConfirmar={opcoes => duplicar(produtoSelecionado, opcoes)}
+        />
+      )}
     </>
   );
 }
@@ -597,6 +636,38 @@ function CabecalhoProduto({ produto, usuarios }) {
         <> · Última alteração: {fmtDataHora(produto.updated_at)}{nomeUsuario ? ' por ' + nomeUsuario : ''}</>
       )}
     </span>
+  );
+}
+
+function DuplicarProdutoModal({ produto, onFechar, onConfirmar }) {
+  const [fiscal, setFiscal] = useState(true);
+  const [ficha, setFicha] = useState(true);
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onFechar(); }}>
+      <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="duplicar-titulo">
+        <div className="modal-head">
+          <h3 id="duplicar-titulo">Duplicar "{produto.nome}"</h3>
+          <button className="btn secondary small" type="button" onClick={onFechar} aria-label="Fechar">
+            <Icone nome="fechar" tamanho={14} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <p className="ajuda" style={{ marginTop: 0 }}>Informações principais são sempre copiadas.</p>
+          <label className="check-line">
+            <input type="checkbox" checked={fiscal} onChange={e => setFiscal(e.target.checked)} />
+            Configuração fiscal
+          </label>
+          <label className="check-line">
+            <input type="checkbox" checked={ficha} onChange={e => setFicha(e.target.checked)} />
+            Ficha técnica
+          </label>
+        </div>
+        <div className="modal-foot">
+          <button className="btn secondary" type="button" onClick={onFechar}>Cancelar</button>
+          <button className="btn" type="button" onClick={() => onConfirmar({ fiscal, ficha })}>Duplicar</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

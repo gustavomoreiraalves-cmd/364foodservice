@@ -21,6 +21,19 @@ export function camposDoFormulario(registro, formVazio) {
   return saida;
 }
 
+// Usado por "Duplicar produto": monta o formulário do produto novo a partir
+// de um produto existente, respeitando o que o usuário marcou pra copiar.
+// Nunca copia id/codigo/created_at/ativo_fiscal/sugerido_automaticamente/
+// revisado_em/revisado_por_id/updated_at/atualizado_por_id — são específicos
+// do registro original, não fazem sentido num clone.
+export function camposParaDuplicar(origem, formVazio, camposFiscaisChaves, opcoes) {
+  const base = camposDoFormulario(origem, formVazio);
+  if (!opcoes.fiscal) {
+    for (const chave of camposFiscaisChaves) base[chave] = formVazio[chave];
+  }
+  return base;
+}
+
 // O botão Desativar é o único lugar onde o estado pré-migração fica visível para
 // o operador: sem a atualização 26 o PostgREST devolve PGRST204 ("Could not find
 // the 'ativo' column of 'clientes' in the schema cache") ou 42703, em inglês e
