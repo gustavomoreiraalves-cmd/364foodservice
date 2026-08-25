@@ -14,7 +14,7 @@ const FORM_VAZIO = {
   nome: '', cnpj: '', tipo: 'Revenda', contato: '', telefone: '',
   // Bloco <dest> da NF-e (atualização 36). Sem ele não se emite nota para
   // este cliente, por mais completo que esteja o cadastro comercial.
-  tipo_pessoa: 'J', cpf: '', ie: '', ind_ie_dest: '', consumidor_final: null,
+  tipo_pessoa: 'J', cpf: '', ie: '', ind_ie_dest: null, consumidor_final: null,
   logradouro: '', numero: '', complemento: '', bairro: '',
   codigo_municipio_ibge: '', municipio: '', uf: '', cep: '', email_nfe: '',
 };
