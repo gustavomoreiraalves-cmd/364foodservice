@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 import {
   SEM_GTIN, soDigitos, gtinValido, cestsDoNcm, pendenciasFiscaisProduto,
   ORIGENS_MERCADORIA, UNIDADES_PADRAO,
@@ -14,9 +15,11 @@ import Icone from './Icone';
 const AVISO_SEM_MIGRACAO = 'O cadastro fiscal precisa da atualização 36 aplicada no banco. '
   + 'Enquanto ela não roda, os campos abaixo ficam indisponíveis.';
 
-export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, editando, onLiberar, naturezas = [], regras = [], onAbrirConfiguracao }) {
+export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, editando, onLiberar, naturezas = [], regras = [], onAbrirConfiguracao, produtos = [], produtoAtualId = null }) {
   const set = campos => setForm({ ...form, ...campos });
   const { ncms = [], cests = [], unidades = [], grupos = [] } = tabelas || {};
+  const [buscaCopia, setBuscaCopia] = useState('');
+  const [produtoParaCopiar, setProdutoParaCopiar] = useState(null);
 
   if (!disponivel) return <p className="muted" style={{ fontSize: 12 }}>{AVISO_SEM_MIGRACAO}</p>;
 
@@ -226,7 +229,67 @@ export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, edit
             Só passa a ser exigido do Simples Nacional em 04/01/2027. Deixe em branco por enquanto.
           </p>
         </div>
+        <div className="secao">Copiar de outro produto</div>
+        <div className="largo">
+          <input
+            placeholder="Buscar produto de referência por nome ou código…"
+            value={buscaCopia}
+            onChange={e => setBuscaCopia(e.target.value)}
+          />
+          {buscaCopia.trim() && (
+            <ul className="lista-sugestoes">
+              {(produtos || [])
+                .filter(p => p.id !== produtoAtualId)
+                .filter(p => p.nome.toLowerCase().includes(buscaCopia.toLowerCase())
+                  || (p.codigo || '').toLowerCase().includes(buscaCopia.toLowerCase()))
+                .slice(0, 8)
+                .map(p => (
+                  <li key={p.id}>
+                    <button type="button" className="btn secondary small"
+                            onClick={() => setProdutoParaCopiar(p)}>
+                      {p.codigo} — {p.nome}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
       </div>
+
+      {produtoParaCopiar && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setProdutoParaCopiar(null); }}>
+          <div className="modal-box" role="dialog" aria-modal="true">
+            <div className="modal-head"><h3>Copiar configuração fiscal</h3></div>
+            <div className="modal-body">
+              <p>Copiar de <b>{produtoParaCopiar.codigo} — {produtoParaCopiar.nome}</b>?</p>
+              <p className="ajuda">
+                Serão importados: NCM, CEST, GTIN, origem, unidade tributável, peso, escala de produção,
+                configuração tributária (grupo) e demais campos desta aba. Nada é salvo até você clicar
+                em "Salvar alterações".
+              </p>
+            </div>
+            <div className="modal-foot">
+              <button className="btn secondary" type="button" onClick={() => setProdutoParaCopiar(null)}>Cancelar</button>
+              <button className="btn" type="button" onClick={() => {
+                // Descarta tudo que não é fiscal (identidade do registro de origem +
+                // campos da aba Geral, que não fazem parte desta cópia) e tudo que é
+                // específico da liberação/sugestão do produto de origem — nunca deve
+                // "herdar" que o produto de origem já foi liberado para emissão.
+                const {
+                  id, codigo, created_at, updated_at, atualizado_por_id, empresa_id,
+                  nome, categoria, unidade, preco_venda, custo_unitario, validade_dias,
+                  producao_interna, rastreado,
+                  ativo_fiscal, sugerido_automaticamente, revisado_em, revisado_por_id,
+                  ...camposFiscais
+                } = produtoParaCopiar;
+                set(camposFiscais);
+                setProdutoParaCopiar(null);
+                setBuscaCopia('');
+              }}>Copiar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
