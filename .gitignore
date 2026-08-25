@@ -82,3 +82,14 @@ logs/
 
 # Docker
 .docker-compose.override.yml
+
+# Perfil do navegador do Opensquad: 8,7 MB com cookies de sessão das contas
+# usadas nas investigações. O CLAUDE.md já dizia que era ignorado; não estava.
+_opensquad/_browser_profile/
+**/_browser_profile/
+
+# Artefatos das skills de design e capturas de tela de verificação
+.impeccable/
+.playwright-mcp/
+sistema-364-web/public/_inspecao.html
+sistema-364-web/public/_globals.css
