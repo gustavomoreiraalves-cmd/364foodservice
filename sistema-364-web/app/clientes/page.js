@@ -9,9 +9,17 @@ import { useEmpresaAtual } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
 import { filtrarRegistros } from '../../lib/listaCadastro';
 import { pendenciasFiscaisCliente, soDigitos } from '../../lib/fiscal';
+import { formatarCnpj, cnpjValido } from '../../lib/cnpj';
+import { formatarCpf } from '../../lib/ponto';
+import { formatarTelefone, capitalizarNome } from '../../lib/formatacao';
+
+// Sem fonte nacional gratuita para inscrição estadual (SINTEGRA é por estado
+// e a consulta pública do RO exige captcha, não dá pra automatizar) — o botão
+// abaixo só leva o usuário até o portal para conferir manualmente.
+const URL_SEFIN_RO = 'https://portalcontribuinte.sefin.ro.gov.br/Publico/parametropublica.jsp';
 
 const FORM_VAZIO = {
-  nome: '', cnpj: '', tipo: 'Revenda', contato: '', telefone: '',
+  nome: '', nome_fantasia: '', cnpj: '', tipo: 'Revenda', contato: '', telefone: '',
   // Bloco <dest> da NF-e (atualização 36). Sem ele não se emite nota para
   // este cliente, por mais completo que esteja o cadastro comercial.
   tipo_pessoa: 'J', cpf: '', ie: '', ind_ie_dest: '', consumidor_final: null,
@@ -37,6 +45,10 @@ function Conteudo() {
   const [mostrarInativos, setMostrarInativos] = useState(false);
   const [criando, setCriando] = useState(false);
   const [fiscalDisponivel, setFiscalDisponivel] = useState(true);
+  const [consultandoCnpj, setConsultandoCnpj] = useState(false);
+  const [erroConsultaCnpj, setErroConsultaCnpj] = useState('');
+  const [situacaoCnpj, setSituacaoCnpj] = useState('');
+  const [cnpjCopiado, setCnpjCopiado] = useState(false);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -68,9 +80,45 @@ function Conteudo() {
   const pendencias = fiscalDisponivel ? pendenciasFiscaisCliente(form) : [];
   const aberto = criando || !!editando;
 
-  function abrirNovo() { cancelarEdicao(); setCriando(true); }
-  function fechar() { cancelarEdicao(); setCriando(false); }
-  function abrir(c) { setCriando(false); iniciarEdicao(c); }
+  function abrirNovo() { cancelarEdicao(); setCriando(true); limparConsultaCnpj(); }
+  function fechar() { cancelarEdicao(); setCriando(false); limparConsultaCnpj(); }
+  function abrir(c) { setCriando(false); iniciarEdicao(c); limparConsultaCnpj(); }
+  function limparConsultaCnpj() { setErroConsultaCnpj(''); setSituacaoCnpj(''); setCnpjCopiado(false); }
+
+  // O formulário da SEFIN-RO é POST com token CSRF por sessão e captcha —
+  // não existe link que abra a página já preenchida. O que dá pra fazer é
+  // copiar o CNPJ pra área de transferência antes de abrir, pra só colar lá.
+  async function abrirConsultaIe() {
+    // window.open primeiro: depois de um await, alguns navegadores (Safari)
+    // não reconhecem mais o clique como gesto do usuário e bloqueiam o popup.
+    window.open(URL_SEFIN_RO, '_blank', 'noopener,noreferrer');
+    try {
+      await navigator.clipboard.writeText(formatarCnpj(form.cnpj));
+      setCnpjCopiado(true);
+    } catch {
+      setCnpjCopiado(false);
+    }
+  }
+
+  async function consultarCnpj() {
+    setConsultandoCnpj(true);
+    limparConsultaCnpj();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch(`/api/cnpj/${soDigitos(form.cnpj)}`, {
+        headers: { Authorization: `Bearer ${session?.access_token || ''}` },
+      });
+      const dados = await r.json();
+      if (!r.ok) { setErroConsultaCnpj(dados.error || 'Não foi possível consultar o CNPJ.'); return; }
+      const { situacaoCadastral, ...camposForm } = dados;
+      setForm(f => ({ ...f, ...camposForm }));
+      setSituacaoCnpj(situacaoCadastral);
+    } catch {
+      setErroConsultaCnpj('Não foi possível consultar o CNPJ.');
+    } finally {
+      setConsultandoCnpj(false);
+    }
+  }
 
   const COLUNAS = [
     { titulo: 'Nome', principal: true, minimo: 200, render: c => c.nome, textoPuro: c => c.nome },
@@ -79,10 +127,17 @@ function Conteudo() {
       render: c => (c.tipo ? <span className="tag categoria">{c.tipo}</span> : null),
       textoPuro: c => c.tipo || '',
     },
-    { titulo: 'CNPJ / CPF', largura: 132, mono: true, render: c => c.cnpj || c.cpf || null, textoPuro: c => c.cnpj || c.cpf || '' },
+    {
+      titulo: 'CNPJ / CPF', largura: 132, mono: true,
+      render: c => docFormatado(c) || null, textoPuro: c => docFormatado(c),
+    },
     { titulo: 'Município', largura: 130, render: c => (c.municipio ? `${c.municipio}/${c.uf || ''}` : null), textoPuro: c => c.municipio || '' },
     { titulo: 'Contato', largura: 140, render: c => c.contato || null, textoPuro: c => c.contato || '' },
-    { titulo: 'Telefone', largura: 118, mono: true, render: c => c.telefone || null, textoPuro: c => c.telefone || '' },
+    {
+      titulo: 'Telefone', largura: 118, mono: true,
+      render: c => (c.telefone ? formatarTelefone(c.telefone) : null),
+      textoPuro: c => (c.telefone ? formatarTelefone(c.telefone) : ''),
+    },
     {
       titulo: 'Nota', largura: 66, alinhamento: 'center',
       render: c => (!fiscalDisponivel ? null
@@ -148,7 +203,14 @@ function Conteudo() {
                 <div className="largo">
                   <label htmlFor="c-nome">Nome / Razão social</label>
                   <input id="c-nome" required autoFocus value={form.nome}
-                         onChange={e => setForm({ ...form, nome: e.target.value })} />
+                         onChange={e => setForm({ ...form, nome: e.target.value })}
+                         onBlur={e => setForm(f => ({ ...f, nome: capitalizarNome(e.target.value) }))} />
+                </div>
+                <div className="largo">
+                  <label htmlFor="c-fantasia">Nome fantasia</label>
+                  <input id="c-fantasia" value={form.nome_fantasia || ''}
+                         onChange={e => setForm({ ...form, nome_fantasia: e.target.value })}
+                         onBlur={e => setForm(f => ({ ...f, nome_fantasia: capitalizarNome(e.target.value) }))} />
                 </div>
                 <div>
                   <label htmlFor="c-pessoa">Pessoa</label>
@@ -159,12 +221,25 @@ function Conteudo() {
                 </div>
                 <div>
                   <label htmlFor="c-doc">{form.tipo_pessoa === 'F' ? 'CPF' : 'CNPJ'}</label>
-                  <input id="c-doc" inputMode="numeric"
-                         maxLength={form.tipo_pessoa === 'F' ? 11 : 14}
-                         value={form.tipo_pessoa === 'F' ? (form.cpf || '') : (form.cnpj || '')}
-                         onChange={e => setForm(form.tipo_pessoa === 'F'
-                           ? { ...form, cpf: soDigitos(e.target.value) }
-                           : { ...form, cnpj: soDigitos(e.target.value) })} />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input id="c-doc" inputMode="numeric" style={{ flex: 1 }}
+                           value={form.tipo_pessoa === 'F' ? (form.cpf || '') : formatarCnpj(form.cnpj)}
+                           onChange={e => setForm(form.tipo_pessoa === 'F'
+                             ? { ...form, cpf: soDigitos(e.target.value).slice(0, 11) }
+                             : { ...form, cnpj: soDigitos(e.target.value).slice(0, 14) })} />
+                    {form.tipo_pessoa === 'J' && (
+                      <button type="button" className="btn secondary small" disabled={!cnpjValido(form.cnpj) || consultandoCnpj}
+                              onClick={consultarCnpj}>
+                        {consultandoCnpj ? 'Consultando…' : 'Consultar'}
+                      </button>
+                    )}
+                  </div>
+                  {erroConsultaCnpj && <p className="ajuda erro">{erroConsultaCnpj}</p>}
+                  {situacaoCnpj && (
+                    <p className="ajuda">
+                      Situação na Receita: {situacaoCnpj}. Inscrição estadual não vem nessa consulta — confira na SEFIN.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="c-tipo">Tipo de cliente</label>
@@ -178,7 +253,8 @@ function Conteudo() {
                 </div>
                 <div>
                   <label htmlFor="c-fone">Telefone</label>
-                  <input id="c-fone" value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} />
+                  <input id="c-fone" inputMode="numeric" value={formatarTelefone(form.telefone)}
+                         onChange={e => setForm({ ...form, telefone: soDigitos(e.target.value).slice(0, 11) })} />
                 </div>
               </div>
 
@@ -204,8 +280,14 @@ function Conteudo() {
                   {Number(form.ind_ie_dest) === 1 && (
                     <div>
                       <label htmlFor="c-ie">Número da inscrição</label>
-                      <input id="c-ie" inputMode="numeric" value={form.ie || ''}
-                             onChange={e => setForm({ ...form, ie: soDigitos(e.target.value) })} />
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input id="c-ie" inputMode="numeric" style={{ flex: 1 }} value={form.ie || ''}
+                               onChange={e => setForm({ ...form, ie: soDigitos(e.target.value) })} />
+                        <button type="button" className="btn secondary small" onClick={abrirConsultaIe}>
+                          Consultar IE
+                        </button>
+                      </div>
+                      {cnpjCopiado && <p className="ajuda">CNPJ copiado — cole no campo da consulta.</p>}
                     </div>
                   )}
                   <div>
@@ -290,9 +372,15 @@ function Conteudo() {
   );
 }
 
+function docFormatado(c) {
+  if (c.cnpj) return formatarCnpj(c.cnpj);
+  if (c.cpf) return formatarCpf(c.cpf);
+  return '';
+}
+
 // Antes da atualização 36 o cadastro só tinha o recorte comercial; mandar as
 // colunas do bloco dest para um banco sem elas derruba o insert inteiro.
 function recorteComercial(dados) {
-  const { nome, cnpj, tipo, contato, telefone } = dados;
-  return { nome, cnpj, tipo, contato, telefone };
+  const { nome, nome_fantasia, cnpj, tipo, contato, telefone } = dados;
+  return { nome, nome_fantasia, cnpj, tipo, contato, telefone };
 }
