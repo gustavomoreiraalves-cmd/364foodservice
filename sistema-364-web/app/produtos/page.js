@@ -285,15 +285,6 @@ function Conteudo() {
     carregar();
   }
 
-  async function salvarCusto(produtoId, valor) {
-    if (valor === null || valor === undefined) return;
-    const custo = parseCustoUnitario(valor);
-    if (custo === null) { alert(CUSTO_INVALIDO); return; }
-    const { error } = await supabase.from('produtos').update({ custo_unitario: custo }).eq('id', produtoId);
-    if (error) { alert('Erro ao salvar o custo: ' + error.message); return; }
-    carregar();
-  }
-
   async function addItemFicha(produtoId) {
     const item = itemFicha[produtoId] || {};
     if (!item.materia_prima_id) {
@@ -538,10 +529,6 @@ function Conteudo() {
                     setItem={novo => setItemFicha({ ...itemFicha, [selecionado]: novo })}
                     onAdicionar={() => addItemFicha(selecionado)}
                     onRemover={delItemFicha}
-                    onEditarCusto={() => salvarCusto(selecionado, prompt(
-                      'Custo unitário de ' + produtoSelecionado.nome + ' (R$). Custo teórico da ficha: '
-                        + fmtMoney(custoTeorico(selecionado)),
-                      produtoSelecionado.custo_unitario || custoTeorico(selecionado).toFixed(2)))}
                     regras={CONSERVACOES.map(c => ({ ...c, atual: regraDe(selecionado, c.id) }))}
                     regraForm={regraForm}
                     setRegraForm={setRegraForm}
@@ -617,7 +604,7 @@ function CabecalhoProduto({ produto, usuarios }) {
 // pode ser guardado. Fica numa aba própria porque é trabalho de outra pessoa,
 // em outro momento, que o cadastro comercial.
 function FichaTecnica({
-  produto, itens, mps, custoTeorico, item, setItem, onAdicionar, onRemover, onEditarCusto,
+  produto, itens, mps, custoTeorico, item, setItem, onAdicionar, onRemover,
   regras, regraForm, setRegraForm, onSalvarRegra,
 }) {
   const custoCadastrado = Number(produto.custo_unitario) > 0;
@@ -679,10 +666,11 @@ function FichaTecnica({
 
       <div className="banner info" style={{ marginTop: 16 }}>
         Custo em uso: <b>{fmtMoney(custoCadastrado ? Number(produto.custo_unitario) : custoTeorico)}</b>{' '}
-        {custoCadastrado ? '(cadastrado na mão)' : '(calculado pela ficha)'}
-        <button className="btn secondary small" type="button" style={{ marginLeft: 10 }} onClick={onEditarCusto}>
-          <Icone nome="lapis" tamanho={13} /> Editar custo
-        </button>
+        {custoCadastrado ? '(cadastrado na mão, aba Geral)' : '(calculado pela ficha técnica)'}
+        <p className="ajuda" style={{ marginTop: 4 }}>
+          Para usar o custo calculado pela ficha em vez do valor da aba Geral, apague o campo
+          "Custo unitário" na aba Geral e salve.
+        </p>
       </div>
 
       {produto.producao_interna && (
