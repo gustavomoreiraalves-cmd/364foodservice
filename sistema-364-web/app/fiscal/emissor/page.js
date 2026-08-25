@@ -49,6 +49,13 @@ function Conteudo() {
 
   async function carregar(empresaId) {
     setMensagem('');
+    // Resultado de teste de conexão é por marca — nunca deve sobreviver a uma
+    // troca de marca, senão a tag verde de uma marca fica exibida (e parece
+    // válida) para outra que nunca foi testada. Idem para `testando`, senão
+    // uma troca no meio de uma requisição in-flight deixa o botão travado
+    // desabilitado.
+    setConexao({});
+    setTestando('');
     const r = await fetch(`/api/empresas/${empresaId}/emissao-fiscal`, { headers: await cabecalhoAuth() });
     const json = await r.json();
     if (!r.ok) { setMensagem(json.error || 'Falha ao carregar.'); return; }
