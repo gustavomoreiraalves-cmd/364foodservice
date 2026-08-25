@@ -2,12 +2,16 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
+import ContaBancariaModal from '../../../components/ContaBancariaModal';
 import { useEmpresaAtual } from '../../../lib/empresa';
 
-const INSTITUICOES = ['Sicoob', 'Cresol', 'Sicredi', 'Banco do Brasil', 'Santander', 'Bradesco'];
+// Sugestões, não a lista fechada: o campo é texto livre. Cartão de crédito é o
+// caso que mais precisa disso — emissor e bandeira raramente coincidem com o
+// nome do banco onde fica a conta corrente.
+const INSTITUICOES_SUGERIDAS = ['Sicoob', 'Cresol', 'Sicredi', 'Banco do Brasil', 'Santander', 'Bradesco'];
 
 const VAZIO = () => ({
-  nome: '', instituicao: INSTITUICOES[0], tipo: 'conta_corrente', agencia: '', numero_conta: '',
+  nome: '', instituicao: '', tipo: 'conta_corrente', agencia: '', numero_conta: '',
 });
 
 export default function ContasBancariasPage() {
@@ -25,6 +29,7 @@ function Conteudo() {
   const [form, setForm] = useState(VAZIO());
   const [salvando, setSalvando] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editando, setEditando] = useState(null);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -38,14 +43,22 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
+  // As seis do grupo mais o que já foi cadastrado nesta empresa, sem repetir.
+  // Sai da lista que a tabela já carregou — nenhuma consulta a mais.
+  const instituicoesSugeridas = [...new Set([
+    ...INSTITUICOES_SUGERIDAS,
+    ...lista.map(c => c.instituicao).filter(Boolean),
+  ])].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
   async function salvar(e) {
     e.preventDefault();
     if (!form.nome.trim()) { alert('Dê um nome para a conta (ex.: Sicoob principal).'); return; }
+    if (!form.instituicao.trim()) { alert('Diga a instituição (ex.: Bradesco, Nubank PJ, Ailos).'); return; }
     setSalvando(true);
     const { error } = await supabase.from('contas_bancarias').insert([{
       empresa_id: empresaAtual.id,
       nome: form.nome.trim(),
-      instituicao: form.instituicao,
+      instituicao: form.instituicao.trim(),
       tipo: form.tipo,
       agencia: form.agencia.trim() || null,
       numero_conta: form.numero_conta.trim() || null,
@@ -75,10 +88,12 @@ function Conteudo() {
           </div>
           <div>
             <label>Instituição</label>
-            <select value={form.instituicao}
-              onChange={e => setForm({ ...form, instituicao: e.target.value })}>
-              {INSTITUICOES.map(i => <option key={i} value={i}>{i}</option>)}
-            </select>
+            <input list="lista-instituicoes" value={form.instituicao}
+              placeholder="Bradesco, Nubank PJ, Ailos…"
+              onChange={e => setForm({ ...form, instituicao: e.target.value })} />
+            <datalist id="lista-instituicoes">
+              {instituicoesSugeridas.map(i => <option key={i} value={i} />)}
+            </datalist>
           </div>
           <div>
             <label>Tipo</label>
@@ -121,7 +136,8 @@ function Conteudo() {
               )}
               {lista.map(c => (
                 <tr key={c.id}>
-                  <td>{c.nome}</td>
+                  <td onClick={() => setEditando(c)} title="Clique para editar esta conta"
+                    style={{ cursor: 'pointer', textDecoration: 'underline' }}>{c.nome}</td>
                   <td>{c.instituicao}</td>
                   <td>{c.tipo === 'cartao_credito' ? 'Cartão de crédito' : 'Conta corrente'}</td>
                   <td>{c.agencia || '—'}</td>
@@ -140,6 +156,15 @@ function Conteudo() {
           </table>
         </div>
       </div>
+
+      {editando && (
+        <ContaBancariaModal
+          conta={editando}
+          sugestoes={instituicoesSugeridas}
+          aoSalvar={() => { setEditando(null); carregar(); }}
+          aoCancelar={() => setEditando(null)}
+        />
+      )}
     </>
   );
 }
