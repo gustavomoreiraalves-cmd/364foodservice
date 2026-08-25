@@ -17,13 +17,21 @@ function comoObjeto(valor) {
 
 // Ações inline da linha do extrato. Segue o padrão da baixa de parcela em
 // contas a pagar: o formulário abre dentro da própria célula, sem modal.
-export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, funcionarios, onMudou }) {
+export default function AcoesConciliacao({
+  lancamento, empresaId, fornecedores, funcionarios, tipoImportacao, onMudou,
+}) {
   const [aberto, setAberto] = useState('');   // '' | 'associar' | 'criar'
   const [ocupado, setOcupado] = useState(false);
   const [candidatos, setCandidatos] = useState([]);
   const [parcelasPorId, setParcelasPorId] = useState({});
   const [novaConta, setNovaConta] = useState(null);
 
+  const ehLinhaDeFatura = tipoImportacao === 'fatura_cartao';
+
+  // Devolve o corpo da resposta (não um booleano) porque nem toda resposta
+  // 200 é sucesso: confirmar-lote responde 200 com { confirmados, falhas } e
+  // quem chama precisa olhar `falhas`. Null é a falha propriamente dita — os
+  // `if (ok)` de quem chama continuam valendo.
   async function chamar(corpo) {
     setOcupado(true);
     try {
@@ -31,12 +39,12 @@ export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, 
         method: 'POST', body: JSON.stringify(corpo),
       });
       const j = await r.json();
-      if (!r.ok) { alert(j.error || 'Não foi possível concluir a ação.'); return false; }
+      if (!r.ok) { alert(j.error || 'Não foi possível concluir a ação.'); return null; }
       await onMudou();
-      return true;
+      return j;
     } catch (e) {
       alert('Falha: ' + e.message);
-      return false;
+      return null;
     } finally {
       setOcupado(false);
     }
@@ -47,19 +55,44 @@ export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, 
   async function abrirAssociar() {
     setOcupado(true);
     try {
-      const [rp, rpad] = await Promise.all([
+      const [rp, rpad, rvinc] = await Promise.all([
         supabase.from('contas_a_pagar_parcelas')
           .select('id, valor, vencimento, contas_a_pagar(descricao, fornecedor_id, categoria_conta, fornecedores(nome))')
           .eq('empresa_id', empresaId).eq('status', 'Pendente'),
         supabase.from('conciliacao_padroes').select('fornecedor_id, categoria_conta')
           .eq('empresa_id', empresaId).eq('padrao', lancamento.descricao_normalizada).maybeSingle(),
+        // Mesma exclusão de lib/extratosServer.js: parcela que já tem vínculo
+        // não pode ser oferecida de novo. Filtrar por status = 'Pendente' não
+        // basta — a linha de fatura de cartão concilia deixando a parcela em
+        // aberto de propósito, e ela reaparecia aqui como candidata livre.
+        supabase.from('conciliacao_vinculos').select('parcela_id').eq('empresa_id', empresaId),
       ]);
-      const parcelas = (rp.data || []).map(p => ({
+      // Erro engolido aqui vira "nenhuma parcela casa com este valor", e a
+      // tela manda criar uma conta a pagar que na verdade já existe: a mesma
+      // despesa lançada duas vezes por causa de um timeout.
+      if (rp.error) {
+        alert('Não consegui ler as parcelas em aberto: ' + rp.error.message
+          + '\n\nTente de novo antes de criar qualquer conta a pagar por aqui.');
+        return;
+      }
+      if (rvinc.error) {
+        alert('Não consegui conferir quais parcelas já estão conciliadas: ' + rvinc.error.message
+          + '\n\nTente de novo — sem essa conferência a tela pode oferecer uma parcela que '
+          + 'outro lançamento já pagou.');
+        return;
+      }
+      if (rpad.error) {
+        alert('Não consegui ler o fornecedor aprendido para esta descrição: ' + rpad.error.message
+          + '\n\nOs candidatos abaixo vão aparecer sem esse desempate.');
+      }
+      const vinculadas = new Set((rvinc.data || []).map(v => v.parcela_id));
+      const emAberto = (rp.data || []).filter(p => !vinculadas.has(p.id));
+      const parcelas = emAberto.map(p => ({
         id: p.id, valor: Number(p.valor), vencimento: p.vencimento,
         fornecedorId: comoObjeto(p.contas_a_pagar)?.fornecedor_id || null,
       }));
       const mapa = {};
-      for (const p of rp.data || []) mapa[p.id] = p;
+      for (const p of emAberto) mapa[p.id] = p;
       setParcelasPorId(mapa);
       const padrao = rpad.data
         ? { fornecedorId: rpad.data.fornecedor_id, categoriaConta: rpad.data.categoria_conta }
@@ -94,8 +127,17 @@ export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, 
 
   // Confirmar a sugestão que veio da importação: os dados do fornecedor saem
   // da própria parcela sugerida, já embutida na linha.
+  //
+  // confirmar-lote responde 200 mesmo quando o item falha — o lote existe para
+  // que um erro não derrube os outros. Aqui o "lote" é de um só, e sem olhar
+  // `falhas` o clique não produzia mensagem nenhuma: a linha continuava
+  // "Sugerido" e o colaborador clicava para sempre, sem explicação. A barra de
+  // lote da tela já inspeciona essa mesma resposta; esta postura é a dela.
   async function confirmarSugestao() {
-    await chamar({ acao: 'confirmar-lote', lancamentoIds: [lancamento.id] });
+    const j = await chamar({ acao: 'confirmar-lote', lancamentoIds: [lancamento.id] });
+    if (j?.falhas?.length) {
+      alert('Não foi possível confirmar esta sugestão:\n\n' + j.falhas[0].erro);
+    }
   }
 
   async function criar() {
@@ -143,9 +185,23 @@ export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, 
 
       {aberto === 'associar' && (
         <div className="items-list" style={{ marginTop: 8 }}>
+          {/* Candidato exige valor exatamente igual, e a confirmação manda uma
+              parcela só. Então o débito único que paga três boletos não casa
+              com nada — e mandar "crie a conta a pagar abaixo" como se fosse a
+              saída natural faz o colaborador criar uma QUARTA conta a pagar
+              enquanto as três reais continuam em aberto: a mesma despesa
+              lançada duas vezes. Enquanto a seleção de várias parcelas não
+              existe nesta tela, o texto tem que dizer isso. */}
           {!candidatos.length && (
-            <div className="item-line muted">
-              Nenhuma parcela em aberto casa com este valor e data. Crie a conta a pagar abaixo.
+            <div className="item-line muted" style={{ display: 'block' }}>
+              Nenhuma parcela em aberto casa com este valor e data.
+              <br />
+              Se este débito pagou <strong>vários boletos de uma vez</strong>, esta tela ainda não
+              associa um lançamento a mais de uma parcela — dê baixa nelas por Financeiro › Contas
+              a Pagar e deixe esta linha como está.
+              <br />
+              Só crie a conta a pagar abaixo se a despesa <strong>realmente ainda não estiver
+              lançada</strong>: criá-la para um boleto que já existe conta a mesma despesa duas vezes.
             </div>
           )}
           {candidatos.map(c => {
@@ -202,9 +258,25 @@ export default function AcoesConciliacao({ lancamento, empresaId, fornecedores, 
                 </button>
               </div>
             </div>
+            {/* A promessa muda com o tipo do documento, e a diferença é a
+                regra inteira do cartão: compra da fatura não baixa parcela,
+                porque o dinheiro ainda não saiu do banco. Quem baixa é o
+                pagamento da fatura. */}
             <p className="muted" style={{ marginTop: 6 }}>
-              A conta nasce com uma parcela única já paga em {fmtDate(lancamento.data)}, no valor de{' '}
-              {fmtMoney(lancamento.valor)}.
+              {ehLinhaDeFatura ? (
+                <>
+                  Esta é uma compra da fatura do cartão: a conta nasce com uma parcela única{' '}
+                  <strong>ainda em aberto</strong>, vencendo em {fmtDate(lancamento.data)}, no valor
+                  de {fmtMoney(lancamento.valor)}. Ela é baixada mais tarde, quando o pagamento da
+                  fatura for conciliado no extrato da conta corrente — é o que impede a mesma
+                  despesa de ser contada duas vezes.
+                </>
+              ) : (
+                <>
+                  A conta nasce com uma parcela única já paga em {fmtDate(lancamento.data)}, no
+                  valor de {fmtMoney(lancamento.valor)}.
+                </>
+              )}
             </p>
           </div>
 

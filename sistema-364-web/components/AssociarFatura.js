@@ -27,12 +27,20 @@ export default function AssociarFatura({ lancamento, empresaId, onMudou }) {
       // Sem filtro por cartão de propósito: o débito do pagamento vem do
       // extrato da conta corrente e não carrega qual cartão foi pago — cada
       // opção mostra o nome da conta para o colaborador escolher à mão.
-      const { data } = await supabase.from('extrato_importacoes')
+      const { data, error } = await supabase.from('extrato_importacoes')
         .select('id, periodo_inicio, periodo_fim, total_lancamentos, conciliados, contas_bancarias(nome)')
         .eq('empresa_id', empresaId).eq('tipo', 'fatura_cartao')
         .order('periodo_fim', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(100);
+      // Erro descartado aqui virava "Nenhuma fatura importada. Importe a
+      // fatura do cartão" — mandando o colaborador reimportar um arquivo que
+      // ele já tem, para resolver um problema que não é esse.
+      if (error) {
+        alert('Não consegui listar as faturas importadas: ' + error.message
+          + '\n\nTente de novo — isto não quer dizer que a fatura não foi importada.');
+        return;
+      }
       setFaturas(data || []);
       setAberto(true);
     } finally {

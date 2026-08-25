@@ -56,7 +56,22 @@ function Conteudo() {
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaAtual.id)
         .eq('ativo', true).order('nome'),
     ]);
-    if (r2.error) console.error(r2.error);
+    // As quatro consultas alimentam a tela inteira, e cada uma que falha em
+    // silêncio some como se o cadastro estivesse vazio: sem contas bancárias o
+    // formulário de importar não abre, sem fornecedores o "criar conta a
+    // pagar" fica sem opção nenhuma. Nada disso é a mesma coisa que "não há
+    // nada cadastrado", e antes só r2 era registrada.
+    const falhas = [
+      ['contas bancárias', r1.error], ['importações', r2.error],
+      ['fornecedores', r3.error], ['funcionários', r4.error],
+    ].filter(([, erro]) => erro);
+    for (const [nome, erro] of falhas) console.error(`Falha ao carregar ${nome}:`, erro);
+    if (falhas.length) {
+      alert('Parte da tela não carregou:\n'
+        + falhas.map(([nome, erro]) => `· ${nome}: ${erro.message}`).join('\n')
+        + '\n\nRecarregue antes de conciliar — uma lista vazia aqui não quer dizer '
+        + 'que não há nada cadastrado.');
+    }
     setContas(r1.data || []);
     setImportacoes(r2.data || []);
     setFornecedores(r3.data || []);
@@ -71,7 +86,11 @@ function Conteudo() {
       .select('*, parcela_sugerida:contas_a_pagar_parcelas!parcela_sugerida_id('
         + 'id, valor, vencimento, contas_a_pagar(descricao, fornecedores(nome)))')
       .eq('importacao_id', importacaoId).order('data');
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      alert('Não consegui carregar os lançamentos desta importação: ' + error.message
+        + '\n\nO painel abaixo pode aparecer vazio por causa disso, não por falta de lançamento.');
+    }
     setLancamentos(data || []);
   }
 
@@ -84,6 +103,38 @@ function Conteudo() {
     if (selecionada) {
       setSelecionada(lista.find(i => i.id === selecionada.id) || null);
       await carregarLancamentos(selecionada.id);
+    }
+  }
+
+  // Importar contra a conta errada é o erro mais provável do primeiro dia: o
+  // hash_dedupe inclui a conta bancária, então importar de novo contra a conta
+  // certa gera um SEGUNDO conjunto completo, e o errado ficava na tela para
+  // sempre. Cada lançamento dele segura um parcela_sugerida_id que some do
+  // pool de sugestões de toda importação futura.
+  async function excluirImportacao(imp) {
+    const { count } = await supabase.from('extrato_lancamentos')
+      .select('id', { count: 'exact', head: true }).eq('importacao_id', imp.id);
+    const quantos = count == null ? 'todos os' : `os ${count}`;
+    const rotulo = imp.arquivo_nome || (imp.tipo === 'fatura_cartao' ? 'fatura' : 'extrato');
+    const periodo = imp.periodo_inicio
+      ? ` (${fmtDate(imp.periodo_inicio)} a ${fmtDate(imp.periodo_fim)})` : '';
+    if (!confirm(
+      `Excluir a importação "${rotulo}"${periodo}, da conta ${imp.contas_bancarias?.nome || '—'}?\n\n`
+      + `Isso apaga ${quantos} lançamento(s) dela e o arquivo guardado no sistema. As parcelas `
+      + `que esses lançamentos estavam segurando voltam a ser oferecidas nas próximas `
+      + `importações.\n\nNão dá para desfazer — para trazer de volta, é só importar o arquivo `
+      + `de novo.`)) return;
+
+    const r = await chamarApi('/api/financeiro/conciliacao', {
+      method: 'POST', body: JSON.stringify({ acao: 'excluir-importacao', importacaoId: imp.id }),
+    });
+    const j = await r.json();
+    if (!r.ok) { alert(j.error || 'Não foi possível excluir a importação.'); return; }
+    if (selecionada?.id === imp.id) { setSelecionada(null); setLancamentos([]); }
+    await carregarBase();
+    if (j.arquivoRemovido === false) {
+      alert('Importação excluída, mas o arquivo continuou no armazenamento. '
+        + 'Os lançamentos foram removidos — isso é o que destrava as sugestões.');
     }
   }
 
@@ -161,6 +212,17 @@ function Conteudo() {
                     <button className="btn small" onClick={() => setSelecionada(i)}>Abrir</button>
                     <button className="btn secondary small" onClick={() => abrirArquivo(i.arquivo_path)}>
                       Arquivo
+                    </button>
+                    {/* Importação com lançamento conciliado não se apaga: o
+                        cascade levaria vínculos e baixas junto, em silêncio.
+                        O servidor recusa de novo — este disabled é só para o
+                        botão não parecer disponível. */}
+                    <button className="btn secondary small" disabled={i.conciliados > 0}
+                      title={i.conciliados > 0
+                        ? 'Tem lançamento já conciliado. Desfaça as conciliações antes de excluir.'
+                        : 'Excluir esta importação e seus lançamentos'}
+                      onClick={() => excluirImportacao(i)}>
+                      Excluir
                     </button>
                   </td>
                 </tr>
@@ -248,7 +310,7 @@ function Conteudo() {
                     <td>
                       <AcoesConciliacao lancamento={l} empresaId={empresaAtual?.id}
                         fornecedores={fornecedores} funcionarios={funcionarios}
-                        onMudou={recarregar} />
+                        tipoImportacao={selecionada.tipo} onMudou={recarregar} />
                       {selecionada.tipo === 'extrato' && l.tipo === 'saida'
                         && l.status !== 'conciliado' && (
                         <AssociarFatura lancamento={l} empresaId={empresaAtual?.id}

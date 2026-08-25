@@ -20,9 +20,18 @@ confirmação antes de baixar qualquer parcela.
 - **Não baixa extrato do banco sozinho.** A importação é sempre por upload
   manual do arquivo que você baixa do internet banking; não existe integração
   automática com nenhum banco ainda.
+- **Não associa um débito a várias parcelas.** Um único débito de R$ 3.000 que
+  pagou três boletos de R$ 1.000 **não casa com nada** nesta tela: os
+  candidatos exigem valor exatamente igual, e a confirmação manda uma parcela
+  só. Nesse caso, dê baixa nas três parcelas por **Financeiro › Contas a
+  Pagar** e deixe a linha do extrato como está. **Não crie uma conta a pagar
+  nova** pelo botão da tela — as três parcelas reais continuariam abertas e a
+  mesma despesa entraria duas vezes no financeiro.
 - **Não tem painel de divergências.** Se um fornecedor mudar o texto de uma
   cobrança recorrente, ou uma saída ficar conciliada fora do prazo esperado,
   hoje isso não aparece destacado em lugar nenhum — só olhando a lista.
+- **Não mostra, na linha já conciliada, com qual parcela ela foi conciliada.**
+  Para conferir, o caminho é o Contas a Pagar.
 - **A conferência automática de fechamento não cobre OFX nem CSV** — nem para
   extrato, nem para fatura de cartão. Só roda de fato com PDF, e só quando o
   documento traz os números necessários. Ver a seção própria abaixo: é o
@@ -76,8 +85,16 @@ de conferir antes de sair conciliando. O texto do aviso muda conforme o
 documento: para extrato ele fala em saldo; para fatura, no total que não bate
 com a soma das compras.
 
-**As duas só acontecem de fato com PDF, e só quando o documento traz os
-números necessários** — saldo inicial e final, no caso do extrato; total da
+Existe ainda um terceiro aviso, esse independente de formato: se um **extrato**
+for importado e **nenhuma** linha dele for lida como saída, o sistema levanta a
+mão. Extrato sem nenhuma saída não existe na prática — quase sempre é layout
+mal interpretado (CSV cujo valor vem sem sinal, com débito e crédito numa
+coluna à parte). Sem esse aviso a importação ficaria com a tag verde
+"Conciliada" e o painel de lançamentos abriria vazio, porque as entradas ficam
+escondidas até você marcar "Mostrar entradas".
+
+**As duas conferências de fechamento só acontecem de fato com PDF, e só quando
+o documento traz os números necessários** — saldo inicial e final, no caso do extrato; total da
 fatura, no caso da fatura de cartão. Extrato em OFX ou CSV não traz o saldo
 do início do período, e fatura em OFX ou CSV não traz o total — são
 limitações do formato em si, não do sistema — então, para esses dois
@@ -144,6 +161,19 @@ nela (fatura paga parcialmente, ou no rotativo), o sistema barra a baixa e
 mostra a diferença; só segue adiante com uma confirmação explícita na tela,
 para não baixar parcelas com base em um valor que não fecha.
 
+**Cada fatura é paga uma vez só.** Se você tentar associar um segundo débito à
+mesma fatura, o sistema recusa e diz qual lançamento já é o pagamento dela —
+antes essa segunda associação não baixava nada e mesmo assim ficava verde, com
+uma saída real do banco conciliada contra nada. Pelo mesmo motivo, um débito
+que não teria nenhuma parcela a baixar (porque todas já constavam pagas) é
+recusado em vez de ser aceito como "0 parcela(s) baixada(s)".
+
+**Uma parcela é de um lançamento só.** Se você tentar conciliar uma parcela que
+outro lançamento do extrato já reivindica, o sistema recusa e diz qual é esse
+lançamento. Isso é o que impede duas saídas reais de serem contabilizadas
+contra a mesma dívida — situação que aparecia justamente com o cartão, porque a
+compra da fatura deixa a parcela em aberto de propósito.
+
 ## Aprendizado
 
 Cada confirmação ensina o sistema: a descrição do extrato — limpa de acentos,
@@ -185,6 +215,12 @@ depois de importar informa quantos lançamentos já estavam no sistema.
 | Conciliado | Já associado a uma ou mais parcelas do contas a pagar |
 | Entrada | Lançamento de entrada — fora da conciliação nesta fase, listado só para ficar visível |
 
+A coluna **"Conciliados"** da lista de importações conta **só as saídas** nas
+duas pontas — "12/12" quer dizer que as doze saídas daquele arquivo estão
+resolvidas, não que ele tinha só doze linhas. As entradas ficam de fora porque
+não são conciliadas nesta fase; elas continuam na lista, marcando "Mostrar
+entradas".
+
 ## Passo a passo
 
 1. Cadastre as contas em **Financeiro › Contas Bancárias** — uma linha para
@@ -202,8 +238,22 @@ depois de importar informa quantos lançamentos já estavam no sistema.
    não tiver sugestão automática fica para resolver um a um, pelo botão
    "Associar" da própria linha.
 5. Saída sem conta a pagar correspondente: o botão "Associar" abre, no fim da
-   lista de candidatos, um formulário para criar a conta a pagar direto dali
-   — já nasce com uma parcela paga na data do débito.
+   lista de candidatos, um formulário para criar a conta a pagar direto dali.
+   **O que essa conta nasce valendo depende do documento:**
+   - **No extrato bancário**, ela nasce com uma parcela única **já paga** na
+     data do débito — o dinheiro saiu do banco naquele dia.
+   - **Na fatura de cartão**, ela nasce com uma parcela única **ainda em
+     aberto**, vencendo na data da compra. É a mesma regra da seção "Fatura de
+     cartão de crédito" acima, e vale igual por este caminho: a compra no
+     cartão não tira dinheiro do banco, então ela não pode nascer baixada.
+     Quem baixa é o pagamento da fatura, no passo 6. A tela avisa isso no
+     próprio formulário.
+
+   Antes de usar este formulário, confira que a despesa **realmente não está
+   lançada**. Se ela já existe no contas a pagar mas não apareceu como
+   candidata (valor diferente, vencimento fora da janela de 7 dias, ou um
+   débito que pagou vários boletos de uma vez), criar uma conta aqui lança a
+   mesma despesa duas vezes.
 6. Pagamento de fatura de cartão: na linha do extrato da conta corrente,
    clique em "Associar à fatura", escolha a fatura na lista e confirme em
    "Baixar parcelas da fatura" (ver a seção "Fatura de cartão de crédito"
@@ -211,3 +261,18 @@ depois de importar informa quantos lançamentos já estavam no sistema.
 7. Conciliou errado? O botão "Desfazer", na própria linha já conciliada,
    desfaz a associação; se foi ele quem baixou a parcela, ela volta para
    "Pendente".
+
+   Numa fatura de cartão já paga, o desfazer tem **ordem**: primeiro o
+   pagamento da fatura (a linha do extrato da conta corrente), depois a
+   compra. O sistema recusa a ordem inversa e explica na hora — desfazer a
+   compra primeiro deixaria a parcela em aberto para sempre, porque o
+   pagamento da fatura não roda de novo.
+8. Importou o arquivo errado (a conta errada, o mês errado)? O botão
+   **"Excluir"**, na linha da importação, apaga a importação, todos os
+   lançamentos dela e o arquivo guardado. Ele fica **desabilitado enquanto
+   houver lançamento conciliado** naquela importação — nesse caso, desfaça as
+   conciliações primeiro. Excluir importa mais do que parece: enquanto a
+   importação errada existe, cada lançamento dela continua "segurando" a
+   parcela que o sistema tinha sugerido, e essa parcela não é oferecida em
+   nenhuma importação seguinte. Depois de excluir, é só importar o arquivo de
+   novo pela conta certa.
