@@ -1,8 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { usuarioParaEmail } from '../../lib/auth';
+import { dataPorExtenso } from '../../lib/formatacao';
+
+const MARCAS = 'Steakhouse · Afya · Foodservices · Buffet & Eventos';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +13,12 @@ export default function LoginPage() {
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState(null);
   const [entrando, setEntrando] = useState(false);
+  const [hoje, setHoje] = useState('');
+
+  // A data é do relógio do usuário, não do servidor: preenchida depois da
+  // montagem para o HTML servido e o renderizado baterem (o servidor está em
+  // outro fuso e, perto da virada do dia, mostraria outra data).
+  useEffect(() => { setHoje(dataPorExtenso(new Date())); }, []);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -27,9 +36,14 @@ export default function LoginPage() {
   const campoStyle = { marginBottom: 10 };
 
   return (
-    <main className="centro">
-      <h1 style={{ fontSize: 22 }}>364 Foodservices</h1>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Entre com seu usuário e senha.</p>
+    <main className="centro login">
+      {/* Logo do grupo servida do próprio repositório: a tela de login não tem
+          sessão, e a logo cadastrada por marca (empresas.logo_path) só é
+          legível autenticado. */}
+      <img className="login-logo" src="/logo-364.png" alt="Grupo 364" />
+      <h1>Bem-vindo ao Grupo 364</h1>
+      <p className="login-marcas">{MARCAS}</p>
+      <p className="login-data">{hoje || ' '}</p>
       <form onSubmit={handleLogin}>
         <input
           required

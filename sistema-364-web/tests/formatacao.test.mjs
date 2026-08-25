@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatarTelefone, capitalizarNome } from '../lib/formatacao.js';
+import { formatarTelefone, capitalizarNome, dataPorExtenso } from '../lib/formatacao.js';
 
 test('formatarTelefone aplica máscara progressiva de fixo (8 dígitos)', () => {
   assert.equal(formatarTelefone('6932251234'), '(69) 3225-1234');
@@ -34,4 +34,17 @@ test('capitalizarNome não quebra com espaços duplicados ou nome vazio', () => 
 
 test('capitalizarNome preserva siglas maiúsculas comuns (LTDA, ME, EIRELI)', () => {
   assert.equal(capitalizarNome('mercado bom preco EIRELI'), 'Mercado Bom Preco EIRELI');
+});
+
+test('dataPorExtenso escreve a data em português, com o dia da semana capitalizado', () => {
+  assert.equal(dataPorExtenso(new Date(2026, 7, 25)), 'Terça-feira, 25 de agosto de 2026');
+});
+
+test('dataPorExtenso capitaliza o dia da semana também no domingo', () => {
+  assert.equal(dataPorExtenso(new Date(2026, 7, 30)), 'Domingo, 30 de agosto de 2026');
+});
+
+test('dataPorExtenso sem data devolve string vazia', () => {
+  assert.equal(dataPorExtenso(null), '');
+  assert.equal(dataPorExtenso(new Date('nada')), '');
 });

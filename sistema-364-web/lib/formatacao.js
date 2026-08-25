@@ -34,3 +34,15 @@ export function capitalizarNome(v) {
     return minuscula.charAt(0).toUpperCase() + minuscula.slice(1);
   }).join('');
 }
+
+// "Terça-feira, 25 de agosto de 2026" — usada na tela de login. O Intl devolve
+// o dia da semana em minúscula em pt-BR; aqui ele entra capitalizado porque a
+// frase começa nele. A data vem por parâmetro para o valor ser testável e para
+// quem chama decidir o momento (na tela, o relógio do navegador do usuário).
+export function dataPorExtenso(data) {
+  if (!(data instanceof Date) || Number.isNaN(data.getTime())) return '';
+  const texto = data.toLocaleDateString('pt-BR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
