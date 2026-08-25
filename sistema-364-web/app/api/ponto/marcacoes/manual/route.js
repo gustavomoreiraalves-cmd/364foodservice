@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { autorizarModulo, auditar } from '../../../../../lib/pontoServer';
+import { garantirColaborador, garantirUnidade } from '../../../../../lib/autorizacao';
 
 const TIPOS = ['entrada', 'intervalo_inicio', 'intervalo_fim', 'saida'];
 
 // POST (gestor/RH logado): marcação assistida de contingência.
 // body: { colaboradorId, unidadeId, tipo, motivo }
 export async function POST(request) {
-  const { sb, user, erro } = await autorizarModulo(request, 'ponto');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'ponto');
   if (erro) return erro;
 
   const { colaboradorId, unidadeId, tipo, motivo } = await request.json();
@@ -18,15 +19,23 @@ export async function POST(request) {
     return NextResponse.json({ error: 'O motivo é obrigatório na marcação manual.' }, { status: 400 });
   }
 
-  const { data: colab } = await sb.from('colaboradores')
-    .select('id, nome, empresa_id, empregador_id, status, registra_ponto')
-    .eq('id', colaboradorId).maybeSingle();
-  if (!colab || colab.status !== 'ativo' || !colab.registra_ponto) {
+  // Colaborador e unidade precisam ser de uma empresa que o gestor alcança:
+  // esta rota grava marcação de ponto, que é documento trabalhista.
+  let colab, unidade;
+  try {
+    colab = await garantirColaborador(sb, user, isAdmin, colaboradorId,
+      'id, nome, empresa_id, empregador_id, status, registra_ponto');
+    unidade = await garantirUnidade(sb, user, isAdmin, unidadeId, 'id, fuso, empresa_id');
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
+  if (colab.status !== 'ativo' || !colab.registra_ponto) {
     return NextResponse.json({ error: 'Colaborador não autorizado a registrar ponto.' }, { status: 403 });
   }
-
-  const { data: unidade } = await sb.from('unidades').select('id, fuso').eq('id', unidadeId).maybeSingle();
-  if (!unidade) return NextResponse.json({ error: 'Unidade não encontrada.' }, { status: 404 });
+  // Marcar na unidade de outra empresa embaralharia a apuração das duas.
+  if (unidade.empresa_id !== colab.empresa_id) {
+    return NextResponse.json({ error: 'A unidade não pertence à empresa do colaborador.' }, { status: 400 });
+  }
 
   const { data: marcacao, error } = await sb.rpc('registrar_marcacao', {
     p_idempotencia: crypto.randomUUID(),

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo } from '../../../../lib/pontoServer';
-import { garantirEmpresa } from '../../../../lib/nfe/autorizacao';
+import { garantirEmpresa } from '../../../../lib/autorizacao';
 
 export const runtime = 'nodejs';
 

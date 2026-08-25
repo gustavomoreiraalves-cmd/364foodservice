@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo, cifrarDescritor, sha256Hex, auditar } from '../../../../lib/pontoServer';
+import { garantirColaborador } from '../../../../lib/autorizacao';
 
 // POST (RH logado): grava as amostras biométricas cifradas + consentimento LGPD.
 // body: { colaboradorId, descritores: [[128 floats]...], qualidades: [n...], avisoId, baseLegal }
 export async function POST(request) {
-  const { sb, user, erro } = await autorizarModulo(request, 'ponto');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'ponto');
   if (erro) return erro;
 
   const { colaboradorId, descritores, qualidades = [], avisoId, baseLegal = 'obrigacao_legal' } = await request.json();
@@ -16,8 +17,13 @@ export async function POST(request) {
   }
   if (!avisoId) return NextResponse.json({ error: 'É obrigatório registrar a ciência do aviso de privacidade.' }, { status: 400 });
 
-  const { data: colab } = await sb.from('colaboradores').select('id, nome').eq('id', colaboradorId).maybeSingle();
-  if (!colab) return NextResponse.json({ error: 'Colaborador não encontrado.' }, { status: 404 });
+  // O módulo `ponto` sozinho não basta: sem esta conferência, quem tem o
+  // módulo numa marca cadastraria biometria de colaborador de outra.
+  try {
+    await garantirColaborador(sb, user, isAdmin, colaboradorId, 'id, nome');
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
 
   const { data: aviso } = await sb.from('ponto_avisos_privacidade').select('id, texto').eq('id', avisoId).maybeSingle();
   if (!aviso) return NextResponse.json({ error: 'Aviso de privacidade não encontrado.' }, { status: 404 });
@@ -53,11 +59,17 @@ export async function POST(request) {
 
 // DELETE (RH logado): bloqueia/remove a biometria ativa, com motivo obrigatório.
 export async function DELETE(request) {
-  const { sb, user, erro } = await autorizarModulo(request, 'ponto');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'ponto');
   if (erro) return erro;
 
   const { colaboradorId, motivo } = await request.json();
   if (!colaboradorId || !motivo) return NextResponse.json({ error: 'Informe colaborador e motivo.' }, { status: 400 });
+
+  try {
+    await garantirColaborador(sb, user, isAdmin, colaboradorId, 'id, nome');
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+  }
 
   await sb.from('ponto_biometrias').update({ ativo: false }).eq('colaborador_id', colaboradorId).eq('ativo', true);
   await sb.from('colaboradores').update({ biometria_status: 'bloqueada' }).eq('id', colaboradorId);

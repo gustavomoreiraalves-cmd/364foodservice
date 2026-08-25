@@ -1,16 +1,25 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { autorizarModulo, sha256Hex, auditar } from '../../../../../lib/pontoServer';
+import { garantirColaborador } from '../../../../../lib/autorizacao';
 
 // POST (RH logado) { colaboradorId, pin }: define o PIN de contingência.
 // O PIN nunca é armazenado em claro — só sha256(pin + salt).
 export async function POST(request) {
-  const { sb, user, erro } = await autorizarModulo(request, 'ponto');
+  const { sb, user, isAdmin, erro } = await autorizarModulo(request, 'ponto');
   if (erro) return erro;
 
   const { colaboradorId, pin } = await request.json();
   if (!colaboradorId || !/^\d{4,6}$/.test(String(pin || ''))) {
     return NextResponse.json({ error: 'PIN deve ter de 4 a 6 dígitos.' }, { status: 400 });
+  }
+
+  // Sem esta conferência, definir o PIN de um colaborador de outra marca daria
+  // ao autor uma credencial válida para bater ponto no lugar dele.
+  try {
+    await garantirColaborador(sb, user, isAdmin, colaboradorId, 'id, nome');
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
