@@ -5,13 +5,15 @@ import AppShell from '../../components/AppShell';
 import Icone from '../../components/Icone';
 import ListaCadastro from '../../components/ListaCadastro';
 import FichaModal from '../../components/FichaModal';
+import FichaParceiro from '../../components/FichaParceiro';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { useCadastro } from '../../lib/cadastro';
+import { camposDoFormulario } from '../../lib/cadastro';
 import { filtrarRegistros } from '../../lib/listaCadastro';
 import { pendenciasFiscaisCliente, soDigitos } from '../../lib/fiscal';
-import { formatarCnpj, cnpjValido } from '../../lib/cnpj';
+import { montarListaParceiros, salvarParceiro, excluirParceiro, alternarAtivoParceiro } from '../../lib/parceiro';
+import { formatarCnpj } from '../../lib/cnpj';
 import { formatarCpf } from '../../lib/ponto';
-import { formatarTelefone, capitalizarNome } from '../../lib/formatacao';
+import { formatarTelefone } from '../../lib/formatacao';
 
 // Sem fonte nacional gratuita para inscrição estadual (SINTEGRA é por estado
 // e a consulta pública do RO exige captcha, não dá pra automatizar) — o botão
@@ -19,19 +21,20 @@ import { formatarTelefone, capitalizarNome } from '../../lib/formatacao';
 const URL_SEFIN_RO = 'https://portalcontribuinte.sefin.ro.gov.br/Publico/parametropublica.jsp';
 
 const FORM_VAZIO = {
-  nome: '', nome_fantasia: '', cnpj: '', tipo: 'Revenda', contato: '', telefone: '',
+  nome: '', nome_fantasia: '', cnpj: '', contato: '', telefone: '',
+  tipo: 'Revenda',
   // Bloco <dest> da NF-e (atualização 36). Sem ele não se emite nota para
   // este cliente, por mais completo que esteja o cadastro comercial.
-  tipo_pessoa: 'J', cpf: '', ie: '', ind_ie_dest: '', consumidor_final: null,
+  tipo_pessoa: 'J', cpf: '', ie: '', ind_ie_dest: null, consumidor_final: null,
   logradouro: '', numero: '', complemento: '', bairro: '',
   codigo_municipio_ibge: '', municipio: '', uf: '', cep: '', email_nfe: '',
+  categoria: 'Carnes', email: '',
 };
-const TIPOS = ['Revenda', 'Distribuidor', 'Food Service', 'Consumidor Final'];
-const CAMPOS_BUSCA = ['nome', 'cnpj', 'cpf', 'tipo', 'municipio'];
+const CAMPOS_BUSCA = ['nome', 'nome_fantasia', 'cnpj', 'cpf', 'tipo', 'municipio', 'categoria', 'email', 'contato'];
 
 export default function ClientesPage() {
   return (
-    <AppShell modulo="clientes" titulo="Clientes" desc="Cadastro de clientes, revendas e dados para nota fiscal">
+    <AppShell modulo="clientes" titulo="Clientes/Fornecedores" desc="Cadastro de clientes, fornecedores e revendas, com dados para nota fiscal">
       <Conteudo />
     </AppShell>
   );
@@ -39,12 +42,18 @@ export default function ClientesPage() {
 
 function Conteudo() {
   const { empresaAtual } = useEmpresaAtual();
-  const [lista, setLista] = useState([]);
+  const [listaParceiros, setListaParceiros] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [mostrarInativos, setMostrarInativos] = useState(false);
-  const [criando, setCriando] = useState(false);
   const [fiscalDisponivel, setFiscalDisponivel] = useState(true);
+
+  const [selecionado, setSelecionado] = useState(null);
+  const [criando, setCriando] = useState(false);
+  const [form, setForm] = useState(FORM_VAZIO);
+  const [papeis, setPapeis] = useState(['cliente']);
+  const [salvando, setSalvando] = useState(false);
+
   const [consultandoCnpj, setConsultandoCnpj] = useState(false);
   const [erroConsultaCnpj, setErroConsultaCnpj] = useState('');
   const [situacaoCnpj, setSituacaoCnpj] = useState('');
@@ -53,37 +62,77 @@ function Conteudo() {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const { data } = await supabase.from('clientes').select('*').eq('empresa_id', empresaAtual.id).order('nome');
-    setLista(data || []);
+    const [{ data: clientesData }, { data: fornecedoresData }] = await Promise.all([
+      supabase.from('clientes').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+    ]);
+    setListaParceiros(montarListaParceiros(clientesData || [], fornecedoresData || []));
     // Sem a atualização 36 as colunas do bloco dest não existem, e gravá-las
     // faria o PostgREST recusar o registro inteiro.
-    setFiscalDisponivel(!data?.length || 'uf' in (data[0] || {}));
+    setFiscalDisponivel(!clientesData?.length || 'uf' in (clientesData[0] || {}));
     setLoading(false);
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
-  const { form, setForm, editando, salvando, iniciarEdicao, cancelarEdicao, salvar, alternarAtivo, excluir } =
-    useCadastro({
-      tabela: 'clientes',
-      formVazio: FORM_VAZIO,
-      empresaId: empresaAtual?.id,
-      aoTerminar: async () => { await carregar(); fechar(); },
-      paraGravar: dados => (fiscalDisponivel ? dados : recorteComercial(dados)),
-    });
-
-  const emEdicao = editando ? lista.find(c => c.id === editando) : null;
   const visiveis = useMemo(
-    () => filtrarRegistros(lista, { campos: CAMPOS_BUSCA, busca, mostrarInativos }),
-    [lista, busca, mostrarInativos],
+    () => filtrarRegistros(listaParceiros, { campos: CAMPOS_BUSCA, busca, mostrarInativos }),
+    [listaParceiros, busca, mostrarInativos],
   );
-  const pendencias = fiscalDisponivel ? pendenciasFiscaisCliente(form) : [];
-  const aberto = criando || !!editando;
+  const pendencias = fiscalDisponivel && papeis.includes('cliente') ? pendenciasFiscaisCliente(form) : [];
+  const aberto = criando || !!selecionado;
 
-  function abrirNovo() { cancelarEdicao(); setCriando(true); limparConsultaCnpj(); }
-  function fechar() { cancelarEdicao(); setCriando(false); limparConsultaCnpj(); }
-  function abrir(c) { setCriando(false); iniciarEdicao(c); limparConsultaCnpj(); }
   function limparConsultaCnpj() { setErroConsultaCnpj(''); setSituacaoCnpj(''); setCnpjCopiado(false); }
+
+  function abrirNovo() {
+    setSelecionado(null); setCriando(true); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
+  }
+  function fechar() {
+    setSelecionado(null); setCriando(false); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
+  }
+  function abrir(p) {
+    setCriando(false); setSelecionado(p);
+    setForm(camposDoFormulario({ ...(p.fornecedor || {}), ...(p.cliente || {}) }, FORM_VAZIO));
+    setPapeis(p.papeis);
+    limparConsultaCnpj();
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function salvar(e) {
+    e.preventDefault();
+    if (salvando) return;
+    setSalvando(true);
+    try {
+      const { error } = await salvarParceiro(supabase, {
+        form, papeis,
+        clienteExistente: selecionado?.cliente || null,
+        fornecedorExistente: selecionado?.fornecedor || null,
+        empresaId: empresaAtual?.id,
+        fiscalDisponivel,
+      });
+      if (error) { alert(error); return; }
+      await carregar();
+      fechar();
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluirSelecionado() {
+    if (!selecionado) return;
+    if (!confirm(`Excluir ${selecionado.nome}?`)) return;
+    const { error } = await excluirParceiro(supabase, selecionado);
+    if (error) { alert(error); return; }
+    await carregar();
+    fechar();
+  }
+
+  async function alternarAtivoSelecionado() {
+    if (!selecionado) return;
+    const { error } = await alternarAtivoParceiro(supabase, selecionado);
+    if (error) { alert(error); return; }
+    await carregar();
+  }
 
   // O formulário da SEFIN-RO é POST com token CSRF por sessão e captcha —
   // não existe link que abra a página já preenchida. O que dá pra fazer é
@@ -121,30 +170,35 @@ function Conteudo() {
   }
 
   const COLUNAS = [
-    { titulo: 'Nome', principal: true, minimo: 200, render: c => c.nome, textoPuro: c => c.nome },
+    { titulo: 'Nome', principal: true, minimo: 200, render: p => p.nome, textoPuro: p => p.nome },
     {
-      titulo: 'Tipo', largura: 118,
-      render: c => (c.tipo ? <span className="tag categoria">{c.tipo}</span> : null),
-      textoPuro: c => c.tipo || '',
+      titulo: 'Papel', largura: 150,
+      render: p => (
+        <span style={{ display: 'flex', gap: 4 }}>
+          {p.papeis.includes('cliente') && <span className="tag categoria">Cliente</span>}
+          {p.papeis.includes('fornecedor') && <span className="tag categoria">Fornecedor</span>}
+        </span>
+      ),
+      textoPuro: p => p.papeis.map(x => (x === 'cliente' ? 'Cliente' : 'Fornecedor')).join(' e '),
     },
     {
       titulo: 'CNPJ / CPF', largura: 132, mono: true,
-      render: c => docFormatado(c) || null, textoPuro: c => docFormatado(c),
+      render: p => docFormatado(p) || null, textoPuro: p => docFormatado(p),
     },
-    { titulo: 'Município', largura: 130, render: c => (c.municipio ? `${c.municipio}/${c.uf || ''}` : null), textoPuro: c => c.municipio || '' },
-    { titulo: 'Contato', largura: 140, render: c => c.contato || null, textoPuro: c => c.contato || '' },
+    { titulo: 'Município', largura: 130, render: p => (p.municipio ? `${p.municipio}/${p.uf || ''}` : null), textoPuro: p => p.municipio || '' },
+    { titulo: 'Contato', largura: 140, render: p => p.contato || null, textoPuro: p => p.contato || '' },
     {
       titulo: 'Telefone', largura: 118, mono: true,
-      render: c => (c.telefone ? formatarTelefone(c.telefone) : null),
-      textoPuro: c => (c.telefone ? formatarTelefone(c.telefone) : ''),
+      render: p => (p.telefone ? formatarTelefone(p.telefone) : null),
+      textoPuro: p => (p.telefone ? formatarTelefone(p.telefone) : ''),
     },
     {
       titulo: 'Nota', largura: 66, alinhamento: 'center',
-      render: c => (!fiscalDisponivel ? null
-        : pendenciasFiscaisCliente(c).length
+      render: p => (!fiscalDisponivel || !p.papeis.includes('cliente') ? null
+        : pendenciasFiscaisCliente(p.cliente).length
           ? <span className="tag warn">falta</span>
           : <span className="tag ok">ok</span>),
-      textoPuro: c => (pendenciasFiscaisCliente(c).length ? 'faltam dados para emitir' : 'pronto para emitir'),
+      textoPuro: p => (!p.papeis.includes('cliente') ? '' : pendenciasFiscaisCliente(p.cliente).length ? 'faltam dados para emitir' : 'pronto para emitir'),
     },
   ];
 
@@ -155,18 +209,18 @@ function Conteudo() {
       <section className="panel">
         <div className="filter-bar" style={{ marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <label htmlFor="busca-cliente">Buscar</label>
-            <input id="busca-cliente" value={busca} placeholder="nome, CNPJ, CPF, tipo ou município"
+            <label htmlFor="busca-parceiro">Buscar</label>
+            <input id="busca-parceiro" value={busca} placeholder="nome, CNPJ, CPF, categoria ou município"
                    onChange={e => setBusca(e.target.value)} />
           </div>
           <button className="btn" type="button" onClick={abrirNovo}>
-            <Icone nome="mais" tamanho={14} /> Novo cliente
+            <Icone nome="mais" tamanho={14} /> Novo parceiro
           </button>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <span className="muted" style={{ fontSize: 11.5 }}>
-            {visiveis.length} de {lista.length} cliente{lista.length === 1 ? '' : 's'}
+            {visiveis.length} de {listaParceiros.length} parceiro{listaParceiros.length === 1 ? '' : 's'}
           </span>
           <label className="check-line" style={{ fontSize: 12 }}>
             <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} />
@@ -175,191 +229,36 @@ function Conteudo() {
         </div>
 
         <ListaCadastro
-          colunas={COLUNAS} registros={visiveis} selecionado={editando} onAbrir={abrir}
-          rotulo="Clientes"
-          vazio={busca ? 'Nenhum cliente encontrado para essa busca.' : 'Nenhum cliente cadastrado ainda.'} />
+          colunas={COLUNAS} registros={visiveis} selecionado={selecionado?.id} onAbrir={abrir}
+          rotulo="Clientes/Fornecedores"
+          vazio={busca ? 'Nenhum parceiro encontrado para essa busca.' : 'Nenhum cliente ou fornecedor cadastrado ainda.'} />
       </section>
 
       {aberto && (
         <FichaModal
-          titulo={emEdicao ? emEdicao.nome : 'Novo cliente'}
-          subtitulo={emEdicao?.cnpj || emEdicao?.cpf || null}
+          titulo={selecionado ? selecionado.nome : 'Novo parceiro'}
+          subtitulo={selecionado ? (docFormatado(selecionado) || null) : null}
           onFechar={fechar}>
           <form onSubmit={salvar}>
-            <div className="modal-body">
-              {fiscalDisponivel && (
-                <div className={'pendencias' + (pendencias.length ? '' : ' completo')}>
-                  {pendencias.length ? (
-                    <>
-                      <b>Falta para emitir nota para este cliente:</b>
-                      <ul>{pendencias.map(p => <li key={p}>{p}</li>)}</ul>
-                    </>
-                  ) : <span className="tag ok">Pronto para receber nota fiscal</span>}
-                </div>
-              )}
-
-              <div className="form-grid">
-                <div className="secao">Identificação</div>
-                <div className="largo">
-                  <label htmlFor="c-nome">Nome / Razão social</label>
-                  <input id="c-nome" required autoFocus value={form.nome}
-                         onChange={e => setForm({ ...form, nome: e.target.value })}
-                         onBlur={e => setForm(f => ({ ...f, nome: capitalizarNome(e.target.value) }))} />
-                </div>
-                <div className="largo">
-                  <label htmlFor="c-fantasia">Nome fantasia</label>
-                  <input id="c-fantasia" value={form.nome_fantasia || ''}
-                         onChange={e => setForm({ ...form, nome_fantasia: e.target.value })}
-                         onBlur={e => setForm(f => ({ ...f, nome_fantasia: capitalizarNome(e.target.value) }))} />
-                </div>
-                <div>
-                  <label htmlFor="c-pessoa">Pessoa</label>
-                  <select id="c-pessoa" value={form.tipo_pessoa || 'J'}
-                          onChange={e => setForm({ ...form, tipo_pessoa: e.target.value })}>
-                    <option value="J">Jurídica</option><option value="F">Física</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="c-doc">{form.tipo_pessoa === 'F' ? 'CPF' : 'CNPJ'}</label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input id="c-doc" inputMode="numeric" style={{ flex: 1 }}
-                           value={form.tipo_pessoa === 'F' ? (form.cpf || '') : formatarCnpj(form.cnpj)}
-                           onChange={e => setForm(form.tipo_pessoa === 'F'
-                             ? { ...form, cpf: soDigitos(e.target.value).slice(0, 11) }
-                             : { ...form, cnpj: soDigitos(e.target.value).slice(0, 14) })} />
-                    {form.tipo_pessoa === 'J' && (
-                      <button type="button" className="btn secondary small" disabled={!cnpjValido(form.cnpj) || consultandoCnpj}
-                              onClick={consultarCnpj}>
-                        {consultandoCnpj ? 'Consultando…' : 'Consultar'}
-                      </button>
-                    )}
-                  </div>
-                  {erroConsultaCnpj && <p className="ajuda erro">{erroConsultaCnpj}</p>}
-                  {situacaoCnpj && (
-                    <p className="ajuda">
-                      Situação na Receita: {situacaoCnpj}. Inscrição estadual não vem nessa consulta — confira na SEFIN.
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label htmlFor="c-tipo">Tipo de cliente</label>
-                  <select id="c-tipo" value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}>
-                    {TIPOS.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="c-contato">Contato</label>
-                  <input id="c-contato" value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} />
-                </div>
-                <div>
-                  <label htmlFor="c-fone">Telefone</label>
-                  <input id="c-fone" inputMode="numeric" value={formatarTelefone(form.telefone)}
-                         onChange={e => setForm({ ...form, telefone: soDigitos(e.target.value).slice(0, 11) })} />
-                </div>
-              </div>
-
-              {fiscalDisponivel && (
-                <div className="form-grid">
-                  <div className="secao">Dados para nota fiscal</div>
-                  <div>
-                    <label htmlFor="c-indie">Inscrição estadual</label>
-                    <select id="c-indie" value={form.ind_ie_dest ?? ''}
-                            onChange={e => setForm({
-                              ...form,
-                              ind_ie_dest: e.target.value === '' ? null : Number(e.target.value),
-                              // Trocar para não contribuinte com IE preenchida
-                              // deixaria o registro em estado que o banco recusa.
-                              ie: e.target.value === '1' ? form.ie : '',
-                            })}>
-                      <option value="">Selecione…</option>
-                      <option value="1">Contribuinte de ICMS</option>
-                      <option value="2">Isento de inscrição</option>
-                      <option value="9">Não contribuinte</option>
-                    </select>
-                  </div>
-                  {Number(form.ind_ie_dest) === 1 && (
-                    <div>
-                      <label htmlFor="c-ie">Número da inscrição</label>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input id="c-ie" inputMode="numeric" style={{ flex: 1 }} value={form.ie || ''}
-                               onChange={e => setForm({ ...form, ie: soDigitos(e.target.value) })} />
-                        <button type="button" className="btn secondary small" onClick={abrirConsultaIe}>
-                          Consultar IE
-                        </button>
-                      </div>
-                      {cnpjCopiado && <p className="ajuda">CNPJ copiado — cole no campo da consulta.</p>}
-                    </div>
-                  )}
-                  <div>
-                    <label htmlFor="c-final">Compra para</label>
-                    <select id="c-final" value={form.consumidor_final === null || form.consumidor_final === undefined ? '' : String(form.consumidor_final)}
-                            onChange={e => setForm({ ...form, consumidor_final: e.target.value === '' ? null : e.target.value === 'true' })}>
-                      <option value="">Selecione…</option>
-                      <option value="false">Revender</option>
-                      <option value="true">Consumo próprio</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="c-email">E-mail para a nota</label>
-                    <input id="c-email" type="email" value={form.email_nfe || ''}
-                           onChange={e => setForm({ ...form, email_nfe: e.target.value })} />
-                  </div>
-
-                  <div className="secao">Endereço</div>
-                  <div className="largo">
-                    <label htmlFor="c-log">Logradouro</label>
-                    <input id="c-log" value={form.logradouro || ''}
-                           onChange={e => setForm({ ...form, logradouro: e.target.value })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-num">Número</label>
-                    <input id="c-num" value={form.numero || ''} onChange={e => setForm({ ...form, numero: e.target.value })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-comp">Complemento</label>
-                    <input id="c-comp" value={form.complemento || ''} onChange={e => setForm({ ...form, complemento: e.target.value })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-bairro">Bairro</label>
-                    <input id="c-bairro" value={form.bairro || ''} onChange={e => setForm({ ...form, bairro: e.target.value })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-cep">CEP</label>
-                    <input id="c-cep" inputMode="numeric" maxLength={8} value={form.cep || ''}
-                           onChange={e => setForm({ ...form, cep: soDigitos(e.target.value) })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-mun">Município</label>
-                    <input id="c-mun" value={form.municipio || ''} onChange={e => setForm({ ...form, municipio: e.target.value })} />
-                  </div>
-                  <div>
-                    <label htmlFor="c-ibge">Código IBGE</label>
-                    <input id="c-ibge" inputMode="numeric" maxLength={7} value={form.codigo_municipio_ibge || ''}
-                           onChange={e => setForm({ ...form, codigo_municipio_ibge: soDigitos(e.target.value) })} />
-                    <p className="ajuda">Ji-Paraná é 1100122; Porto Velho, 1100205.</p>
-                  </div>
-                  <div>
-                    <label htmlFor="c-uf">UF</label>
-                    <input id="c-uf" maxLength={2} value={form.uf || ''}
-                           onChange={e => setForm({ ...form, uf: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') })} />
-                  </div>
-                </div>
-              )}
-            </div>
-
+            <FichaParceiro
+              form={form} setForm={setForm} papeis={papeis} setPapeis={setPapeis}
+              fiscalDisponivel={fiscalDisponivel} pendencias={pendencias}
+              consultandoCnpj={consultandoCnpj} erroConsultaCnpj={erroConsultaCnpj}
+              situacaoCnpj={situacaoCnpj} onConsultarCnpj={consultarCnpj}
+              cnpjCopiado={cnpjCopiado} onConsultarIe={abrirConsultaIe}
+            />
             <div className="modal-foot">
               <button className="btn" type="submit" disabled={salvando}>
-                {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Criar cliente')}
+                {salvando ? 'Salvando…' : (selecionado ? 'Salvar alterações' : 'Criar parceiro')}
               </button>
               <button className="btn secondary" type="button" onClick={fechar}>Cancelar</button>
-              {emEdicao && (
+              {selecionado && (
                 <>
                   <button className="btn secondary small" type="button" style={{ marginLeft: 'auto' }}
-                          onClick={() => alternarAtivo(emEdicao)}>
-                    {emEdicao.ativo === false ? 'Reativar' : 'Desativar'}
+                          onClick={alternarAtivoSelecionado}>
+                    {selecionado.ativo === false ? 'Reativar' : 'Desativar'}
                   </button>
-                  <button className="btn danger" type="button"
-                          onClick={() => excluir(emEdicao, `Excluir o cliente ${emEdicao.nome}?`)}>
+                  <button className="btn danger" type="button" onClick={excluirSelecionado}>
                     <Icone nome="lixeira" tamanho={13} /> Excluir
                   </button>
                 </>
@@ -372,15 +271,8 @@ function Conteudo() {
   );
 }
 
-function docFormatado(c) {
-  if (c.cnpj) return formatarCnpj(c.cnpj);
-  if (c.cpf) return formatarCpf(c.cpf);
+function docFormatado(p) {
+  if (p.cliente?.tipo_pessoa === 'F' && p.cliente?.cpf) return formatarCpf(p.cliente.cpf);
+  if (p.cnpj) return formatarCnpj(p.cnpj);
   return '';
-}
-
-// Antes da atualização 36 o cadastro só tinha o recorte comercial; mandar as
-// colunas do bloco dest para um banco sem elas derruba o insert inteiro.
-function recorteComercial(dados) {
-  const { nome, nome_fantasia, cnpj, tipo, contato, telefone } = dados;
-  return { nome, nome_fantasia, cnpj, tipo, contato, telefone };
 }
