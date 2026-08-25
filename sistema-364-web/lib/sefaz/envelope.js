@@ -7,10 +7,24 @@
 // sem. Documento de verdade (o XML da nota) continua sendo lido com
 // fast-xml-parser, como já faz lib/nfe/parseNFe.js.
 
-export function envelopeSoap(corpoXml) {
+// `namespaceServico` é obrigatório: sem o payload embrulhado em
+// <nfeDadosMsg xmlns="...">, a SEFAZ recebe a mensagem mas rejeita a forma
+// (soap:Fault/soap:Sender) — é exatamente o bug que esta função existe para
+// corrigir. Deixar o parâmetro opcional permitiria reintroduzi-lo em
+// silêncio; por isso lança em vez de cair para um envelope sem
+// nfeDadosMsg. Use endpoints.js#namespaceServico(servico) para obtê-lo.
+export function envelopeSoap(corpoXml, namespaceServico) {
+  if (!namespaceServico) {
+    throw new Error(
+      'envelopeSoap requer o namespace do serviço (nfeDadosMsg). '
+      + 'Use namespaceServico(servico) de lib/sefaz/endpoints.js.',
+    );
+  }
   return '<?xml version="1.0" encoding="UTF-8"?>'
     + '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">'
-    + '<soap:Body>' + corpoXml + '</soap:Body>'
+    + '<soap:Body>'
+    + `<nfeDadosMsg xmlns="${namespaceServico}">${corpoXml}</nfeDadosMsg>`
+    + '</soap:Body>'
     + '</soap:Envelope>';
 }
 

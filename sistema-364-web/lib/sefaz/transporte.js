@@ -30,9 +30,13 @@ import { extrairChaveECert } from '../certificadoServer.js';
 import { RAIZ_ICP_BRASIL_V10 } from './icpBrasil.js';
 
 const TIMEOUT_PADRAO_MS = 20000;
-const TAMANHO_EXCERTO_ERRO = 300;
+// 300 já cortou o SOAP Fault da própria SEFAZ no meio do <soap:Reason>,
+// escondendo a única frase que explicava a causa (foi assim que se
+// descobriu que faltava o nfeDadosMsg). ~2000 cobre um Fault inteiro; é
+// saída da própria SEFAZ, não carrega material de certificado.
+const TAMANHO_EXCERTO_ERRO = 2000;
 
-export async function chamarSefaz({ url, corpoXml, pfx, senha, timeoutMs = TIMEOUT_PADRAO_MS }) {
+export async function chamarSefaz({ url, corpoXml, pfx, senha, timeoutMs = TIMEOUT_PADRAO_MS, acaoSoap }) {
   if (!pfx) throw new Error('Certificado ausente para falar com a SEFAZ.');
   // extrairChaveECert já lança erro claro se o .pfx não trouxer a chave
   // privada ou se a senha estiver errada — não precisa de tratamento extra
@@ -51,11 +55,16 @@ export async function chamarSefaz({ url, corpoXml, pfx, senha, timeoutMs = TIMEO
       ca: [...tls.rootCertificates, RAIZ_ICP_BRASIL_V10],
     },
   });
+  // SOAP 1.2 carrega a ação como parâmetro `action` do Content-Type, não como
+  // header SOAPAction separado (isso era SOAP 1.1) — a SEFAZ espera assim.
+  const contentType = acaoSoap
+    ? `application/soap+xml; charset=utf-8; action="${acaoSoap}"`
+    : 'application/soap+xml; charset=utf-8';
   try {
     const resposta = await request(url, {
       method: 'POST',
       body: corpoXml,
-      headers: { 'Content-Type': 'application/soap+xml; charset=utf-8' },
+      headers: { 'Content-Type': contentType },
       dispatcher: agente,
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,

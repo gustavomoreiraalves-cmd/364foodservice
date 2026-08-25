@@ -17,7 +17,13 @@ const BASE = {
 };
 
 const CAMINHO = {
-  statusServico: 'NfeStatusServico/NfeStatusServico4.asmx',
+  // O segundo segmento (nome do arquivo .asmx, sem extensão) também é a fonte
+  // do nome de serviço WSDL usado em namespaceServico() abaixo — por isso a
+  // grafia "NFeStatusServico4" (F maiúsculo) importa aqui: é o nome real do
+  // serviço, confirmado batendo com o SOAP Fault que a SEFAZ devolveu em
+  // homologação. O path em si é tolerante a maiúscula/minúscula (IIS/ASMX),
+  // mas o nome derivado dele não pode ser.
+  statusServico: 'NfeStatusServico/NFeStatusServico4.asmx',
   autorizacao: 'NfeAutorizacao/NFeAutorizacao4.asmx',
   retAutorizacao: 'NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
   recepcaoEvento: 'recepcaoevento/recepcaoevento4.asmx',
@@ -47,4 +53,47 @@ export function endpointSefaz(servico, ambiente) {
   const caminho = CAMINHO[servico];
   if (!caminho) throw new Error(`Serviço desconhecido: ${servico}.`);
   return `${base}/${caminho}`;
+}
+
+// Nome do serviço tal como o WSDL o declara: o nome do arquivo .asmx em
+// CAMINHO, sem extensão. Deriva do mesmo CAMINHO que monta a URL — de
+// propósito, para não existir uma segunda lista que possa divergir dele.
+function nomeServicoWsdl(servico) {
+  const caminho = CAMINHO[servico];
+  if (!caminho) throw new Error(`Serviço desconhecido: ${servico}.`);
+  const arquivo = caminho.split('/').pop();
+  return arquivo.replace(/\.asmx$/i, '');
+}
+
+// Namespace do elemento <nfeDadosMsg> que envolve o payload dentro do
+// soap:Body. Sem isso (ou com o namespace errado), a SEFAZ devolve
+// soap:Fault/soap:Sender: ela recebeu a mensagem mas rejeitou a forma.
+export function namespaceServico(servico) {
+  return `http://www.portalfiscal.inf.br/nfe/wsdl/${nomeServicoWsdl(servico)}`;
+}
+
+// SOAPAction por serviço. No SOAP 1.2 isso vai como parâmetro `action` do
+// Content-Type (não como header SOAPAction separado — isso era SOAP 1.1).
+// Cada serviço tem um nome de método próprio dentro do seu WSDL, e esses
+// nomes NÃO seguem um padrão uniforme entre si (serviços em lote usam verbos
+// diferentes) — ao contrário do namespace, não dá para derivar isso de
+// CAMINHO. Por isso só entra aqui o que já foi conferido contra o WSDL real;
+// os demais devem ser adicionados um a um, na hora de implementar aquele
+// fluxo, nunca por suposição. Pedir a ação de um serviço ainda não
+// verificado lança, em vez de silenciosamente mandar a requisição sem
+// SOAPAction ou com um verbo chutado — foi exatamente uma suposição não
+// verificada (undici aceitando .pfx bruto) que causou esta sessão de debug.
+const METODO_SOAP_VERIFICADO = {
+  statusServico: 'nfeStatusServicoNF',
+};
+
+export function acaoSoapServico(servico) {
+  const metodo = METODO_SOAP_VERIFICADO[servico];
+  if (!metodo) {
+    throw new Error(
+      `SOAPAction de '${servico}' ainda não foi verificada contra o WSDL do serviço. `
+      + 'Confira o método real no WSDL antes de implementar esse fluxo — não adivinhe.',
+    );
+  }
+  return `${namespaceServico(servico)}/${metodo}`;
 }

@@ -7,7 +7,7 @@
 //
 // Atenção: consStatServ NÃO é assinado. Este caminho não exercita a assinatura
 // XMLDSig — quem cobre isso é tests/sefaz-assinatura.test.mjs.
-import { endpointSefaz, tpAmb, CUF_RONDONIA } from './endpoints.js';
+import { endpointSefaz, tpAmb, CUF_RONDONIA, namespaceServico, acaoSoapServico } from './endpoints.js';
 import { envelopeSoap, extrairCorpoResposta, lerCampos } from './envelope.js';
 import { chamarSefaz } from './transporte.js';
 
@@ -20,7 +20,8 @@ export async function consultarStatusServico({ ambiente, pfx, senha, timeoutMs }
 
   const resposta = await chamarSefaz({
     url: endpointSefaz('statusServico', ambiente),
-    corpoXml: envelopeSoap(corpo),
+    corpoXml: envelopeSoap(corpo, namespaceServico('statusServico')),
+    acaoSoap: acaoSoapServico('statusServico'),
     pfx,
     senha,
     timeoutMs,

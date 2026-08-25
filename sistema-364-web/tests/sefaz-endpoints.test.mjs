@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { endpointSefaz, tpAmb, CUF_RONDONIA } from '../lib/sefaz/endpoints.js';
+import { endpointSefaz, tpAmb, CUF_RONDONIA, namespaceServico, acaoSoapServico } from '../lib/sefaz/endpoints.js';
 
 test('cUF de Rondônia', () => {
   assert.equal(CUF_RONDONIA, '11');
@@ -42,4 +42,30 @@ test('consultaProtocolo e inutilizacao apontam para os serviços certos', () => 
 
 test('serviço desconhecido lança em vez de devolver undefined', () => {
   assert.throws(() => endpointSefaz('inexistente', 'producao'), /servi/i);
+});
+
+test('namespaceServico devolve a URI wsdl correta por serviço', () => {
+  assert.equal(namespaceServico('statusServico'), 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4');
+  assert.equal(namespaceServico('autorizacao'), 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4');
+  assert.equal(namespaceServico('retAutorizacao'), 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4');
+  assert.equal(namespaceServico('consultaProtocolo'), 'http://www.portalfiscal.inf.br/nfe/wsdl/NfeConsultaProtocolo4');
+  assert.equal(namespaceServico('inutilizacao'), 'http://www.portalfiscal.inf.br/nfe/wsdl/NfeInutilizacao4');
+  assert.equal(namespaceServico('recepcaoEvento'), 'http://www.portalfiscal.inf.br/nfe/wsdl/recepcaoevento4');
+});
+
+test('namespaceServico lança para serviço desconhecido', () => {
+  assert.throws(() => namespaceServico('inexistente'), /servi/i);
+});
+
+test('acaoSoapServico devolve a SOAPAction verificada de statusServico', () => {
+  assert.equal(
+    acaoSoapServico('statusServico'),
+    'http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4/nfeStatusServicoNF',
+  );
+});
+
+test('acaoSoapServico lança para serviço sem SOAPAction verificada, em vez de adivinhar', () => {
+  for (const servico of ['autorizacao', 'retAutorizacao', 'recepcaoEvento', 'consultaProtocolo', 'inutilizacao']) {
+    assert.throws(() => acaoSoapServico(servico), /verificad/i, servico);
+  }
 });

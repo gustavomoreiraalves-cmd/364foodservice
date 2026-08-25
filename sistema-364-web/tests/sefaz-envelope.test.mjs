@@ -2,11 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { envelopeSoap, extrairCorpoResposta, lerCampos } from '../lib/sefaz/envelope.js';
 
-test('envelopa o corpo em SOAP 1.2', () => {
-  const env = envelopeSoap('<consStatServ versao="4.00"><tpAmb>2</tpAmb></consStatServ>');
+const NS_STATUS_SERVICO = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4';
+
+test('envelopa o corpo em SOAP 1.2, dentro de nfeDadosMsg com o namespace do serviço', () => {
+  const env = envelopeSoap('<consStatServ versao="4.00"><tpAmb>2</tpAmb></consStatServ>', NS_STATUS_SERVICO);
   assert.match(env, /http:\/\/www\.w3\.org\/2003\/05\/soap-envelope/);
   assert.match(env, /<consStatServ versao="4\.00">/);
   assert.ok(env.indexOf('<consStatServ') > env.indexOf('Body'), 'o corpo precisa estar dentro do Body');
+  assert.match(env, new RegExp(`<nfeDadosMsg xmlns="${NS_STATUS_SERVICO.replace(/\//g, '\\/')}">`));
+  assert.ok(
+    env.indexOf('<nfeDadosMsg') > env.indexOf('<soap:Body') && env.indexOf('<consStatServ') > env.indexOf('<nfeDadosMsg'),
+    'nfeDadosMsg precisa estar dentro do Body, envolvendo o payload',
+  );
+});
+
+test('o payload sobrevive intacto dentro de nfeDadosMsg, sem ter o namespace do wrapper sobrescrito', () => {
+  const corpo = '<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">'
+    + '<tpAmb>2</tpAmb><cUF>11</cUF><xServ>STATUS</xServ></consStatServ>';
+  const env = envelopeSoap(corpo, NS_STATUS_SERVICO);
+  assert.ok(env.includes(corpo), 'o corpo precisa aparecer exatamente como foi passado, sem alteração');
+  assert.match(env, /<consStatServ xmlns="http:\/\/www\.portalfiscal\.inf\.br\/nfe" versao="4\.00">/);
+});
+
+test('namespace do serviço é obrigatório: sem ele, lança em vez de gerar o envelope quebrado', () => {
+  assert.throws(() => envelopeSoap('<consStatServ/>'), /namespace/i);
+  assert.throws(() => envelopeSoap('<consStatServ/>', ''), /namespace/i);
+  assert.throws(() => envelopeSoap('<consStatServ/>', null), /namespace/i);
 });
 
 test('extrai o corpo da resposta, descartando o envelope', () => {
