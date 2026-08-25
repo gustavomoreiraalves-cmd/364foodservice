@@ -2,6 +2,8 @@
 // pelo cadastro rápido que abre no recebimento quando o XML traz um emitente
 // desconhecido. Função pura: sem rede, sem banco, sem estado.
 
+import { enderecoParaGravar } from './endereco.js';
+
 export const CATEGORIAS_FORNECEDOR = ['Carnes', 'Temperos', 'Embalagens', 'Equipamentos', 'Serviços', 'Outros'];
 
 // O documento é gravado só com dígitos: é assim que ele vem no XML da NF-e, e é
@@ -9,7 +11,10 @@ export const CATEGORIAS_FORNECEDOR = ['Carnes', 'Temperos', 'Embalagens', 'Equip
 // cadastrado como 12.345.678/0001-99 nunca casava com a nota.
 export const soDigitos = v => String(v || '').replace(/\D/g, '');
 
-const FORM_VAZIO = { nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' };
+const FORM_VAZIO = {
+  nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '',
+  logradouro: '', numero: '', complemento: '', bairro: '', codigo_municipio_ibge: '', municipio: '', uf: '', cep: '',
+};
 
 // Monta o formulário do cadastro rápido a partir do `fornecedorSugerido` que a
 // rota /preparar devolve. Campo que a nota não traz vem null de lá e precisa
@@ -43,6 +48,7 @@ export function fornecedorParaGravar(form) {
     contato: ouNulo(form.contato),
     telefone: soDigitos(form.telefone) || null,
     email: ouNulo(form.email),
+    ...enderecoParaGravar(form),
   };
 }
 

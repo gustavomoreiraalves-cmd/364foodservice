@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CATEGORIAS_FORNECEDOR, soDigitos, formularioDaNota, fornecedorParaGravar, mensagemAoCadastrar,
 } from '../lib/fornecedores.js';
+import { clienteParaGravar } from '../lib/clientes.js';
 
 test('soDigitos: tira máscara, mantém só números', () => {
   assert.equal(soDigitos('12.345.678/0001-99'), '12345678000199');
@@ -35,7 +36,10 @@ test('formularioDaNota: emitente sem documento deixa o campo vazio para preenche
 
 test('formularioDaNota: sem sugestão nenhuma devolve formulário em branco', () => {
   const form = formularioDaNota(null);
-  assert.deepEqual(form, { nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' });
+  assert.deepEqual(form, {
+    nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '',
+    logradouro: '', numero: '', complemento: '', bairro: '', codigo_municipio_ibge: '', municipio: '', uf: '', cep: '',
+  });
 });
 
 test('fornecedorParaGravar: normaliza o CNPJ e manda em branco como null', () => {
@@ -69,6 +73,31 @@ test('fornecedorParaGravar: sincroniza nome_fantasia com o cliente vinculado (br
 
 test('fornecedorParaGravar: telefone vira só dígitos (mesma convenção do lado cliente, pro campo ficar idêntico quando vinculado)', () => {
   assert.equal(fornecedorParaGravar({ nome: 'X', telefone: '(11) 91234-5678', categoria: 'Outros' }).telefone, '11912345678');
+});
+
+test('fornecedorParaGravar: grava endereço normalizado (cep e IBGE só com dígitos, UF maiúscula)', () => {
+  const gravar = fornecedorParaGravar({
+    nome: 'Distribuidora XYZ', categoria: 'Embalagens',
+    logradouro: 'Avenida Brasil', numero: '725', bairro: 'Nova Brasília',
+    codigo_municipio_ibge: '1100122', municipio: 'Ji-Paraná', uf: 'ro', cep: '76908-408',
+  });
+  assert.equal(gravar.logradouro, 'Avenida Brasil');
+  assert.equal(gravar.uf, 'RO');
+  assert.equal(gravar.cep, '76908408');
+  assert.equal(gravar.codigo_municipio_ibge, '1100122');
+});
+
+test('fornecedorParaGravar: endereço sai idêntico ao de clienteParaGravar pra mesma entrada (garante o vínculo não divergir)', () => {
+  const form = {
+    nome: 'Manar', categoria: 'Carnes', tipo_pessoa: 'J',
+    logradouro: 'Rua X', numero: '10', complemento: '', bairro: 'Centro',
+    codigo_municipio_ibge: '1100122', municipio: 'Ji-Paraná', uf: 'ro', cep: '76900-000',
+  };
+  const doFornecedor = fornecedorParaGravar(form);
+  const doCliente = clienteParaGravar(form);
+  for (const campo of ['logradouro', 'numero', 'complemento', 'bairro', 'codigo_municipio_ibge', 'municipio', 'uf', 'cep']) {
+    assert.equal(doFornecedor[campo], doCliente[campo], `campo ${campo} divergiu entre cliente e fornecedor`);
+  }
 });
 
 test('mensagemAoCadastrar: documento repetido vira instrução, não erro do Postgres', () => {

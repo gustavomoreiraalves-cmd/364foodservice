@@ -2,6 +2,8 @@
 // recorte comercial usado quando a atualização 36 (bloco fiscal) ainda não
 // rodou no banco. Função pura: sem rede, sem Supabase, sem React.
 
+import { enderecoParaGravar } from './endereco.js';
+
 const soDigitos = v => String(v || '').replace(/\D/g, '');
 const ouNulo = v => (String(v || '').trim() || null);
 
@@ -19,14 +21,7 @@ export function clienteParaGravar(form) {
     ind_ie_dest: form.ind_ie_dest === '' || form.ind_ie_dest === null || form.ind_ie_dest === undefined
       ? null : Number(form.ind_ie_dest),
     consumidor_final: form.consumidor_final === undefined ? null : form.consumidor_final,
-    logradouro: ouNulo(form.logradouro),
-    numero: ouNulo(form.numero),
-    complemento: ouNulo(form.complemento),
-    bairro: ouNulo(form.bairro),
-    codigo_municipio_ibge: soDigitos(form.codigo_municipio_ibge) || null,
-    municipio: ouNulo(form.municipio),
-    uf: (form.uf || '').toUpperCase().replace(/[^A-Z]/g, '') || null,
-    cep: soDigitos(form.cep) || null,
+    ...enderecoParaGravar(form),
     email_nfe: ouNulo(form.email_nfe),
   };
 }

@@ -171,7 +171,7 @@ function Conteudo() {
   }
 
   const COLUNAS = [
-    { titulo: 'Nome', principal: true, minimo: 200, render: p => p.nome, textoPuro: p => p.nome },
+    { titulo: 'Nome', principal: true, minimo: 200, render: p => p.nome_fantasia || p.nome, textoPuro: p => p.nome_fantasia || p.nome },
     {
       titulo: 'Papel', largura: 150,
       render: p => (

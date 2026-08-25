@@ -12,7 +12,7 @@ function linhaParceiro({ id, clienteId, fornecedorId, papeis, cliente, fornecedo
     id, clienteId, fornecedorId, papeis,
     nome: principal.nome, nome_fantasia: principal.nome_fantasia || '',
     cnpj: principal.cnpj || '', contato: principal.contato || '', telefone: principal.telefone || '',
-    cpf: cliente?.cpf || '', tipo: cliente?.tipo || '', municipio: cliente?.municipio || '', uf: cliente?.uf || '',
+    cpf: cliente?.cpf || '', tipo: cliente?.tipo || '', municipio: principal.municipio || '', uf: principal.uf || '',
     categoria: fornecedor?.categoria || '', email: fornecedor?.email || '',
     cliente: cliente || null, fornecedor: fornecedor || null,
     ativo: (cliente ? cliente.ativo !== false : true) && (fornecedor ? fornecedor.ativo !== false : true),

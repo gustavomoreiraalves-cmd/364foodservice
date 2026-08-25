@@ -49,7 +49,11 @@ function criarSb(banco, { falharAoExcluir = new Set(), falharAoInserir = new Set
 }
 
 const CLIENTE_SOLTO = { id: 'c1', nome: 'Açougue Central', nome_fantasia: null, cnpj: '111', contato: 'A', telefone: '1', tipo: 'Revenda', municipio: 'Ji-Paraná', uf: 'RO', ativo: true, fornecedor_vinculado_id: null };
-const FORNECEDOR_SOLTO = { id: 'f1', nome: 'Distribuidora XYZ', nome_fantasia: null, cnpj: '222', contato: 'B', telefone: '2', categoria: 'Embalagens', email: 'xyz@ex.com', ativo: true, cliente_vinculado_id: null };
+const FORNECEDOR_SOLTO = {
+  id: 'f1', nome: 'Distribuidora XYZ', nome_fantasia: null, cnpj: '222', contato: 'B', telefone: '2',
+  categoria: 'Embalagens', email: 'xyz@ex.com', municipio: 'Porto Velho', uf: 'RO',
+  ativo: true, cliente_vinculado_id: null,
+};
 
 test('montarListaParceiros: cliente sem vínculo vira uma linha com papel só cliente', () => {
   const lista = montarListaParceiros([CLIENTE_SOLTO], []);
@@ -71,6 +75,9 @@ test('montarListaParceiros: fornecedor sem vínculo vira uma linha com papel só
   assert.equal(lista[0].fornecedorId, 'f1');
   assert.equal(lista[0].categoria, 'Embalagens');
   assert.equal(lista[0].tipo, '');
+  // Endereço agora existe pros dois lados — não é mais exclusivo de cliente.
+  assert.equal(lista[0].municipio, 'Porto Velho');
+  assert.equal(lista[0].uf, 'RO');
 });
 
 test('montarListaParceiros: par vinculado vira uma linha só, com os dois papéis', () => {
@@ -142,6 +149,23 @@ test('salvarParceiro: cria os dois lados vinculados quando os dois papéis estã
   assert.equal(banco.fornecedores[0].cliente_vinculado_id, banco.clientes[0].id);
   assert.equal(banco.clientes[0].nome, 'Manar');
   assert.equal(banco.fornecedores[0].nome, 'Manar');
+});
+
+test('salvarParceiro: endereço sai idêntico nos dois lados quando os dois papéis estão marcados', async () => {
+  const banco = { clientes: [], fornecedores: [] };
+  const sb = criarSb(banco);
+  await salvarParceiro(sb, {
+    form: {
+      nome: 'Manar', cnpj: '222', tipo: 'Revenda', tipo_pessoa: 'J', categoria: 'Carnes',
+      logradouro: 'Avenida Brasil', numero: '725', bairro: 'Nova Brasília',
+      codigo_municipio_ibge: '1100122', municipio: 'Ji-Paraná', uf: 'ro', cep: '76908-408',
+    },
+    papeis: ['cliente', 'fornecedor'], clienteExistente: null, fornecedorExistente: null, empresaId: 'e1', fiscalDisponivel: true,
+  });
+  for (const campo of ['logradouro', 'numero', 'bairro', 'codigo_municipio_ibge', 'municipio', 'uf', 'cep']) {
+    assert.equal(banco.clientes[0][campo], banco.fornecedores[0][campo], `campo ${campo} divergiu`);
+  }
+  assert.equal(banco.clientes[0].uf, 'RO');
 });
 
 test('salvarParceiro: editar um par existente sincroniza os campos compartilhados nos dois lados', async () => {
