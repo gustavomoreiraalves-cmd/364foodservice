@@ -42,10 +42,12 @@ confirmação antes de baixar qualquer parcela.
 Tela: **Financeiro › Conciliação Bancária**. Antes do primeiro arquivo,
 cadastre a conta (ou o cartão) em **Financeiro › Contas Bancárias**.
 
-O campo Instituição desse cadastro hoje tem só seis opções fixas — Sicoob,
-Cresol, Sicredi, Banco do Brasil, Santander e Bradesco — sem campo livre para
-digitar outro nome. Se o grupo abrir conta em um banco fora dessa lista, o
-cadastro vai precisar de um ajuste no sistema antes de aceitar essa conta.
+O campo Instituição aceita qualquer texto. Ele sugere os seis bancos do grupo
+— Sicoob, Cresol, Sicredi, Banco do Brasil, Santander e Bradesco — mais tudo
+que você já cadastrou antes nessa empresa, mas você pode digitar outro nome à
+vontade. Vale usar isso para descrever melhor, principalmente em cartão de
+crédito, onde o emissor e a bandeira raramente têm o mesmo nome do banco:
+"Bradesco Elo Nanquim" e "Nubank PJ" são nomes melhores que "Bradesco".
 
 | Formato | Como é lido | Custo | Confiabilidade |
 |---|---|---|---|
@@ -224,8 +226,9 @@ entradas".
 ## Passo a passo
 
 1. Cadastre as contas em **Financeiro › Contas Bancárias** — uma linha para
-   cada conta corrente e cada cartão de crédito (ver a observação sobre as
-   seis instituições disponíveis, na seção "Como importar").
+   cada conta corrente e cada cartão de crédito. O campo Instituição sugere os
+   bancos do grupo, mas aceita qualquer texto: use o nome que descreva melhor,
+   sobretudo nos cartões.
 2. Importe o arquivo em **Financeiro › Conciliação Bancária**, escolhendo a
    conta e se é extrato ou fatura.
 3. Se aparecer um aviso de que a conta não fechou — o texto muda conforme o
