@@ -5,7 +5,7 @@ import { montarListaParceiros, salvarParceiro, excluirParceiro, alternarAtivoPar
 // Dublê mínimo de supabase-js pra estas três funções: cobre só
 // insert/update/delete/select/eq/single, que é tudo que salvarParceiro usa.
 // `banco` é { clientes: [...], fornecedores: [...] } — mutado em memória.
-function criarSb(banco, { falharAoExcluir = new Set() } = {}) {
+function criarSb(banco, { falharAoExcluir = new Set(), falharAoInserir = new Set() } = {}) {
   let proximoId = 1;
   function builder(tabela) {
     const estado = {};
@@ -21,6 +21,9 @@ function criarSb(banco, { falharAoExcluir = new Set() } = {}) {
     async function executar() {
       const linhas = banco[tabela];
       if (estado.op === 'insert') {
+        if (falharAoInserir.has(tabela)) {
+          return { data: null, error: { message: `duplicate key value violates unique constraint "${tabela}_empresa_cnpj_idx"`, code: '23505' } };
+        }
         const linha = { id: `novo-${proximoId++}`, ...estado.linhas[0] };
         linhas.push(linha);
         return { data: linha, error: null };
@@ -231,6 +234,38 @@ test('salvarParceiro: recorte comercial não derruba o vínculo com fornecedor',
   assert.equal(error, null);
   assert.equal(banco.clientes[0].fornecedor_vinculado_id, 'f9');
   assert.equal('uf' in banco.clientes[0], false);
+});
+
+test('salvarParceiro: fornecedor criado é desfeito se a gravação do cliente falhar', async () => {
+  const banco = { clientes: [], fornecedores: [] };
+  const sb = criarSb(banco, { falharAoInserir: new Set(['clientes']) });
+  const { error } = await salvarParceiro(sb, {
+    form: { nome: 'Manar', cnpj: '222', tipo: 'Revenda', tipo_pessoa: 'J', categoria: 'Carnes' },
+    papeis: ['cliente', 'fornecedor'], clienteExistente: null, fornecedorExistente: null, empresaId: 'e1', fiscalDisponivel: true,
+  });
+  assert.match(error, /cliente/);
+  assert.equal(banco.fornecedores.length, 0, 'o fornecedor criado nesta chamada não deve sobrar órfão');
+  assert.equal(banco.clientes.length, 0);
+});
+
+test('salvarParceiro: CNPJ de fornecedor duplicado vira mensagem em português, não o erro do Postgres', async () => {
+  const banco = { clientes: [], fornecedores: [] };
+  const sb = criarSb(banco, { falharAoInserir: new Set(['fornecedores']) });
+  const { error } = await salvarParceiro(sb, {
+    form: { nome: 'Manar', cnpj: '222', tipo_pessoa: 'J', categoria: 'Carnes' },
+    papeis: ['fornecedor'], clienteExistente: null, fornecedorExistente: null, empresaId: 'e1',
+  });
+  assert.match(error, /já existe/i);
+  assert.doesNotMatch(error, /duplicate key/);
+});
+
+test('excluirParceiro: cliente excluído e fornecedor bloqueado por FK relata o que já foi feito', async () => {
+  const banco = { clientes: [{ id: 'c1', nome: 'Manar' }], fornecedores: [{ id: 'f1', nome: 'Manar' }] };
+  const sb = criarSb(banco, { falharAoExcluir: new Set(['f1']) });
+  const { error } = await excluirParceiro(sb, { clienteId: 'c1', fornecedorId: 'f1' });
+  assert.match(error, /cliente.*foi excluído/i);
+  assert.equal(banco.clientes.length, 0);
+  assert.equal(banco.fornecedores.length, 1);
 });
 
 test('excluirParceiro: exclui os dois lados de um par vinculado', async () => {

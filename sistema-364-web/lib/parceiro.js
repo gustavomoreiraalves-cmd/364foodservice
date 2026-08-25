@@ -4,7 +4,7 @@
 // abaixo neste mesmo arquivo.
 
 import { clienteParaGravar, recorteComercial } from './clientes.js';
-import { fornecedorParaGravar } from './fornecedores.js';
+import { fornecedorParaGravar, mensagemAoCadastrar } from './fornecedores.js';
 
 function linhaParceiro({ id, clienteId, fornecedorId, papeis, cliente, fornecedor }) {
   const principal = cliente || fornecedor;
@@ -75,6 +75,7 @@ export async function salvarParceiro(sb, { form, papeis, clienteExistente, forne
 
   let clienteId = querCliente ? clienteExistente?.id : null;
   let fornecedorId = querFornecedor ? fornecedorExistente?.id : null;
+  let fornecedorCriadoAgora = false;
 
   // Fornecedor primeiro: se os dois lados são novos, o cliente precisa do id
   // dele pra gravar o vínculo já na própria criação.
@@ -86,8 +87,9 @@ export async function salvarParceiro(sb, { form, papeis, clienteExistente, forne
     } else {
       const { data, error } = await sb.from('fornecedores')
         .insert([{ ...dados, empresa_id: empresaId }]).select('*').single();
-      if (error) return { error: 'Não foi possível criar o fornecedor: ' + error.message };
+      if (error) return { error: mensagemAoCadastrar(error) };
       fornecedorId = data.id;
+      fornecedorCriadoAgora = true;
     }
   }
 
@@ -96,11 +98,17 @@ export async function salvarParceiro(sb, { form, papeis, clienteExistente, forne
     const dados = { ...base, fornecedor_vinculado_id: querFornecedor ? fornecedorId : null };
     if (clienteId) {
       const { error } = await sb.from('clientes').update(dados).eq('id', clienteId);
-      if (error) return { error: 'Não foi possível salvar o cliente: ' + error.message };
+      if (error) {
+        if (fornecedorCriadoAgora) await sb.from('fornecedores').delete().eq('id', fornecedorId);
+        return { error: 'Não foi possível salvar o cliente: ' + error.message };
+      }
     } else {
       const { data, error } = await sb.from('clientes')
         .insert([{ ...dados, empresa_id: empresaId }]).select('*').single();
-      if (error) return { error: 'Não foi possível criar o cliente: ' + error.message };
+      if (error) {
+        if (fornecedorCriadoAgora) await sb.from('fornecedores').delete().eq('id', fornecedorId);
+        return { error: 'Não foi possível criar o cliente: ' + error.message };
+      }
       clienteId = data.id;
     }
   }
@@ -122,19 +130,23 @@ function mensagemDeExclusaoDePapel(erro, lado) {
 // Exclui os lados que existirem. Usado pelo botão "Excluir" da ficha de
 // parceiro — o mesmo bloqueio de FK de sempre vale por lado.
 export async function excluirParceiro(sb, parceiro) {
+  const excluidos = [];
   const erros = [];
   if (parceiro.clienteId) {
     const { error } = await sb.from('clientes').delete().eq('id', parceiro.clienteId);
-    if (error) erros.push('cliente: ' + error.message);
+    if (error) erros.push({ lado: 'cliente', mensagem: error.message }); else excluidos.push('cliente');
   }
   if (parceiro.fornecedorId) {
     const { error } = await sb.from('fornecedores').delete().eq('id', parceiro.fornecedorId);
-    if (error) erros.push('fornecedor: ' + error.message);
+    if (error) erros.push({ lado: 'fornecedor', mensagem: error.message }); else excluidos.push('fornecedor');
   }
-  if (erros.length) {
-    return { error: 'Não foi possível excluir (' + erros.join('; ') + '). Se já tem movimento, use Desativar em vez de Excluir.' };
+  if (!erros.length) return { error: null };
+
+  const detalhes = erros.map(e => `${e.lado}: ${e.mensagem}`).join('; ');
+  if (excluidos.length) {
+    return { error: `O cadastro de ${excluidos.join(' e ')} foi excluído, mas o de ${erros.map(e => e.lado).join(' e ')} não (${detalhes}). Use Desativar para o lado que sobrou.` };
   }
-  return { error: null };
+  return { error: `Não foi possível excluir (${detalhes}). Se já tem movimento, use Desativar em vez de Excluir.` };
 }
 
 // Ativa/desativa os lados que existirem, sempre pro mesmo valor.

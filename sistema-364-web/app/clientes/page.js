@@ -48,7 +48,7 @@ function Conteudo() {
   const [mostrarInativos, setMostrarInativos] = useState(false);
   const [fiscalDisponivel, setFiscalDisponivel] = useState(true);
 
-  const [selecionado, setSelecionado] = useState(null);
+  const [selecionadoId, setSelecionadoId] = useState(null);
   const [criando, setCriando] = useState(false);
   const [form, setForm] = useState(FORM_VAZIO);
   const [papeis, setPapeis] = useState(['cliente']);
@@ -79,19 +79,20 @@ function Conteudo() {
     () => filtrarRegistros(listaParceiros, { campos: CAMPOS_BUSCA, busca, mostrarInativos }),
     [listaParceiros, busca, mostrarInativos],
   );
+  const selecionado = selecionadoId ? listaParceiros.find(p => p.id === selecionadoId) ?? null : null;
   const pendencias = fiscalDisponivel && papeis.includes('cliente') ? pendenciasFiscaisCliente(form) : [];
   const aberto = criando || !!selecionado;
 
   function limparConsultaCnpj() { setErroConsultaCnpj(''); setSituacaoCnpj(''); setCnpjCopiado(false); }
 
   function abrirNovo() {
-    setSelecionado(null); setCriando(true); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
+    setSelecionadoId(null); setCriando(true); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
   }
   function fechar() {
-    setSelecionado(null); setCriando(false); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
+    setSelecionadoId(null); setCriando(false); setForm(FORM_VAZIO); setPapeis(['cliente']); limparConsultaCnpj();
   }
   function abrir(p) {
-    setCriando(false); setSelecionado(p);
+    setCriando(false); setSelecionadoId(p.id);
     setForm(camposDoFormulario({ ...(p.fornecedor || {}), ...(p.cliente || {}) }, FORM_VAZIO));
     setPapeis(p.papeis);
     limparConsultaCnpj();
