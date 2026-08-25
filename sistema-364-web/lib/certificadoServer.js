@@ -88,7 +88,7 @@ function abrirPfx(buffer, senha) {
     || bags.find(b => b.cert && !b.cert.isIssuer(b.cert))
     || bags[0];
   if (!bag?.cert) throw new Error('Arquivo não é um certificado PKCS#12 válido.');
-  return { cert: bag.cert, chave: chaves[0]?.key || null };
+  return { cert: bag.cert, chave: chaves[0]?.key || null, bags };
 }
 
 export function inspecionarPfx(buffer, senha) {
@@ -105,13 +105,25 @@ export function inspecionarPfx(buffer, senha) {
 
 // Material para assinar (XMLDSig) e para o handshake mTLS. Nunca serializar
 // nada disto em resposta HTTP nem em log: é a chave privada da empresa.
+//
+// certificadoPem é só o certificado do titular (a folha) — é o que vai no
+// X509Certificate da assinatura XMLDSig, e misturar mais de um certificado
+// ali quebraria a assinatura. certificadoCadeiaPem é a folha seguida do
+// restante dos certificados do .pfx (a cadeia, quando o arquivo a inclui) —
+// é o que o handshake mTLS deve apresentar; um bundle de PEMs concatenados é
+// aceito normalmente pelo TLS do Node como `cert`.
 export function extrairChaveECert(buffer, senha) {
-  const { cert, chave } = abrirPfx(buffer, senha);
+  const { cert, chave, bags } = abrirPfx(buffer, senha);
   if (!chave) throw new Error('O certificado não traz a chave privada — confira se o arquivo é o A1 completo.');
   const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  const certificadoPem = forge.pki.certificateToPem(cert);
+  const outrosDaCadeia = (bags || [])
+    .filter(b => b.cert && b.cert !== cert)
+    .map(b => forge.pki.certificateToPem(b.cert));
   return {
     chavePrivadaPem: forge.pki.privateKeyToPem(chave),
-    certificadoPem: forge.pki.certificateToPem(cert),
+    certificadoPem,
+    certificadoCadeiaPem: [certificadoPem, ...outrosDaCadeia].join('\n'),
     certificadoBase64: forge.util.encode64(der),
   };
 }

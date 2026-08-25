@@ -11,7 +11,7 @@ import { endpointSefaz, tpAmb, CUF_RONDONIA } from './endpoints.js';
 import { envelopeSoap, extrairCorpoResposta, lerCampos } from './envelope.js';
 import { chamarSefaz } from './transporte.js';
 
-export async function consultarStatusServico({ ambiente, pfx, senha }) {
+export async function consultarStatusServico({ ambiente, pfx, senha, timeoutMs }) {
   const corpo = '<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">'
     + `<tpAmb>${tpAmb(ambiente)}</tpAmb>`
     + `<cUF>${CUF_RONDONIA}</cUF>`
@@ -23,6 +23,7 @@ export async function consultarStatusServico({ ambiente, pfx, senha }) {
     corpoXml: envelopeSoap(corpo),
     pfx,
     senha,
+    timeoutMs,
   });
 
   const { cStat, xMotivo } = lerCampos(extrairCorpoResposta(resposta), ['cStat', 'xMotivo']);

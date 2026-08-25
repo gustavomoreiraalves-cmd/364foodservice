@@ -71,3 +71,16 @@ test('XML sem o Id esperado falha explicando, em vez de gerar assinatura inútil
   const semId = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe versao="4.00"><ide/></infNFe></NFe>`;
   assert.throws(() => assinarXml(semId, { chavePrivadaPem, certificadoPem, tagReferencia: 'infNFe' }), /Id/);
 });
+
+test('elemento repetido é recusado, em vez de assinar só o primeiro e deixar o resto sem Signature', () => {
+  const { chavePrivadaPem, certificadoPem } = material();
+  const doisEventos = `<?xml version="1.0" encoding="UTF-8"?>`
+    + `<envEvento xmlns="http://www.portalfiscal.inf.br/nfe">`
+    + `<evento><infEvento Id="ID1102000001112025000000015511100000001101"><tpEvento>110111</tpEvento></infEvento></evento>`
+    + `<evento><infEvento Id="ID1102000001112025000000015511100000001102"><tpEvento>110111</tpEvento></infEvento></evento>`
+    + `</envEvento>`;
+  assert.throws(
+    () => assinarXml(doisEventos, { chavePrivadaPem, certificadoPem, tagReferencia: 'infEvento' }),
+    /infEvento.*2|2 elemento/i,
+  );
+});

@@ -23,6 +23,18 @@ export function assinarXml(xml, { chavePrivadaPem, certificadoPem, tagReferencia
   const temId = new RegExp(`<${tagReferencia}[^>]*\\bId="[^"]+"`).test(xml);
   if (!temId) throw new Error(`O elemento <${tagReferencia}> precisa do atributo Id para ser assinado.`);
 
+  // Quando o xpath casa mais de um elemento (ex.: envEvento com vários
+  // <evento>), o xml-crypto não assina cada um: ele produz UMA <Signature>
+  // com N <Reference>s dentro do primeiro elemento casado, e os demais ficam
+  // sem assinatura própria — documento inválido para a SEFAZ, e o erro só
+  // aparece como rejeição de schema lá, não aqui. A NF-e exige uma
+  // <Signature> por elemento assinado, irmã dele. Por isso: barrar aqui e
+  // forçar quem chama a assinar elemento por elemento.
+  const contagem = (xml.match(new RegExp(`<${tagReferencia}(?=[\\s/>])`, 'g')) || []).length;
+  if (contagem !== 1) {
+    throw new Error(`O xpath de <${tagReferencia}> casou ${contagem} elemento(s); assine cada <${tagReferencia}> individualmente, não o documento inteiro de uma vez.`);
+  }
+
   const caminho = `//*[local-name(.)='${tagReferencia}']`;
   const sig = new SignedXml({
     privateKey: chavePrivadaPem,

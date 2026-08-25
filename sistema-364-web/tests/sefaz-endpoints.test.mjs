@@ -24,12 +24,20 @@ test('produção e homologação são hosts diferentes', () => {
   assert.match(homo, /^https:\/\/nfe-homologacao\.svrs\.rs\.gov\.br\//);
 });
 
-test('os quatro serviços têm endpoint nos dois ambientes', () => {
-  for (const servico of ['statusServico', 'autorizacao', 'retAutorizacao', 'recepcaoEvento']) {
+test('os seis serviços têm endpoint nos dois ambientes', () => {
+  for (const servico of ['statusServico', 'autorizacao', 'retAutorizacao', 'recepcaoEvento', 'consultaProtocolo', 'inutilizacao']) {
     for (const ambiente of ['producao', 'homologacao']) {
       assert.match(endpointSefaz(servico, ambiente), /^https:\/\/.+\.asmx$/, `${servico}/${ambiente}`);
     }
   }
+});
+
+// A máquina de estados da próxima etapa recupera de timeout consultando o
+// protocolo, e a numeração inutiliza número queimado — os dois só existem se
+// o endpoint apontar para o serviço certo, não para qualquer .asmx.
+test('consultaProtocolo e inutilizacao apontam para os serviços certos', () => {
+  assert.match(endpointSefaz('consultaProtocolo', 'producao'), /NfeConsultaProtocolo4\.asmx$/);
+  assert.match(endpointSefaz('inutilizacao', 'producao'), /NfeInutilizacao4\.asmx$/);
 });
 
 test('serviço desconhecido lança em vez de devolver undefined', () => {

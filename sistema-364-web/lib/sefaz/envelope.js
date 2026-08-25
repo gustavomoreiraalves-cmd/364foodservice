@@ -19,8 +19,22 @@ export function extrairCorpoResposta(xmlResposta) {
   return m ? m[1].trim() : String(xmlResposta).trim();
 }
 
-export function lerCampos(xml, campos) {
-  const texto = String(xml);
+// `dentroDe` restringe a busca ao conteúdo da primeira ocorrência dessa tag.
+// Sem isto, um retEnviNFe de autorização mistura níveis: cStat/xMotivo do
+// lote (ex.: 104 "Lote processado") são iguais em nome aos da nota dentro de
+// protNFe/infProt (ex.: 100 "Autorizado o uso da NF-e"), e o primeiro match
+// no documento inteiro é sempre o do lote — quieto e errado justamente no
+// caso que decide se a nota foi autorizada. `consStatServ` não tem esse
+// problema (só um nível), por isso o default sem escopo continua igual.
+export function lerCampos(xml, campos, { dentroDe } = {}) {
+  let texto = String(xml);
+  if (dentroDe) {
+    const escopo = texto.match(new RegExp(`<(?:\\w+:)?${dentroDe}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${dentroDe}>`, 'i'));
+    // Elemento de escopo ausente: nada de cair para o match externo — isso
+    // reintroduziria exatamente a mistura de níveis que o escopo existe para
+    // evitar. Todos os campos saem null.
+    texto = escopo ? escopo[1] : '';
+  }
   const saida = {};
   for (const campo of campos) {
     const m = texto.match(new RegExp(`<(?:\\w+:)?${campo}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${campo}>`, 'i'));

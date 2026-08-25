@@ -35,3 +35,30 @@ test('lê campo mesmo com prefixo de namespace no retorno', () => {
 test('resposta sem Body não quebra: devolve o que veio', () => {
   assert.equal(extrairCorpoResposta('<qualquer/>'), '<qualquer/>');
 });
+
+// Um retEnviNFe real repete cStat/xMotivo em dois níveis: o do lote
+// (envelope) e o da nota (dentro de protNFe/infProt). Sem escopo, o primeiro
+// match no documento é sempre o do lote — o que já foi Finding 4 da revisão
+// final: uma nota rejeitada podia sair marcada como autorizada.
+const RET_ENVI_NFE = `<retEnviNFe><cStat>104</cStat><xMotivo>Lote processado</xMotivo>`
+  + `<protNFe><infProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo>`
+  + `<nProt>111250000000001</nProt></infProt></protNFe></retEnviNFe>`;
+
+test('lerCampos com dentroDe lê o campo de dentro do elemento indicado, não o do nível externo', () => {
+  assert.deepEqual(
+    lerCampos(RET_ENVI_NFE, ['cStat', 'xMotivo', 'nProt'], { dentroDe: 'infProt' }),
+    { cStat: '100', xMotivo: 'Autorizado o uso da NF-e', nProt: '111250000000001' },
+  );
+});
+
+test('lerCampos sem dentroDe mantém o comportamento de sempre (primeiro match, nível do lote)', () => {
+  assert.deepEqual(lerCampos(RET_ENVI_NFE, ['cStat', 'xMotivo']), { cStat: '104', xMotivo: 'Lote processado' });
+});
+
+test('lerCampos com dentroDe ausente no documento devolve tudo null, não cai para o match externo', () => {
+  const semProtNFe = `<retConsStatServ><cStat>107</cStat><xMotivo>Servico em Operacao</xMotivo></retConsStatServ>`;
+  assert.deepEqual(
+    lerCampos(semProtNFe, ['cStat', 'xMotivo'], { dentroDe: 'infProt' }),
+    { cStat: null, xMotivo: null },
+  );
+});

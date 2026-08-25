@@ -21,6 +21,15 @@ const CAMINHO = {
   autorizacao: 'NfeAutorizacao/NFeAutorizacao4.asmx',
   retAutorizacao: 'NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
   recepcaoEvento: 'recepcaoevento/recepcaoevento4.asmx',
+  // consultaProtocolo: a máquina de estados da próxima etapa usa isto para se
+  // recuperar de um timeout — reenviar de novo arrisca duplicar a nota, mas
+  // consultar o protocolo pelo mesmo cUF/chave é seguro e resolve o "não sei
+  // se autorizou ou não" sem reemitir.
+  consultaProtocolo: 'NfeConsultaProtocolo/NfeConsultaProtocolo4.asmx',
+  // inutilizacao: a numeração usa isto para pular um número queimado (nota
+  // cancelada antes de transmitir, erro de sequência etc.) sem deixar buraco
+  // não declarado na sequência do modelo/série.
+  inutilizacao: 'NfeInutilizacao/NfeInutilizacao4.asmx',
 };
 
 // A configuração guarda 'producao'/'homologacao'; o XML da NF-e usa tpAmb 1/2.

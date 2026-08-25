@@ -59,7 +59,6 @@ test('resumoCertificado mapeia colunas do banco', () => {
 });
 
 test('extrairChaveECert devolve chave e certificado utilizáveis', async () => {
-  const { extrairChaveECert } = await import('../lib/certificadoServer.js');
   const pfx = gerarPfx({ cn: '364 STEAKHOUSE LTDA:37541736000187', cnpjOid: '37541736000187', senha: 'abc123' });
   const { chavePrivadaPem, certificadoPem, certificadoBase64 } = extrairChaveECert(pfx, 'abc123');
 

@@ -153,7 +153,7 @@ function Conteudo() {
       setConexao(c => ({
         ...c,
         [ambiente]: r.ok
-          ? { ok: json.ok, texto: `${json.cStat} — ${json.xMotivo}` }
+          ? { ok: json.ok, texto: (json.cStat && json.xMotivo) ? `${json.cStat} — ${json.xMotivo}` : 'resposta da SEFAZ não reconhecida' }
           : { ok: false, texto: json.error || 'Falha ao testar.' },
       }));
     } catch (e) {
@@ -224,11 +224,11 @@ function Conteudo() {
           })}
 
           <fieldset className="form-grid" style={{ marginTop: 12 }}>
-            <legend><strong>Conexão com a SEFAZ</strong></legend>
+            <legend><strong>Conexão com a SEFAZ — NF-e (modelo 55)</strong></legend>
             {['homologacao', 'producao'].map(amb => (
               <div key={amb} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn secondary" type="button" disabled={testando === amb} onClick={() => testarConexao(amb)}>
-                  {testando === amb ? 'Testando…' : `Testar ${amb === 'producao' ? 'produção' : 'homologação'}`}
+                  {testando === amb ? 'Testando…' : `Testar NF-e — ${amb === 'producao' ? 'produção' : 'homologação'}`}
                 </button>
                 {conexao[amb] && (
                   <span className={`tag ${conexao[amb].ok ? 'ok' : 'bad'}`}>{conexao[amb].texto}</span>
@@ -236,7 +236,7 @@ function Conteudo() {
               </div>
             ))}
             <p className="muted" style={{ gridColumn: '1 / -1' }}>
-              Consulta o status do serviço da SEFAZ com o certificado desta marca. Não emite nota nem consome numeração.
+              Consulta o status do serviço de NF-e (modelo 55) da SEFAZ com o certificado desta marca. Não emite nota nem consome numeração. NFC-e (modelo 65) autoriza por um host diferente, ainda não configurado — este teste não prova a conexão de NFC-e.
             </p>
           </fieldset>
 
