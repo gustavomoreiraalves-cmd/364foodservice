@@ -35,7 +35,7 @@ test('formularioDaNota: emitente sem documento deixa o campo vazio para preenche
 
 test('formularioDaNota: sem sugestão nenhuma devolve formulário em branco', () => {
   const form = formularioDaNota(null);
-  assert.deepEqual(form, { nome: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' });
+  assert.deepEqual(form, { nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' });
 });
 
 test('fornecedorParaGravar: normaliza o CNPJ e manda em branco como null', () => {
@@ -59,6 +59,12 @@ test('fornecedorParaGravar: CPF de produtor rural cabe na coluna de documento', 
 
 test('fornecedorParaGravar: sem documento nenhum grava null, não string vazia', () => {
   assert.equal(fornecedorParaGravar({ nome: 'Sitio do Zé', cnpj: '' }).cnpj, null);
+});
+
+test('fornecedorParaGravar: sincroniza nome_fantasia com o cliente vinculado (branco vira null)', () => {
+  const gravar = fornecedorParaGravar({ nome: 'Manar', nome_fantasia: '  Comercial São João  ', cnpj: '', categoria: 'Outros' });
+  assert.equal(gravar.nome_fantasia, 'Comercial São João');
+  assert.equal(fornecedorParaGravar({ nome: 'Manar', nome_fantasia: '', categoria: 'Outros' }).nome_fantasia, null);
 });
 
 test('mensagemAoCadastrar: documento repetido vira instrução, não erro do Postgres', () => {

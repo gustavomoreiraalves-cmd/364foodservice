@@ -9,7 +9,7 @@ export const CATEGORIAS_FORNECEDOR = ['Carnes', 'Temperos', 'Embalagens', 'Equip
 // cadastrado como 12.345.678/0001-99 nunca casava com a nota.
 export const soDigitos = v => String(v || '').replace(/\D/g, '');
 
-const FORM_VAZIO = { nome: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' };
+const FORM_VAZIO = { nome: '', nome_fantasia: '', cnpj: '', categoria: 'Outros', contato: '', telefone: '', email: '' };
 
 // Monta o formulário do cadastro rápido a partir do `fornecedorSugerido` que a
 // rota /preparar devolve. Campo que a nota não traz vem null de lá e precisa
@@ -37,6 +37,7 @@ const ouNulo = v => (String(v || '').trim() || null);
 export function fornecedorParaGravar(form) {
   return {
     nome: String(form.nome || '').trim(),
+    nome_fantasia: ouNulo(form.nome_fantasia),
     cnpj: soDigitos(form.cnpj) || null,
     categoria: form.categoria || 'Outros',
     contato: ouNulo(form.contato),
