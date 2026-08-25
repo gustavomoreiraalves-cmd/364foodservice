@@ -155,6 +155,11 @@ create index if not exists conciliacao_vinculos_lancamento_idx
   on public.conciliacao_vinculos(lancamento_id);
 create index if not exists conciliacao_vinculos_parcela_idx
   on public.conciliacao_vinculos(parcela_id);
+-- Por empresa porque toda importação varre esta tabela inteira para tirar do
+-- sorteio as parcelas que já têm vínculo (lib/extratosServer.js), e a policy
+-- de RLS filtra pela mesma coluna.
+create index if not exists conciliacao_vinculos_empresa_idx
+  on public.conciliacao_vinculos(empresa_id);
 
 alter table public.conciliacao_vinculos enable row level security;
 drop policy if exists "empresa_scoped_access" on public.conciliacao_vinculos;

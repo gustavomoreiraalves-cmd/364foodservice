@@ -149,9 +149,10 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
     // Alerta e não falha de propósito: assim o arquivo continua na tela para
     // ser inspecionado. Fatura fica de fora — uma fatura só de estornos é
     // estranha, mas é possível.
-    const saidas = (lido.lancamentos || []).filter(l => l.tipo === 'saida').length;
+    const linhasLidas = lido.lancamentos || [];
+    const saidas = linhasLidas.filter(l => l.tipo === 'saida').length;
     const alertaSemSaida = (tipo === 'extrato' && saidas === 0)
-      ? `Nenhuma das ${lido.lancamentos.length} linha(s) deste extrato foi lida como saída. `
+      ? `Nenhuma das ${linhasLidas.length} linha(s) deste extrato foi lida como saída. `
         + `Isso quase sempre é layout mal interpretado (coluna de valor sem sinal, com `
         + `débito/crédito em outra coluna) — confira o arquivo antes de dar a conciliação `
         + `por encerrada, e marque "Mostrar entradas" para ver o que foi importado.`
