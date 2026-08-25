@@ -21,7 +21,7 @@
 
 ---
 
-### Tarefa 1: Migração 39 — colunas de vínculo
+### Task 1: Migração 39 — colunas de vínculo
 
 **Files:**
 - Create: `supabase/atualizacao_39_parceiro_cliente_fornecedor.sql`
@@ -94,7 +94,7 @@ git commit -m "feat(cadastros): migração 39 — vínculo cliente/fornecedor"
 
 ---
 
-### Tarefa 2: `lib/fornecedores.js` ganha `nome_fantasia`; `lib/clientes.js` novo
+### Task 2: `lib/fornecedores.js` ganha `nome_fantasia`; `lib/clientes.js` novo
 
 **Files:**
 - Modify: `lib/fornecedores.js`
@@ -296,7 +296,7 @@ git commit -m "feat(cadastros): nome_fantasia em fornecedores e lib/clientes.js"
 
 ---
 
-### Tarefa 3: `lib/parceiro.js` — `montarListaParceiros`
+### Task 3: `lib/parceiro.js` — `montarListaParceiros`
 
 **Files:**
 - Create: `lib/parceiro.js`
@@ -468,7 +468,7 @@ git commit -m "feat(cadastros): montarListaParceiros junta clientes e fornecedor
 
 ---
 
-### Tarefa 4: `lib/parceiro.js` — `salvarParceiro`, `excluirParceiro`, `alternarAtivoParceiro`
+### Task 4: `lib/parceiro.js` — `salvarParceiro`, `excluirParceiro`, `alternarAtivoParceiro`
 
 **Files:**
 - Modify: `lib/parceiro.js`
@@ -808,7 +808,7 @@ git commit -m "feat(cadastros): salvarParceiro, excluirParceiro e alternarAtivoP
 
 ---
 
-### Tarefa 5: `components/FichaParceiro.js`
+### Task 5: `components/FichaParceiro.js`
 
 **Files:**
 - Create: `components/FichaParceiro.js`
@@ -1054,7 +1054,7 @@ git commit -m "feat(cadastros): componente FichaParceiro (ficha compartilhada de
 
 ---
 
-### Tarefa 6: `app/clientes/page.js` vira a tela única
+### Task 6: `app/clientes/page.js` vira a tela única
 
 **Files:**
 - Modify: `app/clientes/page.js` (reescrita quase completa)
@@ -1365,7 +1365,7 @@ git commit -m "feat(cadastros): app/clientes/page.js vira a tela única de parce
 
 ---
 
-### Tarefa 7: Remover `app/fornecedores`; unificar menu e permissão
+### Task 7: Remover `app/fornecedores`; unificar menu e permissão
 
 **Files:**
 - Delete: `app/fornecedores/page.js`
@@ -1434,7 +1434,7 @@ git commit -m "feat(cadastros): remove tela de fornecedores separada, unifica me
 
 ---
 
-### Tarefa 8: Regressão completa
+### Task 8: Regressão completa
 
 **Files:** nenhum (só verificação).
 
