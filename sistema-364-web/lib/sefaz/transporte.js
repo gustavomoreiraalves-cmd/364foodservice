@@ -18,8 +18,16 @@
 // esse PKCS#12 sem passar pelo OpenSSL do Node — por isso extraímos a chave e o
 // certificado com ele (extrairChaveECert) e entregamos PEM moderno ao OpenSSL,
 // em vez do PKCS#12 bruto. Prova: tests/sefaz-transporte.test.mjs.
+//
+// A validação do certificado do SERVIDOR (lado oposto do mTLS) também precisa de
+// ajuda: a cadeia da SVRS termina na raiz ICP-Brasil v10, que não está no pacote
+// de CAs da Mozilla que o Node usa por padrão — sem isso o handshake falha com
+// "unable to get local issuer certificate" mesmo com o certificado do cliente
+// correto. Ver lib/sefaz/icpBrasil.js para os detalhes e a prova.
 import { Agent, request } from 'undici';
+import tls from 'node:tls';
 import { extrairChaveECert } from '../certificadoServer.js';
+import { RAIZ_ICP_BRASIL_V10 } from './icpBrasil.js';
 
 const TIMEOUT_PADRAO_MS = 20000;
 const TAMANHO_EXCERTO_ERRO = 300;
@@ -30,7 +38,19 @@ export async function chamarSefaz({ url, corpoXml, pfx, senha, timeoutMs = TIMEO
   // privada ou se a senha estiver errada — não precisa de tratamento extra
   // aqui, o erro sobe como está.
   const { chavePrivadaPem, certificadoCadeiaPem } = extrairChaveECert(pfx, senha);
-  const agente = new Agent({ connect: { key: chavePrivadaPem, cert: certificadoCadeiaPem } });
+  // `ca` aqui é para validar o certificado do SERVIDOR (SVRS), não o nosso — é
+  // independente do `{ key, cert }` acima, que é o certificado do CLIENTE (mTLS).
+  // Passar só [RAIZ_ICP_BRASIL_V10] SUBSTITUIRIA o conjunto padrão de CAs
+  // confiáveis do Node por este único item — por isso o spread de
+  // tls.rootCertificates: queremos ADICIONAR a raiz ICP-Brasil v10, mantendo
+  // toda a confiança padrão intacta.
+  const agente = new Agent({
+    connect: {
+      key: chavePrivadaPem,
+      cert: certificadoCadeiaPem,
+      ca: [...tls.rootCertificates, RAIZ_ICP_BRASIL_V10],
+    },
+  });
   try {
     const resposta = await request(url, {
       method: 'POST',
