@@ -149,7 +149,20 @@ export async function extrairPdf({ base64, tipo, apiKey, modelo, cliente }) {
       + 'ou a fatura do período.');
   }
 
-  const numeroOuNulo = v => (Number.isFinite(Number(v)) ? Number(v) : null);
+  // null tem que sair null, não zero. O schema da ferramenta declara
+  // saldo_inicial, saldo_final e total_fatura como ['number','null'], então
+  // null é a resposta ESPERADA para o documento que não mostra o número — e
+  // Number(null) é 0, que Number.isFinite aprova. Com saldoInicial = 0 a
+  // guarda de validarExtrato (`saldoInicial == null` → não confere nada) nunca
+  // dispara, e um extrato perfeito passa a acusar "O extrato não fecha…" em
+  // toda importação de PDF. Aviso que aparece sempre é aviso que ninguém lê —
+  // e o aviso de verdade, o da página que ficou de fora, chega com essa mesma
+  // voz. String vazia idem: Number('') também é 0.
+  const numeroOuNulo = v => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
   const datas = lancamentos.map(l => l.data).sort();
   return {
     periodoInicio: dataIso(dados.periodo_inicio) || datas[0],

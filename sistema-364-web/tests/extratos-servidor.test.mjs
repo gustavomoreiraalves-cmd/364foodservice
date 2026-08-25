@@ -47,6 +47,8 @@ function criarSbFalso(cfg = {}) {
     conta: CONTA_PADRAO,
     parcelas: [],
     reservadas: [],
+    vinculadas: [],
+    erroVinculadas: null,
     padroes: [],
     erroPadroes: null,
     erroUpload: null,
@@ -71,6 +73,10 @@ function criarSbFalso(cfg = {}) {
     conciliacao_padroes: () => {
       registrar('conciliacao_padroes', 'select');
       return { data: config.padroes, error: config.erroPadroes };
+    },
+    conciliacao_vinculos: () => {
+      registrar('conciliacao_vinculos', 'select');
+      return { data: config.vinculadas, error: config.erroVinculadas };
     },
     extrato_importacoes: (chamadasDaCadeia) => {
       const verbo = chamadasDaCadeia[0]?.metodo;
@@ -179,6 +185,99 @@ test('controle: sem reserva de outra importação, a mesma parcela É sugerida n
   assert.equal(upsert.linhas[0].status, 'sugerido');
   assert.equal(upsert.linhas[0].parcela_sugerida_id, 'p1');
   assert.equal(resultado.sugeridas, 1);
+});
+
+// ---------- Parcela que já tem vínculo não volta ao sorteio ----------
+
+test('parcela que já tem vínculo não é sugerida de novo, mesmo continuando Pendente', async () => {
+  // É o caso da linha de fatura de cartão: ela concilia deixando a parcela
+  // 'Pendente' de propósito (quem baixa é o pagamento da fatura). Sem esta
+  // exclusão a parcela reaparece na importação seguinte e um débito do extrato
+  // de mesmo valor é sugerido para a MESMA obrigação.
+  const buffer = csvExtrato([{ data: '14/08/2026', descricao: 'PIX ENVIADO LOJA B', valor: '-150,00' }]);
+  const { sb, chamadas } = criarSbFalso({
+    parcelas: [{ id: 'p9', valor: 150, vencimento: '2026-08-14', contas_a_pagar: { fornecedor_id: null } }],
+    reservadas: [],                        // nenhum lançamento aberto a segura
+    vinculadas: [{ parcela_id: 'p9' }],    // mas uma linha de fatura já a reivindica
+  });
+
+  const resultado = await importar(sb, { buffer });
+
+  const upsert = chamadas.find(c => c.tabela === 'extrato_lancamentos' && c.metodo === 'upsert');
+  assert.equal(upsert.linhas[0].status, 'pendente');
+  assert.equal(upsert.linhas[0].parcela_sugerida_id, null);
+  assert.equal(resultado.sugeridas, 0);
+});
+
+test('controle: sem vínculo, a mesma parcela Pendente É sugerida normalmente', async () => {
+  const buffer = csvExtrato([{ data: '14/08/2026', descricao: 'PIX ENVIADO LOJA B', valor: '-150,00' }]);
+  const { sb, chamadas } = criarSbFalso({
+    parcelas: [{ id: 'p9', valor: 150, vencimento: '2026-08-14', contas_a_pagar: { fornecedor_id: null } }],
+    vinculadas: [],
+  });
+
+  const resultado = await importar(sb, { buffer });
+
+  const upsert = chamadas.find(c => c.tabela === 'extrato_lancamentos' && c.metodo === 'upsert');
+  assert.equal(upsert.linhas[0].status, 'sugerido');
+  assert.equal(upsert.linhas[0].parcela_sugerida_id, 'p9');
+  assert.equal(resultado.sugeridas, 1);
+});
+
+test('falha ao ler os vínculos existentes termina em erro (não sugere contra parcela já tomada)', async () => {
+  const buffer = csvExtrato([{ data: '14/08/2026', descricao: 'PIX ENVIADO LOJA B', valor: '-150,00' }]);
+  const { sb } = criarSbFalso({
+    parcelas: [{ id: 'p9', valor: 150, vencimento: '2026-08-14', contas_a_pagar: { fornecedor_id: null } }],
+    erroVinculadas: { message: 'timeout' },
+  });
+
+  await assert.rejects(
+    () => importar(sb, { buffer }),
+    /Não consegui conferir as parcelas já conciliadas/,
+  );
+});
+
+// ---------- Extrato lido sem nenhuma saída ----------
+
+test('extrato que não produziu nenhuma saída levanta alerta (layout mal lido)', async () => {
+  // CSV com valores positivos: tudo vira entrada. Sem alerta, a importação
+  // nasce "concluida" (não sobra saída aberta), a tag fica verde e o painel
+  // abre vazio, porque entradas ficam escondidas por padrão.
+  const buffer = csvExtrato([
+    { data: '10/08/2026', descricao: 'PAGAMENTO FORNECEDOR X', valor: '1200,00' },
+    { data: '11/08/2026', descricao: 'PAGAMENTO FORNECEDOR Y', valor: '800,00' },
+  ]);
+  const { sb, chamadas } = criarSbFalso({});
+
+  const resultado = await importar(sb, { buffer });
+
+  assert.match(resultado.alerta, /nenhuma das 2 linha\(s\)/i);
+  assert.match(resultado.alerta, /saída/i);
+  const update = chamadas.find(c => c.tabela === 'extrato_importacoes' && c.metodo === 'update'
+    && c.patch.status === 'aguardando_conciliacao');
+  assert.equal(update.patch.alerta, resultado.alerta,
+    'o alerta tem que ficar gravado na importação, não só no retorno da rota');
+});
+
+test('extrato com pelo menos uma saída não levanta esse alerta', async () => {
+  const buffer = csvExtrato([
+    { data: '10/08/2026', descricao: 'PIX RECEBIDO CLIENTE', valor: '1200,00' },
+    { data: '11/08/2026', descricao: 'TARIFA', valor: '-50,00' },
+  ]);
+  const { sb } = criarSbFalso({});
+
+  const resultado = await importar(sb, { buffer });
+
+  assert.equal(resultado.alerta, null);
+});
+
+test('fatura sem saída nenhuma não usa esse alerta — a regra é de extrato', async () => {
+  const buffer = csvExtrato([{ data: '10/08/2026', descricao: 'ESTORNO COMPRA', valor: '120,00' }]);
+  const { sb } = criarSbFalso({ conta: { id: 'cb1', empresa_id: 'e1', tipo: 'cartao_credito' } });
+
+  const resultado = await importar(sb, { buffer, tipo: 'fatura_cartao' });
+
+  assert.equal(resultado.alerta, null);
 });
 
 // ---------- Correção 2: erros de escrita descartados no caminho de sucesso ----------

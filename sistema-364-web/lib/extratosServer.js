@@ -50,15 +50,25 @@ function comoObjeto(valor) {
 }
 
 // Parcelas pendentes achatadas no shape que o motor de sugestão espera, menos
-// as que já foram sugeridas por um lançamento ainda aberto ('pendente' ou
-// 'sugerido') de QUALQUER importação — inclusive de outra. Sem essa exclusão,
-// duas importações diferentes (a conta corrente e a fatura do cartão, por
-// exemplo) podem sugerir a mesma parcela cada uma para o seu próprio débito;
-// confirmando as duas, a função do banco não deixa baixar a parcela duas
-// vezes, mas cria os dois vínculos e concilia os dois lançamentos — uma saída
-// real fica contabilizada contra nada, em silêncio. Lançamento já conciliado
-// não precisa entrar nessa exclusão: a parcela dele já não é mais 'Pendente',
-// então nem chega na consulta abaixo.
+// duas populações que não podem voltar ao sorteio:
+//
+// 1. as já sugeridas por um lançamento ainda aberto ('pendente' ou 'sugerido')
+//    de QUALQUER importação — inclusive de outra. Sem isso, a conta corrente e
+//    a fatura do cartão sugerem a mesma parcela cada uma para o seu próprio
+//    débito; confirmando as duas, uma saída real fica contabilizada contra
+//    nada, em silêncio.
+// 2. as que JÁ TÊM VÍNCULO, mesmo continuando 'Pendente'. Este é o caso que a
+//    versão anterior deste comentário dava como impossível ("lançamento já
+//    conciliado não entra: a parcela dele já não é mais Pendente") — e é
+//    justamente o da linha de fatura de cartão, que concilia deixando a
+//    parcela em aberto de propósito, porque quem baixa é o pagamento da
+//    fatura. Sem esta exclusão a parcela reaparece na importação seguinte, um
+//    débito de mesmo valor é sugerido para ela e um clique em "Confirmar N
+//    sugestões" baixa uma obrigação que outra saída já reivindica.
+//
+// A guarda definitiva é a do banco (fn_conciliar_lancamento recusa parcela com
+// vínculo de outro lançamento). Esta aqui é o que impede a sugestão de nascer:
+// sem ela o colaborador só descobriria o problema no erro da confirmação.
 async function parcelasPendentes(sb, empresaId) {
   const { data, error } = await sb.from('contas_a_pagar_parcelas')
     .select('id, valor, vencimento, contas_a_pagar!inner(fornecedor_id)')
@@ -73,8 +83,15 @@ async function parcelasPendentes(sb, empresaId) {
   }
   const jaReservadas = new Set((reservadas || []).map(l => l.parcela_sugerida_id));
 
+  const { data: vinculadas, error: erroVinculadas } = await sb.from('conciliacao_vinculos')
+    .select('parcela_id').eq('empresa_id', empresaId);
+  if (erroVinculadas) {
+    throw new Error('Não consegui conferir as parcelas já conciliadas: ' + erroVinculadas.message);
+  }
+  const jaVinculadas = new Set((vinculadas || []).map(v => v.parcela_id));
+
   return (data || [])
-    .filter(p => !jaReservadas.has(p.id))
+    .filter(p => !jaReservadas.has(p.id) && !jaVinculadas.has(p.id))
     .map(p => ({
       id: p.id, valor: Number(p.valor), vencimento: p.vencimento,
       fornecedorId: comoObjeto(p.contas_a_pagar)?.fornecedor_id || null,
@@ -122,6 +139,24 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
     const conferencia = tipo === 'fatura_cartao'
       ? validarFatura({ total: lido.total, lancamentos: lido.lancamentos })
       : validarExtrato(lido);
+
+    // Extrato sem uma única saída não existe no mundo real — é layout mal
+    // lido. O caso concreto: CSV cujo valor vem sem sinal, com débito/crédito
+    // numa coluna à parte; tudo entra como 'entrada', a importação nasce
+    // 'concluida' (não sobra saída aberta para contar), a tag fica verde e o
+    // painel abre VAZIO, porque entradas ficam escondidas por padrão. Quarenta
+    // linhas importadas e nada na tela, com o sistema dizendo que terminou.
+    // Alerta e não falha de propósito: assim o arquivo continua na tela para
+    // ser inspecionado. Fatura fica de fora — uma fatura só de estornos é
+    // estranha, mas é possível.
+    const saidas = (lido.lancamentos || []).filter(l => l.tipo === 'saida').length;
+    const alertaSemSaida = (tipo === 'extrato' && saidas === 0)
+      ? `Nenhuma das ${lido.lancamentos.length} linha(s) deste extrato foi lida como saída. `
+        + `Isso quase sempre é layout mal interpretado (coluna de valor sem sinal, com `
+        + `débito/crédito em outra coluna) — confira o arquivo antes de dar a conciliação `
+        + `por encerrada, e marque "Mostrar entradas" para ver o que foi importado.`
+      : null;
+    const alerta = [alertaSemSaida, conferencia.alerta].filter(Boolean).join(' ') || null;
 
     const parcelas = await parcelasPendentes(sb, empresaId);
     const padroes = await mapaDePadroes(sb, empresaId);
@@ -182,7 +217,7 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
     // de sucesso mesmo assim.
     const { error: erroAtualizarImportacao } = await sb.from('extrato_importacoes').update({
       periodo_inicio: lido.periodoInicio, periodo_fim: lido.periodoFim,
-      alerta: conferencia.alerta, status: 'aguardando_conciliacao',
+      alerta, status: 'aguardando_conciliacao',
     }).eq('id', importacaoId);
     if (erroAtualizarImportacao) {
       throw new Error('Não consegui atualizar o resumo da importação: ' + erroAtualizarImportacao.message);
@@ -194,7 +229,7 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
 
     return {
       importacaoId, total: linhas.length, novas, duplicadas: linhas.length - novas,
-      sugeridas, alerta: conferencia.alerta,
+      sugeridas, alerta,
     };
   } catch (e) {
     // Deixa a importação registrada com o erro (a tela explica o que houve),

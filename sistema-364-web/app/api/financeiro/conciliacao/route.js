@@ -58,6 +58,47 @@ async function confirmar(sb, user, isAdmin, corpo) {
   return { ok: true, vinculadas: data?.vinculadas ?? 0, baixadas: data?.baixadas ?? 0 };
 }
 
+// De onde sai o fornecedor que o lote vai ensinar ao padrão. O padrao_id só
+// existe quando a descrição JÁ bateu com um padrão na importação — ou seja,
+// quando não há nada de novo a aprender. Na primeira importação do piloto
+// conciliacao_padroes está vazia, toda sugestão vem de valor + data, e o lote
+// mandava fornecedor null: fn_registrar_padrao voltava na primeira linha sem
+// gravar nada, e "Confirmar 18 sugestões" criava ZERO padrões. O mês seguinte
+// chegava sem desempate nenhum, com o objetivo declarado do módulo ("a cada
+// associação confirmada o sistema aprende o padrão") nunca saindo do papel.
+// A conta a pagar da parcela sugerida tem o fornecedor e a categoria — é o
+// mesmo dado que o caminho manual do "Associar" já passa, lido aqui no
+// servidor em vez de vir do corpo da requisição.
+async function fornecedorParaAprender(sb, lanc) {
+  const { data: padrao, error: erroPadrao } = lanc.padrao_id
+    ? await sb.from('conciliacao_padroes').select('fornecedor_id, categoria_conta')
+        .eq('id', lanc.padrao_id).maybeSingle()
+    : { data: null, error: null };
+  // Erro descartado aqui conciliaria o lançamento sem fornecedor/categoria
+  // e sem reforçar o padrão — silencioso, e a razão de ser do lote é
+  // aprender. Melhor este item entrar em falhas do que baixar pela metade.
+  if (erroPadrao) {
+    throw new Error('Não consegui ler o padrão aprendido para este lançamento: ' + erroPadrao.message);
+  }
+  if (padrao?.fornecedor_id) {
+    return { fornecedorId: padrao.fornecedor_id, categoriaConta: padrao.categoria_conta || null };
+  }
+
+  const { data: parcela, error: erroParcela } = await sb.from('contas_a_pagar_parcelas')
+    .select('contas_a_pagar(fornecedor_id, categoria_conta)')
+    .eq('id', lanc.parcela_sugerida_id).maybeSingle();
+  if (erroParcela) {
+    throw new Error('Não consegui ler o fornecedor da parcela sugerida: ' + erroParcela.message);
+  }
+  const conta = Array.isArray(parcela?.contas_a_pagar)
+    ? (parcela.contas_a_pagar[0] || null)
+    : (parcela?.contas_a_pagar || null);
+  return {
+    fornecedorId: conta?.fornecedor_id || null,
+    categoriaConta: padrao?.categoria_conta || conta?.categoria_conta || null,
+  };
+}
+
 // Lote: confirma cada sugestão como o colaborador confirmaria uma por uma.
 // Uma falha não derruba as outras — a tela mostra quais ficaram de fora.
 async function confirmarLote(sb, user, isAdmin, corpo) {
@@ -69,22 +110,13 @@ async function confirmarLote(sb, user, isAdmin, corpo) {
     try {
       const lanc = await carregarLancamento(sb, user, isAdmin, id);
       if (!lanc.parcela_sugerida_id) throw new Error('Este lançamento não tem sugestão.');
-      const { data: padrao, error: erroPadrao } = lanc.padrao_id
-        ? await sb.from('conciliacao_padroes').select('fornecedor_id, categoria_conta')
-            .eq('id', lanc.padrao_id).maybeSingle()
-        : { data: null, error: null };
-      // Erro descartado aqui conciliaria o lançamento sem fornecedor/categoria
-      // e sem reforçar o padrão — silencioso, e a razão de ser do lote é
-      // aprender. Melhor este item entrar em falhas do que baixar pela metade.
-      if (erroPadrao) {
-        throw new Error('Não consegui ler o padrão aprendido para este lançamento: ' + erroPadrao.message);
-      }
+      const { fornecedorId, categoriaConta } = await fornecedorParaAprender(sb, lanc);
       const { error } = await sb.rpc('fn_conciliar_lancamento', {
         p_lancamento_id: lanc.id,
         p_parcelas: [{ parcela_id: lanc.parcela_sugerida_id, valor_aplicado: lanc.valor }],
         p_forma_pagamento: formaPara(lanc),
-        p_fornecedor_id: padrao?.fornecedor_id || null,
-        p_categoria_conta: padrao?.categoria_conta || null,
+        p_fornecedor_id: fornecedorId,
+        p_categoria_conta: categoriaConta,
       });
       if (error) throw new Error(error.message);
       confirmados++;
@@ -128,9 +160,58 @@ async function pagarFatura(sb, user, isAdmin, corpo) {
   return { ok: true, baixadas: data?.baixadas ?? 0, somaFatura: data?.soma_fatura ?? null };
 }
 
+// Apaga a importação inteira. Existe porque o erro mais provável do dia 1 do
+// piloto é importar o extrato do Sicoob contra a conta do Cresol: o
+// hash_dedupe inclui a conta, então reimportar contra a conta certa gera um
+// SEGUNDO conjunto completo, e o primeiro não tinha como sair da tela. Cada
+// lançamento fantasma segura um parcela_sugerida_id que parcelasPendentes
+// subtrai de toda importação futura — a importação certa chegaria 'pendente'
+// em vez de 'sugerido', para sempre.
+//
+// Só quando NENHUM lançamento está conciliado: apagar uma importação
+// conciliada arrastaria vínculos e baixas junto, pelo cascade, em silêncio.
+// Essa mesma regra cobre o pagamento de fatura (que mora em outra importação,
+// mas só existe conciliado).
+const BUCKET_EXTRATOS = 'recebimentos';   // mesmo bucket de lib/extratosServer.js
+
+async function excluirImportacao(sb, user, isAdmin, corpo) {
+  if (!corpo.importacaoId) throw new Error('Informe a importação.');
+  const { data: imp, error: erroImp } = await sb.from('extrato_importacoes')
+    .select('id, empresa_id, arquivo_path, arquivo_nome')
+    .eq('id', corpo.importacaoId).maybeSingle();
+  if (erroImp) throw new Error('Não consegui ler a importação: ' + erroImp.message);
+  if (!imp) throw new Error('Importação não encontrada.');
+  await garantirEmpresa(sb, user, isAdmin, imp.empresa_id);
+
+  const { count, error: erroContagem } = await sb.from('extrato_lancamentos')
+    .select('id', { count: 'exact', head: true })
+    .eq('importacao_id', imp.id).eq('status', 'conciliado');
+  if (erroContagem) {
+    throw new Error('Não consegui conferir os lançamentos conciliados: ' + erroContagem.message);
+  }
+  if ((count || 0) > 0) {
+    throw new Error(`Esta importação tem ${count} lançamento(s) já conciliado(s). `
+      + 'Desfaça essas conciliações antes de excluir — apagar agora sumiria com os vínculos '
+      + 'e com as baixas que eles fizeram.');
+  }
+
+  // Arquivo órfão no bucket é sujeira; lançamento fantasma é sugestão travada.
+  // Se o remove falhar, seguir com o delete ainda é o certo — o que envenena a
+  // conciliação é a linha, não o arquivo.
+  const { error: erroArquivo } = await sb.storage.from(BUCKET_EXTRATOS).remove([imp.arquivo_path]);
+  if (erroArquivo) {
+    console.error('Não removi o arquivo da importação', imp.id, ':', erroArquivo.message);
+  }
+
+  // O cascade de extrato_lancamentos.importacao_id limpa as linhas junto.
+  const { error: erroDelete } = await sb.from('extrato_importacoes').delete().eq('id', imp.id);
+  if (erroDelete) throw new Error('Não consegui excluir a importação: ' + erroDelete.message);
+  return { ok: true, arquivoRemovido: !erroArquivo };
+}
+
 const ACOES = {
   confirmar, 'confirmar-lote': confirmarLote, 'criar-conta': criarConta,
-  desfazer, 'pagar-fatura': pagarFatura,
+  desfazer, 'pagar-fatura': pagarFatura, 'excluir-importacao': excluirImportacao,
 };
 
 export async function POST(request) {
@@ -144,7 +225,11 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Requisição inválida.' }, { status: 400 });
   }
 
-  const executar = ACOES[corpo?.acao];
+  // hasOwnProperty, não `ACOES[acao]`: o acesso direto alcança
+  // Object.prototype, e {"acao":"toString"} devolvia 200 com "[object
+  // Undefined]" no corpo em vez de "Ação desconhecida".
+  const acao = corpo?.acao;
+  const executar = Object.prototype.hasOwnProperty.call(ACOES, acao) ? ACOES[acao] : null;
   if (!executar) return NextResponse.json({ error: 'Ação desconhecida.' }, { status: 400 });
 
   try {

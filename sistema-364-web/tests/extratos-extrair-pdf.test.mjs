@@ -116,6 +116,49 @@ test('linha sem data legível é descartada sem derrubar a importação', async 
   assert.equal(r.lancamentos[0].descricao, 'BOM');
 });
 
+// O schema da ferramenta declara saldo_inicial, saldo_final e total_fatura como
+// ['number','null']: null é a resposta ESPERADA quando o documento não mostra o
+// número, não um caso de borda. Number(null) é 0 e Number.isFinite(0) é true —
+// com saldoInicial = 0 a guarda de validarExtrato nunca dispara e um extrato
+// perfeito passa a acusar "O extrato não fecha…" em toda importação de PDF.
+// Os testes de validar.js cobriam a camada de baixo; o que faltava era provar o
+// que extrairPdf ENTREGA para ela.
+test('saldo nulo na resposta da IA chega como null, não como zero', async () => {
+  const r = await extrairPdf({
+    base64: 'x', tipo: 'extrato',
+    cliente: clienteFalso(respostaComFerramenta({
+      ...EXTRATO_IA, saldo_inicial: null, saldo_final: null,
+    })),
+  });
+  assert.equal(r.saldoInicial, null);
+  assert.equal(r.saldoFinal, null);
+});
+
+test('saldo ausente na resposta da IA também chega como null', async () => {
+  const { saldo_inicial, saldo_final, ...semSaldos } = EXTRATO_IA;
+  const r = await extrairPdf({
+    base64: 'x', tipo: 'extrato', cliente: clienteFalso(respostaComFerramenta(semSaldos)),
+  });
+  assert.equal(r.saldoInicial, null);
+  assert.equal(r.saldoFinal, null);
+});
+
+test('total_fatura nulo chega como null, não como zero', async () => {
+  const r = await extrairPdf({
+    base64: 'x', tipo: 'fatura_cartao',
+    cliente: clienteFalso(respostaComFerramenta({ ...EXTRATO_IA, total_fatura: null })),
+  });
+  assert.equal(r.total, null);
+});
+
+test('zero de verdade continua sendo zero — a distinção é null vs 0', async () => {
+  const r = await extrairPdf({
+    base64: 'x', tipo: 'extrato',
+    cliente: clienteFalso(respostaComFerramenta({ ...EXTRATO_IA, saldo_inicial: 0 })),
+  });
+  assert.equal(r.saldoInicial, 0);
+});
+
 test('sem chave da API o erro diz o que configurar', async () => {
   await assert.rejects(
     () => extrairPdf({ base64: 'x', tipo: 'extrato', apiKey: '' }),
