@@ -139,7 +139,7 @@ export async function excluirParceiro(sb, parceiro) {
 
 // Ativa/desativa os lados que existirem, sempre pro mesmo valor.
 export async function alternarAtivoParceiro(sb, parceiro) {
-  const novoAtivo = !(parceiro.ativo !== false);
+  const novoAtivo = parceiro.ativo === false;
   const erros = [];
   if (parceiro.clienteId) {
     const { error } = await sb.from('clientes').update({ ativo: novoAtivo }).eq('id', parceiro.clienteId);

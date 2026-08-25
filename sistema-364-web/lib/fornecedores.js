@@ -41,7 +41,7 @@ export function fornecedorParaGravar(form) {
     cnpj: soDigitos(form.cnpj) || null,
     categoria: form.categoria || 'Outros',
     contato: ouNulo(form.contato),
-    telefone: ouNulo(form.telefone),
+    telefone: soDigitos(form.telefone) || null,
     email: ouNulo(form.email),
   };
 }

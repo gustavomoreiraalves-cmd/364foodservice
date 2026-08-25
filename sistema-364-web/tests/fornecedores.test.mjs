@@ -67,6 +67,10 @@ test('fornecedorParaGravar: sincroniza nome_fantasia com o cliente vinculado (br
   assert.equal(fornecedorParaGravar({ nome: 'Manar', nome_fantasia: '', categoria: 'Outros' }).nome_fantasia, null);
 });
 
+test('fornecedorParaGravar: telefone vira só dígitos (mesma convenção do lado cliente, pro campo ficar idêntico quando vinculado)', () => {
+  assert.equal(fornecedorParaGravar({ nome: 'X', telefone: '(11) 91234-5678', categoria: 'Outros' }).telefone, '11912345678');
+});
+
 test('mensagemAoCadastrar: documento repetido vira instrução, não erro do Postgres', () => {
   const msg = mensagemAoCadastrar({ code: '23505', message: 'duplicate key value violates unique constraint "fornecedores_empresa_cnpj_idx"' });
   assert.match(msg, /já existe/i);

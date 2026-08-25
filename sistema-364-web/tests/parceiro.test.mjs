@@ -220,6 +220,19 @@ test('salvarParceiro: sem fiscalDisponivel usa o recorte comercial (não manda c
   assert.equal(banco.clientes[0].nome, 'X');
 });
 
+test('salvarParceiro: recorte comercial não derruba o vínculo com fornecedor', async () => {
+  const banco = { clientes: [], fornecedores: [{ id: 'f9', nome: 'X', categoria: 'Outros' }] };
+  const sb = criarSb(banco);
+  const { error } = await salvarParceiro(sb, {
+    form: { nome: 'X', tipo: 'Revenda', tipo_pessoa: 'J', uf: 'RO', cep: '76900000', categoria: 'Outros' },
+    papeis: ['cliente', 'fornecedor'], clienteExistente: null, fornecedorExistente: banco.fornecedores[0],
+    empresaId: 'e1', fiscalDisponivel: false,
+  });
+  assert.equal(error, null);
+  assert.equal(banco.clientes[0].fornecedor_vinculado_id, 'f9');
+  assert.equal('uf' in banco.clientes[0], false);
+});
+
 test('excluirParceiro: exclui os dois lados de um par vinculado', async () => {
   const banco = { clientes: [{ id: 'c1', nome: 'Manar' }], fornecedores: [{ id: 'f1', nome: 'Manar' }] };
   const sb = criarSb(banco);
