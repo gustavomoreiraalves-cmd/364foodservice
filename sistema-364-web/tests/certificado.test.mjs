@@ -4,35 +4,8 @@ process.env.CERTIFICADO_CHAVE = Buffer.alloc(32, 7).toString('base64');
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-const { cifrar, decifrar, inspecionarPfx, statusCertificado, resumoCertificado } = await import('../lib/certificadoServer.js');
-
-// Gera um pfx autoassinado com openssl, no formato que a ICP-Brasil usa:
-// CN "NOME:CNPJ" e otherName 2.16.76.1.3.3 com o CNPJ.
-// O openssl do macOS é LibreSSL 3.3.6: não aceita `-legacy` (flag do OpenSSL 3),
-// e o export padrão dele (RC2/3DES) é lido pelo node-forge sem ajuste — por isso
-// aqui não há nem `-legacy` nem `-keypbe/-certpbe`.
-function gerarPfx({ cn, cnpjOid, senha, dias = 365 }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pfx-'));
-  const cfg = path.join(dir, 'openssl.cnf');
-  fs.writeFileSync(cfg, [
-    '[req]', 'distinguished_name=dn', 'x509_extensions=ext', 'prompt=no',
-    '[dn]', `CN=${cn}`,
-    '[ext]', cnpjOid ? `subjectAltName=otherName:2.16.76.1.3.3;UTF8:${cnpjOid}` : 'basicConstraints=CA:FALSE',
-  ].join('\n'));
-  try {
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', String(dias),
-      '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-config', cfg], { stdio: 'pipe' });
-    execFileSync('openssl', ['pkcs12', '-export', '-inkey', path.join(dir, 'k.pem'), '-in', path.join(dir, 'c.pem'),
-      '-out', path.join(dir, 'c.pfx'), '-passout', `pass:${senha}`], { stdio: 'pipe' });
-    return fs.readFileSync(path.join(dir, 'c.pfx'));
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
+import { gerarPfx } from './helpers/pfx.mjs';
+const { cifrar, decifrar, inspecionarPfx, extrairChaveECert, statusCertificado, resumoCertificado } = await import('../lib/certificadoServer.js');
 
 test('cifrar/decifrar: ida e volta, e IV diferente a cada chamada', () => {
   const plano = Buffer.from('segredo com acentuação ç');
@@ -83,4 +56,27 @@ test('resumoCertificado mapeia colunas do banco', () => {
     valido_de: '2026-01-01', valido_ate: '2099-01-01', created_at: '2026-08-23' });
   assert.equal(r.status, 'vigente');
   assert.equal(r.cnpj, '1');
+});
+
+test('extrairChaveECert devolve chave e certificado utilizáveis', async () => {
+  const { extrairChaveECert } = await import('../lib/certificadoServer.js');
+  const pfx = gerarPfx({ cn: '364 STEAKHOUSE LTDA:37541736000187', cnpjOid: '37541736000187', senha: 'abc123' });
+  const { chavePrivadaPem, certificadoPem, certificadoBase64 } = extrairChaveECert(pfx, 'abc123');
+
+  assert.match(chavePrivadaPem, /^-----BEGIN (RSA )?PRIVATE KEY-----/);
+  assert.match(certificadoPem, /^-----BEGIN CERTIFICATE-----/);
+  // O conteúdo de <X509Certificate> é o DER em base64, sem cabeçalho nem quebras.
+  assert.doesNotMatch(certificadoBase64, /BEGIN|\n/);
+  assert.ok(certificadoBase64.length > 100);
+
+  // A chave precisa de fato assinar: sem isto o teste só confere formato.
+  const { createSign, createVerify } = await import('node:crypto');
+  const assinatura = createSign('RSA-SHA256').update('conteúdo').sign(chavePrivadaPem);
+  assert.ok(createVerify('RSA-SHA256').update('conteúdo').verify(certificadoPem, assinatura),
+    'a chave privada extraída não corresponde ao certificado extraído');
+});
+
+test('extrairChaveECert recusa senha errada com a mesma mensagem de inspecionarPfx', () => {
+  const pfx = gerarPfx({ cn: 'X:60361009000150', senha: 'certa' });
+  assert.throws(() => extrairChaveECert(pfx, 'errada'), /Senha do certificado incorreta/);
 });

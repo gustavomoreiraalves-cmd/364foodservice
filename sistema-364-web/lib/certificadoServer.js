@@ -66,7 +66,11 @@ function cnpjDoCertificado(cert) {
   return m ? m[1] : '';
 }
 
-export function inspecionarPfx(buffer, senha) {
+// Abre o PKCS#12 e devolve o certificado do titular com a chave que casa com
+// ele. Compartilhado por inspecionarPfx (metadados) e extrairChaveECert
+// (material para assinar) — a lógica de achar o bag certo é a mesma e não deve
+// existir em duas cópias.
+function abrirPfx(buffer, senha) {
   let p12;
   try {
     const asn1 = forge.asn1.fromDer(forge.util.createBuffer(buffer.toString('binary')));
@@ -84,7 +88,11 @@ export function inspecionarPfx(buffer, senha) {
     || bags.find(b => b.cert && !b.cert.isIssuer(b.cert))
     || bags[0];
   if (!bag?.cert) throw new Error('Arquivo não é um certificado PKCS#12 válido.');
-  const cert = bag.cert;
+  return { cert: bag.cert, chave: chaves[0]?.key || null };
+}
+
+export function inspecionarPfx(buffer, senha) {
+  const { cert } = abrirPfx(buffer, senha);
   return {
     cnpj: cnpjDoCertificado(cert),
     titular: cert.subject.getField('CN')?.value || '',
@@ -92,6 +100,19 @@ export function inspecionarPfx(buffer, senha) {
     numeroSerie: cert.serialNumber,
     validoDe: cert.validity.notBefore,
     validoAte: cert.validity.notAfter,
+  };
+}
+
+// Material para assinar (XMLDSig) e para o handshake mTLS. Nunca serializar
+// nada disto em resposta HTTP nem em log: é a chave privada da empresa.
+export function extrairChaveECert(buffer, senha) {
+  const { cert, chave } = abrirPfx(buffer, senha);
+  if (!chave) throw new Error('O certificado não traz a chave privada — confira se o arquivo é o A1 completo.');
+  const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  return {
+    chavePrivadaPem: forge.pki.privateKeyToPem(chave),
+    certificadoPem: forge.pki.certificateToPem(cert),
+    certificadoBase64: forge.util.encode64(der),
   };
 }
 
