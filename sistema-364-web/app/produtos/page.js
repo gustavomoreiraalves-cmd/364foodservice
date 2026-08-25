@@ -286,8 +286,7 @@ function Conteudo() {
     carregar();
   }
 
-  async function addItemFicha(e, produtoId) {
-    e.preventDefault();
+  async function addItemFicha(produtoId) {
     const item = itemFicha[produtoId] || {};
     if (!item.materia_prima_id) {
       alert(mps.some(m => m.ativo !== false)
@@ -452,9 +451,9 @@ function Conteudo() {
               </button>
             </div>
 
-            {aba === 'geral' && (
-              <form onSubmit={salvarProduto}>
-                <div className="modal-body">
+            <form onSubmit={salvarProduto}>
+              <div className="modal-body">
+                {aba === 'geral' && (
                   <div className="form-grid">
                     <div className="secao">Identificação</div>
                     <div className="largo">
@@ -512,48 +511,18 @@ function Conteudo() {
                       </p>
                     </div>
                   </div>
-                </div>
-                <div className="modal-foot">
-                  <button className="btn" type="submit" disabled={salvando}>
-                    {salvando ? 'Salvando…' : (produtoSelecionado ? 'Salvar alterações' : 'Criar produto')}
-                  </button>
-                  <button className="btn secondary" type="button" onClick={fechar}>Cancelar</button>
-                  {produtoSelecionado && (
-                    <>
-                      <button className="btn secondary small" type="button" style={{ marginLeft: 'auto' }}
-                              onClick={() => alternarAtivo(produtoSelecionado)}>
-                        {produtoSelecionado.ativo === false ? 'Reativar' : 'Desativar'}
-                      </button>
-                      <button className="btn danger" type="button" onClick={() => excluir(produtoSelecionado.id)}>
-                        <Icone nome="lixeira" tamanho={13} /> Excluir
-                      </button>
-                    </>
-                  )}
-                </div>
-              </form>
-            )}
+                )}
 
-            {aba === 'fiscal' && (
-              <form onSubmit={salvarProduto}>
-                <div className="modal-body">
+                {aba === 'fiscal' && (
                   <ProdutoFiscal form={formProd} setForm={setFormProd} tabelas={tabelasFiscais}
                                  disponivel={fiscalDisponivel} editando={!!produtoSelecionado}
                                  onLiberar={liberarParaEmissao}
                                  naturezas={naturezas} regras={regrasTributarias}
+                                 produtos={produtos} produtoAtualId={selecionado}
                                  onAbrirConfiguracao={grupoId => setConfigAberta({ grupoId })} />
-                </div>
-                <div className="modal-foot">
-                  <button className="btn" type="submit" disabled={salvando || !fiscalDisponivel}>
-                    {salvando ? 'Salvando…' : 'Salvar dados fiscais'}
-                  </button>
-                  <button className="btn secondary" type="button" onClick={fechar}>Cancelar</button>
-                </div>
-              </form>
-            )}
+                )}
 
-            {aba === 'ficha' && produtoSelecionado && (
-              <>
-                <div className="modal-body">
+                {aba === 'ficha' && produtoSelecionado && (
                   <FichaTecnica
                     produto={produtoSelecionado}
                     itens={fichas.filter(f => f.produto_id === selecionado)}
@@ -561,7 +530,7 @@ function Conteudo() {
                     custoTeorico={custoTeorico(selecionado)}
                     item={itemFicha[selecionado] || { materia_prima_id: mps.find(m => m.ativo !== false)?.id || '', quantidade: '' }}
                     setItem={novo => setItemFicha({ ...itemFicha, [selecionado]: novo })}
-                    onAdicionar={e => addItemFicha(e, selecionado)}
+                    onAdicionar={() => addItemFicha(selecionado)}
                     onRemover={delItemFicha}
                     onEditarCusto={() => salvarCusto(selecionado, prompt(
                       'Custo unitário de ' + produtoSelecionado.nome + ' (R$). Custo teórico da ficha: '
@@ -572,12 +541,29 @@ function Conteudo() {
                     setRegraForm={setRegraForm}
                     onSalvarRegra={conservacao => salvarRegra(selecionado, conservacao)}
                   />
-                </div>
-                <div className="modal-foot">
-                  <button className="btn secondary" type="button" onClick={fechar}>Fechar</button>
-                </div>
-              </>
-            )}
+                )}
+              </div>
+
+              <div className="modal-foot">
+                {produtoSelecionado && (
+                  <>
+                    <button className="btn secondary small" type="button"
+                            onClick={() => alternarAtivo(produtoSelecionado)}>
+                      {produtoSelecionado.ativo === false ? 'Reativar' : 'Desativar'}
+                    </button>
+                    <button className="btn danger" type="button" onClick={() => excluir(produtoSelecionado.id)}>
+                      <Icone nome="lixeira" tamanho={13} /> Excluir
+                    </button>
+                  </>
+                )}
+                <button className="btn secondary" type="button" style={{ marginLeft: 'auto' }} onClick={fechar}>
+                  Cancelar
+                </button>
+                <button className="btn" type="submit" disabled={salvando}>
+                  {salvando ? 'Salvando…' : (produtoSelecionado ? 'Salvar alterações' : 'Criar produto')}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -646,7 +632,7 @@ function FichaTecnica({
         <p className="muted" style={{ fontSize: 12.5 }}>Nenhum item na ficha técnica ainda.</p>
       )}
 
-      <form className="form-grid" style={{ marginTop: 12 }} onSubmit={onAdicionar}>
+      <div className="form-grid" style={{ marginTop: 12 }}>
         <div>
           <label htmlFor="ft-mp">Matéria-prima</label>
           <select id="ft-mp" value={item.materia_prima_id}
@@ -662,9 +648,9 @@ function FichaTecnica({
                  onChange={e => setItem({ ...item, quantidade: e.target.value })} />
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button className="btn secondary" type="submit">Adicionar</button>
+          <button className="btn secondary" type="button" onClick={onAdicionar}>Adicionar</button>
         </div>
-      </form>
+      </div>
 
       <div className="banner info" style={{ marginTop: 16 }}>
         Custo em uso: <b>{fmtMoney(custoCadastrado ? Number(produto.custo_unitario) : custoTeorico)}</b>{' '}
