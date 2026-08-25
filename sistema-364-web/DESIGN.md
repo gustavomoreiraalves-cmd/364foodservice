@@ -1,217 +1,283 @@
 ---
 name: Sistema 364
-description: A dark, ledger-precise control room for a multi-brand foodservice operation.
+description: A light working surface where panels persist, seams replace shadow, and one mint green carries the brand as fill — never as ink.
 colors:
-  char: "#1c1815"
-  char-2: "#252019"
-  char-3: "#2f2921"
-  smoke: "#3c352b"
-  paper: "#f4efe6"
-  paper-dim: "#c9c0af"
-  amber: "#c68a2e"
-  amber-bright: "#e0a949"
-  ember-red: "#a13d2b"
-  coral-alert: "#e5806c"
-  field-green: "#8fbd6f"
-  border: "#413a2f"
+  ground: "#f2f4f6"
+  panel: "#ffffff"
+  sunken: "#f7f8fa"
+  seam: "#dfe3e8"
+  seam-strong: "#c4ccd5"
+  ink: "#11161c"
+  ink-2: "#3d4854"
+  ink-muted: "#626d7a"
+  ink-faint: "#6b7683"
+  mint: "#75fc96"
+  mint-hover: "#57f581"
+  mint-wash: "#e9fdef"
+  green-deep: "#0f6b39"
+  accent-ink: "#08120c"
+  ok: "#1257b8"
+  ok-wash: "#eaf2fe"
+  warn: "#8a6100"
+  warn-wash: "#fdf5e2"
+  danger: "#d13817"
+  danger-ink: "#c23214"
+  danger-wash: "#fdece8"
 typography:
   display:
-    fontFamily: "Georgia, 'Times New Roman', serif"
-    fontSize: "22px–64px (contextual: topbar h1 to quiosque clock)"
-    fontWeight: 400
-    lineHeight: 1
-    letterSpacing: "0.3px"
-  title:
-    fontFamily: "Georgia, 'Times New Roman', serif"
-    fontSize: "14px"
-    fontWeight: 400
-    letterSpacing: "0.8px"
+    fontFamily: "Manrope, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "19px"
+    fontWeight: 600
+    letterSpacing: "-0.01em"
   body:
-    fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-    fontSize: "12.5px–14px"
+    fontFamily: "Manrope, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "13.5px"
     fontWeight: 400
-    lineHeight: "normal"
   label:
-    fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-    fontSize: "10.5px–11.5px"
-    fontWeight: 400
-    letterSpacing: "0.5px–1.5px"
+    fontFamily: "Manrope, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "11px"
+    fontWeight: 500
+  section:
+    fontFamily: "Manrope, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "10.5px"
+    fontWeight: 600
+    letterSpacing: "0.09em"
     textTransform: "uppercase"
+  measured:
+    fontFamily: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+    fontSize: "11.5px–23px"
+    fontWeight: 400
+    fontVariantNumeric: "tabular-nums"
 rounded:
-  sm: "3px"
-  lg: "8px"
-  xl: "10px"
+  sm: "8px"
+  lg: "14px"
   pill: "20px"
 spacing:
   xs: "4px"
   sm: "8px"
   md: "12px"
-  lg: "18px"
+  lg: "16px"
   xl: "26px"
 components:
   button-primary:
-    backgroundColor: "{colors.amber}"
-    textColor: "{colors.char}"
+    backgroundColor: "{colors.mint}"
+    textColor: "{colors.accent-ink}"
     rounded: "{rounded.sm}"
     padding: "9px 16px"
-  button-primary-hover:
-    backgroundColor: "{colors.amber-bright}"
   button-secondary:
-    backgroundColor: "transparent"
-    textColor: "{colors.paper-dim}"
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.ink-2}"
+    borderColor: "{colors.seam-strong}"
     rounded: "{rounded.sm}"
-    padding: "9px 16px"
+    padding: "8px 14px"
   button-danger:
-    backgroundColor: "transparent"
-    textColor: "{colors.coral-alert}"
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.danger}"
+    borderStyle: "dashed"
     rounded: "{rounded.sm}"
     padding: "5px 9px"
-  card:
-    backgroundColor: "{colors.char-2}"
-    textColor: "{colors.paper}"
-    rounded: "{rounded.sm}"
-    padding: "18px 20px"
+  panel:
+    backgroundColor: "{colors.panel}"
+    borderColor: "{colors.seam}"
+    rounded: "{rounded.lg}"
+    padding: "20px 22px"
   input:
-    backgroundColor: "{colors.char}"
-    textColor: "{colors.paper}"
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.ink}"
+    borderColor: "{colors.seam-strong}"
     rounded: "{rounded.sm}"
-    padding: "8px 9px"
+    padding: "7px 9px"
+  record-row:
+    backgroundColor: "{colors.panel}"
+    selectedBackgroundColor: "{colors.accent-wash}"
+    borderColor: "{colors.seam}"
+    padding: "9px 12px"
 ---
 
 # Design System: Sistema 364
 
 ## Overview
 
-**Creative North Star: "The Foreman's Board"**
+**Creative North Star: "The Working Surface"**
 
-Sistema 364 is the shift lead's board on the wall of a working kitchen: dark, no-nonsense, built to be scanned at a glance while hands are busy with something else. It exists to track lots, costs, shifts, and stock across four brands sharing one back office — precision under pressure, not persuasion. Every screen defaults to dense, tabular, low-glare: charcoal surfaces, paper-colored text, and a single warm amber signal for what needs a hand on it right now.
+Sistema 364 is a bench, not a dashboard. Panels are laid out and they stay laid
+out; what changes is the content inside them. A list of products on the left, the
+open record on the right, and neither one goes away when the other is used. The
+whole surface is white paper on a light grey floor, divided by 1px seams — there
+is no shadow anywhere except the one modal that genuinely floats.
 
-The palette is deliberately narrow — a handful of char/smoke tones, one paper text color, one recurring accent — so that amber reading as "active, primary, or worth noticing" never has to compete with decorative color elsewhere. The system rejects light backgrounds, drop shadows, and rounded-corner softness as its default register; those belong only to the one sub-world built for a different physical context (the ponto kiosk touchscreen, see below).
+The rule that shapes everything: **color only ever means state**. Blue is the
+action and the current selection. Green is checked. Amber is pending. Red is
+destructive and always stands apart from its neighbours. Nothing in this system
+is colored to be pretty, so when something is colored the operator can trust that
+it is telling them something.
 
-**Key Characteristics:**
-- Dark charcoal ground with a single warm amber signal, not a multi-color palette.
-- Georgia serif reserved for numbers and headings; everything operational reads in a plain UI sans-serif.
-- Uppercase, letter-spaced micro-labels used relentlessly as the connective tissue between data points.
-- Flat by default — depth comes from tone steps and hairline borders, never shadows.
-- Sharp 3px corners on desktop/office screens; a distinct, larger-radius, big-touch-target language on the tablet kiosk.
+Numbers are never set in the interface face. Anything measured — a product code,
+a quantity, money, a tax rate, a version string — is monospaced and tabular, so
+that the column of costs down a list reads as a column and the eye can compare
+without stopping.
+
+**Key characteristics:**
+- White panels on a light grey ground, separated by a single 1px seam weight.
+- Flat by construction: no shadows, no gradients, no colored left borders.
+- Lexend for the interface, JetBrains Mono for everything measured.
+- Section titles inside forms, not cards inside cards.
+- The destructive action is separated from its neighbours by space, not by warning copy.
 
 ## Colors
 
-A near-monochrome charcoal system lit by one recurring amber signal, with narrow, purpose-built reds and one untokenized green for state.
+### Surface
+- **Ground** (`#f2f4f6`): the floor the panels sit on. Never carries content directly.
+- **Panel** (`#ffffff`): every working surface — panels, inputs, list rows, the sidebar.
+- **Sunken** (`#f7f8fa`): hover state, table headers, the tray a list of sub-items sits in.
+- **Seam** (`#dfe3e8`) and **Seam Strong** (`#c4ccd5`): the only two division weights. Seam divides content from content; Seam Strong outlines something you can type into or click.
 
-### Primary
-- **Amber** (`#c68a2e`): the system's one recurring accent — primary button fill, active nav/tab state, KPI accent border, focus outline, links. Used deliberately often; its repetition across active/primary/attention states *is* the system's signature warmth, not overuse.
-- **Amber Bright** (`#e0a949`): the amber's hover/active step and the color of "amber on dark" text (panel headings, active nav labels, KPI numerals that need to pop).
+### Ink
+- **Ink** (`#11161c`): body and headings, 18.2:1 on panel.
+- **Ink 2** (`#3d4854`): field labels and secondary values, 9.3:1.
+- **Ink Muted** (`#626d7a`): descriptions, counts, section titles. 5.3:1 on panel and 4.8:1 on ground — it had to be darkened from a lighter grey that failed on the ground.
+- **Ink Faint** (`#6b7683`): placeholders and resting icons, 4.6:1. Nothing lighter than this carries text.
 
-### Neutral
-- **Char** (`#1c1815`): the base ground — page background, input fields, the kiosk's dark core.
-- **Char 2** (`#252019`): the first surface step up — cards, panels, KPI tiles.
-- **Char 3** (`#2f2921`): the second surface step — hover backgrounds, sidebar link hover, kiosk secondary surfaces.
-- **Smoke** (`#3c352b`): the "selected/active" surface — active sidebar item, active ponto-tab, selected kiosk type.
-- **Paper** (`#f4efe6`): primary text on dark surfaces.
-- **Paper Dim** (`#c9c0af`): secondary/muted text — labels, descriptions, table headers, placeholder-weight copy.
-- **Border** (`#413a2f`): the one hairline border color used everywhere a division is needed — cards, inputs, table rules, dividers.
+### Brand and action — the mint family
+The brand color is **Mint** (`#75fc96`), and it exists in three tones because one
+is not enough. Mint measures **1.3:1 against white**: as ink, as a hairline, or as
+a focus ring it is invisible. Confusing the three is how a screen becomes
+unreadable without anyone noticing.
 
-### Functional
-- **Ember Red** (`#a13d2b`): structural danger — the KPI warning accent border, the danger button's border and hover fill. Deep and used sparingly, as a border/fill rather than large surface.
-- **Coral Alert** (`#e5806c`): bright alert text — danger button label, "bad" status tag text, kiosk error copy, off-line status dot. Paired with Ember Red but reserved for text/small marks, never a fill.
-- **Field Green** (`#8fbd6f`) on `#28351f`: the success pairing — "ok" status tags, online status dot, kiosk check-in confirmation. Real and reused three times in the codebase but not yet promoted to a CSS custom property; treat it as canonical the next time a `--green` token is wired up.
+- **Mint** (`#75fc96`): fill only, always under **Accent Ink** (`#08120c`) — 14.6:1. Primary buttons, product category tags, the 3px selection seam, chart bars.
+- **Mint Wash** (`#e9fdef`): the selected row, the active area.
+- **Green Deep** (`#0f6b39`): everything thin — links, active tab and nav labels, focus ring, input focus border, sparkline stroke. 6.6:1 on white.
 
-### Named Rules
-**The One Signal Rule.** Amber is the only accent color allowed to mean "primary, active, or pay attention." Every other color in the system is either structural neutral (char/smoke/paper) or a narrow functional state (danger/success). Don't introduce a second decorative accent color.
+### State
+- **OK** (`#1257b8`) on **OK Wash** (`#eaf2fe`): checked, complete, released. It became blue when green became the brand — one color, one meaning.
+- **Warn** (`#8a6100`) on **Warn Wash** (`#fdf5e2`): pending — a record that cannot be used yet, and the count of what is missing.
+- **Danger** (`#d13817`) fills and outlines; **Danger Ink** (`#c23214`) is the text tone, because the fill color reads 4.28:1 on its own wash and the ink reads 4.88:1.
+
+### Named rules
+**Color is a claim.** Green is the brand and the action; blue means a person
+checked it; amber means incomplete; red destroys or is wrong. A color used for
+emphasis alone breaks the only reason the operator trusts the other three.
+
+**Mint never carries meaning alone.** The selected row has a mint seam, but what
+carries the state is the washed background plus `aria-selected`. The active tab
+has a mint underline, but the label also turns Green Deep and gains weight. Any
+state that mint marks is marked twice.
+
+**Every list searches, and search forgives.** The search box strips accents and
+case, and a term made of digits also matches the digits of a document — someone
+reading a CNPJ off a printed invoice types the dots and slashes they see.
+`lib/listaCadastro.js` holds it, so all three screens forgive the same way.
+
+**Tax rules are reachable from where the work happens.** A product's tax
+configuration is a shared entity — that is what stops CFOP and MVA from being
+retyped per SKU — but it is created and corrected from inside the product's
+Fiscal tab, in a modal, with the rules it already carries listed underneath the
+selector. Sending someone to a separate menu to describe how an item is taxed is
+how the separate menu becomes the thing nobody understands.
+
+**Mint fill has two jobs, and they do not compete.** It is the primary action,
+and it is the product's category tag — a tag is a label the eye groups by while
+scanning, never something to click. They coexist because they never sit in the
+same place: actions live in the toolbar and the panel foot, category tags live
+inside a list row. Nothing else earns the mint fill.
+
+**Never a colored border above 1px.** Depth is tone and seam. The one exception
+is the 2px seam on the left edge of a selected list row, which is selection state
+and not decoration.
 
 ## Typography
 
-**Display Font:** Georgia, with 'Times New Roman' and serif fallback
-**Body Font:** 'Segoe UI', with Roboto, Helvetica, Arial, sans-serif fallback
-
-**Character:** A working ledger's pairing — a plain, high-legibility UI sans for the operational grind (tables, forms, labels), and an old-style serif reserved for numbers and identity, so the moments that matter (a KPI value, the brand mark, a clock) read with more weight and craft than the surrounding chrome.
+**Interface:** Manrope (400/500/600/700), self-hosted through next/font.
+**Measured:** JetBrains Mono (400/500), tabular figures.
 
 ### Hierarchy
-- **Display** (400, 22px topbar title up to 64px kiosk clock, line-height 1): brand mark, page titles, KPI values, kiosk clock and confirmation names. Georgia's the "this number/name matters" signal.
-- **Title** (400, 14px, letter-spacing 0.8px, uppercase-by-context): panel section headers in amber-bright — a serif label, not a heading in the display sense.
-- **Body** (400, 12.5–14px): table cells, form copy, descriptions, running text.
-- **Label** (400, 10.5–11.5px, letter-spacing 0.5–1.5px, uppercase, paper-dim): the system's connective tissue — KPI labels, form field labels, table column headers, sidebar sub-brand, tag text. This is the single most repeated typographic move in the system.
+- **Page title** (600, 19px, -0.01em): one per screen, in the sticky top bar.
+- **Record title** (600, 15px): the open record's name in the panel head.
+- **Body** (400, 13.5px): the default.
+- **Label** (500, 11px): field labels, in Ink 2. Not uppercase — uppercase belongs to sections.
+- **Section** (600, 10.5px, 0.09em, uppercase, Ink Muted): the divider inside a form, with a hairline running from the text to the right edge.
+- **Measured** (mono, tabular): codes, quantities, money, rates, dates, version strings, KPI values.
 
-### Named Rules
-**The Serif-For-Numbers Rule.** Georgia appears only on headings, brand marks, and numeric/identity display values — never on body copy, labels, or table cells. If it's data being scanned in bulk, it's sans-serif; if it's a headline number or a name, it's serif.
+### Named rules
+**The mono-for-measured rule.** If the value would be compared against another
+value of the same kind, or typed from a document, it is monospaced. Names,
+descriptions and copy never are — monospace here is for alignment and
+transcription, not for looking technical.
 
 ## Layout
 
-Sistema 364 runs in two distinct physical contexts sharing one token system:
+**Office shell:** a 224px sidebar (brand, company switcher, grouped nav, user
+foot) and a fluid main column. The top bar is sticky and carries the page title.
 
-- **Office shell** (desktop/tablet browser): a fixed 210px sidebar (nav + company switcher + user badge) and a fluid main column padded 26px 34px. KPI tiles lay out on `repeat(auto-fit, minmax(190px, 1fr))` with 12px gaps; two-panel comparisons use a `1fr 1fr` grid at 20px gap. Below 900px the sidebar drops above the content and stacks full-width, and two-column grids collapse to one.
-- **Kiosk shell** (`/quiosque`, tablet fullscreen, no sidebar): a single centered column on a radial-gradient charcoal background, built for a person standing at arm's length from a mounted tablet — oversized touch targets, a giant PIN input, and a live camera preview for facial check-in.
+**The bench** (`.workbench`): two equal columns, `minmax(360px,1fr)` each, with
+the record panel sticky under the top bar. Below 1100px it collapses to a single
+`minmax(0,1fr)` column — the `minmax(0,…)` matters, because a plain `1fr`
+respects the list's min-content and pushes the panel off the screen.
 
-Forms use `repeat(auto-fit, minmax(160px, 1fr))` field grids aligned to the field baseline (`align-items: end`), so labels and inputs of different heights stay visually level.
+**Forms:** `repeat(auto-fit, minmax(180px, 1fr))`, aligned to the top so help
+text under one field does not shift its neighbour. `.largo` spans the full row.
+Sections divide with `.secao`.
 
-## Elevation & Depth
+**Records:** rows carry code, name, category tag, NCM, cost, price, margin and
+fiscal status. `.registro-lista` opens with `.registro-cabecalho`, a sunken strip
+naming every column — three money-shaped numbers in a row say nothing about which
+is cost, which is price, and what the percentage measures. Header and row share
+fixed column widths, never `min-width`: with a minimum, a value wider than its
+label pushes the next column and the drift accumulates left to right. The
+selection seam is 3px and always present, transparent when unselected, so a row
+does not shift by a pixel when it is clicked.
 
-Flat by design — there is no `box-shadow` anywhere in the system. Depth is conveyed entirely through tonal steps (char → char-2 → char-3 → smoke) and 1px borders, never through cast shadows.
+Each row is a button; the whole row is the target. A row carries seven columns —
+code, name, category tag, cost, price, margin, status — and the values sit in
+fixed-width right-aligned mono columns so they line up down the list. The bench
+gives the list `1.24fr` against the record panel's `1fr` precisely because of
+that column count; splitting it evenly truncated the product name, and the name
+is the identity. The name yields space last, before the tag and after the
+numbers; anything still too long truncates with the full text in `title`. Below 900px the row
+becomes two lines — identity on top, numbers underneath — because the numbers
+used to run off the right edge of a phone.
 
-### Named Rules
-**The Flat-By-Default Rule.** Surfaces never cast a shadow, at rest or on hover. A card sits "above" the page only because it's a lighter tone step with a border, not because it's lifted.
+**Tablet:** below 900px the sidebar unpins and its brand and company switcher
+share a line, the nav scrolls inside a 44vh box instead of pushing the content
+below the fold, and touch targets grow — buttons to 42px, small buttons to 40px,
+tabs to 44px. Fingers, not cursors.
 
-## Shapes
+## KPI tiles
 
-Two form languages, split by physical context:
+Label in 11px muted, then the value at 32px mono with `-0.02em`, and a sparkline
+to its right at the value's baseline. The number dominates the tile; the chart is
+context and never replaces the value. Below both, a delta line in mono — Green
+Deep when it rose, Danger when it fell, muted when it is just a count.
 
-- **Office shell:** a near-sharp 3px radius (`--radius`) on nearly everything — cards, panels, inputs, buttons. Status tags are the one full-pill exception (20px radius), and the print "ficha" drops radius entirely (square-cornered, table-ruled, made to be read on paper).
-- **Kiosk shell:** a softer, larger radius — 8px on secondary controls and the giant register button, 10px on primary containers (video frame, confirmation card, comprovante) — because these are big touch targets for a thumb, not a mouse pointer.
+Sparklines are drawn in `components/Sparkline.js` from `lib/sparkline.js`: a
+polyline plus a dot on the last point, no library. A flat series sits on the
+middle line rather than the floor, because a series that did not move is not a
+series at rock bottom. Null and undefined are dropped before scaling — a day with
+no reading is not a day with zero.
 
-## Components
+## Elevation & depth
 
-### Buttons
-- **Shape:** 3px radius, built on a `all: unset` reset so no browser button chrome leaks through.
-- **Primary:** amber fill, char-dark text (`#1c1815`), bold weight, uppercase-leaning letter-spacing (0.5px), 9px 16px padding.
-- **Hover / Disabled:** hover steps to amber-bright; disabled drops to 0.5 opacity with a default cursor, no other state change.
-- **Secondary:** transparent fill, bordered in `--border`, paper-dim text; hover swaps the border and text to amber/amber-bright.
-- **Danger:** transparent fill, ember-red border, coral-alert text, tighter padding (5px 9px); hover fills solid ember-red with paper text.
-- **Small:** same variants at 5px 9px padding, 11px type — used for row-level actions.
+There is no shadow in this system except one: the modal, which is genuinely above
+the page, carries `0 12px 32px -8px rgba(17,22,28,.22)` — an offset and a real
+blur. Everything else is tone and seam.
 
-### Tags / Status Pills
-- **Shape:** full pill (20px radius), 2px 8px padding, 10.5px uppercase label.
-- **States:** `ok` (field-green on dark green), `warn` (amber-bright on dark amber-brown), `bad` (coral-alert on dark red-brown) — always a saturated text color on its own muted, near-black tint of the same hue.
+## Icons
 
-### Cards / Panels
-- **Corner Style:** 3px radius.
-- **Background:** char-2, one step lighter than the page.
-- **Border:** 1px `--border` on all sides.
-- **KPI variant:** adds a 3px left accent border in amber (ember-red when the metric is in a warning state) — the one place a side-accent border is used deliberately, not decoratively.
-- **Panel variant:** an amber-bright uppercase title with a border-bottom rule separates the header from its content.
+Drawn in `components/Icone.js`: 24-unit grid, 1.5 stroke, round caps and joins,
+no fill, `currentColor`. Unicode glyphs are not used as icons — the same
+character renders as a different shape on every operating system.
 
-### Inputs / Fields
-- **Style:** char background, 1px `--border`, 3px radius, inherited font.
-- **Focus:** border color shifts to amber — no glow, no ring, just a color-only state change.
-- **Kiosk input:** a distinct oversized variant — 28px type, 8px letter-spacing, center-aligned, for PIN-style entry at arm's length.
+## Motion
 
-### Tables
-- No cell borders except a 1px bottom rule per row; header cells are uppercase, letter-spaced, paper-dim.
-- Row hover darkens the row (`#241f19`) rather than lifting it.
-- Numeric columns get `font-variant-numeric: tabular-nums` and right-alignment via `.num`.
-- Empty state: a single centered, italic, paper-dim row rather than an empty table.
+One authored transition: the nav group chevron rotating 90° over 150ms. Focus,
+hover and selection are instant state changes. An operator repeating a task
+thirty times a day is not served by animation between the steps.
 
-### Navigation
-- **Sidebar:** paper-dim links by default; hover moves to char-3 background with paper text; the active route gets a smoke background, amber-bright text, and bold weight.
-- **Ponto sub-tabs:** the same active-state logic (smoke background, amber-bright text) applied to a horizontal pill row instead of a vertical list, so sub-navigation reads as a sibling pattern to the main sidebar rather than a new idiom.
+## Lineage
 
-### Kiosk (signature sub-world)
-A fullscreen, radial-gradient tablet mode outside the office shell entirely: a large Georgia clock, a giant amber "register" button (8px radius, 22px 54px padding), a mirrored live camera frame for facial capture, and big selectable tiles for marking type (10px radius, amber border + smoke fill when selected). Confirmation renders as a green-tinted receipt card with monospace detail lines — the one place the system uses a monospace font, to read as a printed stub rather than a UI panel.
-
-### Print Ficha (signature sub-world)
-A second, separate world that only exists inside `@media print`: black-on-white, Georgia serif throughout, a double-ruled header border, and a fully-gridded form table with 1px black rules — built to be read as a physical printed receipt/ficha, not a screen. It intentionally shares no tokens with the dark office/kiosk system.
-
-## Do's and Don'ts
-
-### Do:
-- **Do** keep amber as the only color that means "primary, active, or attention" — its frequent reuse across nav/buttons/KPIs/focus is the system's signature, not a bug to fix.
-- **Do** pair every dark surface step with a 1px `--border` rather than a shadow to signal a boundary.
-- **Do** use the uppercase, letter-spaced Label style for anything that annotates data (field labels, table headers, KPI labels, tag text) rather than inventing a new caption style.
-- **Do** use Georgia only for numbers, headings, and identity marks — never for body copy or labels.
-- **Do** give the kiosk shell its own larger radius and touch-target scale rather than reusing office-shell 3px controls at tablet size.
-
-### Don't:
-- **Don't** add `box-shadow` anywhere in the office or kiosk shell — depth is tone-step + border only.
-- **Don't** introduce a second decorative accent color alongside amber; new semantic states should draw from the existing danger/success pairs (ember-red/coral-alert, field-green) before adding a new hue.
-- **Don't** carry the kiosk's larger radius (8–10px) or oversized touch targets into the office shell, or the office shell's 3px sharpness into the kiosk — they're deliberately different form languages for different physical contexts.
-- **Don't** mix the print ficha's black-on-white paper world with the dark office/kiosk token set; it's an intentionally separate visual register for a printed artifact.
+The mint palette, Manrope, the generous corner radius and the label/number/spark
+KPI come from the PlanIQ dashboard study the owner chose as reference. What did
+not come across: PlanIQ's horizontal pill navigation, which fits its seven
+destinations and not this system's eight groups and thirty-odd screens, and its
+low information density, which would fight the requirement to compare many
+products at a glance.

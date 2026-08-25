@@ -16,6 +16,7 @@ export const MODULOS = [
   { id: 'pedidos', label: 'Pedidos de Venda', href: '/pedidos', ic: '▩', desc: 'Pedidos, faturamento e baixa de estoque' },
   // 'funcionarios' foi unificado ao cadastro de colaboradores (Ponto) — ver ROADMAP.md
   { id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', desc: 'Categorias de conta e contas a pagar' },
+  { id: 'fiscal', label: 'Fiscal', href: '/fiscal/tributacao', ic: '◇', desc: 'Grupos e regras tributárias, NF-e' },
   { id: 'relatorios', label: 'Relatórios', href: '/relatorios', ic: '▢', desc: 'Produção, compras e financeiro' },
   { id: 'ponto', label: 'RH', href: '/ponto/colaboradores', ic: '◔', desc: 'Controle de ponto, colaboradores e escalas' },
 ];

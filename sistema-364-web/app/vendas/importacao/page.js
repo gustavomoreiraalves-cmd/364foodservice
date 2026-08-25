@@ -22,7 +22,7 @@ export default function VendasPdvPage() {
 function Delta({ pct }) {
   if (pct === null || !isFinite(pct)) return <span className="muted" style={{ fontSize: 11 }}>—</span>;
   const subiu = pct >= 0;
-  return <span style={{ fontSize: 11, color: subiu ? 'var(--amber-bright)' : '#e5806c' }}>{subiu ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}% vs período anterior</span>;
+  return <span style={{ fontSize: 11, color: subiu ? 'var(--amber-bright)' : 'var(--danger)' }}>{subiu ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}% vs período anterior</span>;
 }
 
 function Kpi({ label, valor, delta }) {
@@ -105,7 +105,7 @@ function Conteudo() {
   if (temLoja === false) {
     return <div className="panel"><h3>Sem PDV Consumer</h3><p className="muted">A empresa selecionada não tem loja no Consumer Connect. Esta tela cobre a 364 Steakhouse e a 364 Foodtruck/Afya.</p></div>;
   }
-  if (erro) return <div className="panel"><p style={{ color: '#e5806c' }}>Erro ao carregar: {erro}</p></div>;
+  if (erro) return <div className="panel"><p style={{ color: 'var(--danger)' }}>Erro ao carregar: {erro}</p></div>;
   if (!calc) return <div className="panel"><p className="muted">Carregando…</p></div>;
 
   const categorias = [...new Set(calc.itens.map(i => i.categoria).filter(Boolean))].sort();

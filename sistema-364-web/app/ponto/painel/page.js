@@ -157,7 +157,7 @@ function Conteudo() {
             <tbody>
               {bancoNegativo.length ? bancoNegativo.map(l => (
                 <tr key={l.colaborador.id}><td>{l.colaborador.nome}</td>
-                  <td className="num" style={{ color: 'var(--ember-bright, #e5806c)' }}>{fmtMinutos(l.resumo.saldoMinutos)}h</td></tr>
+                  <td className="num" style={{ color: 'var(--danger)' }}>{fmtMinutos(l.resumo.saldoMinutos)}h</td></tr>
               )) : <tr className="empty-row"><td colSpan={2}>Sem déficit acumulado.</td></tr>}
             </tbody>
           </table>

@@ -32,7 +32,7 @@ function Delta({ pct, inverso = false, unidade = '%' }) {
   if (pct === null || !isFinite(pct)) return <span className="muted" style={{ fontSize: 11 }}>—</span>;
   const subiu = pct >= 0;
   const bom = inverso ? !subiu : subiu;
-  const cor = bom ? 'var(--amber-bright)' : '#e5806c';
+  const cor = bom ? 'var(--amber-bright)' : 'var(--danger)';
   return (
     <span style={{ fontSize: 11, color: cor }}>
       {subiu ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}{unidade} vs mês anterior

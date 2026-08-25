@@ -1,11 +1,13 @@
+// Estrutura da navegação lateral. `ic` é o nome de um ícone de components/Icone.js
+// (desenhado em SVG), não um caractere — glifo unicode muda de forma por sistema.
 // Estrutura da navegação lateral. Separada de MODULOS (lib/auth.js), que continua
 // sendo o catálogo de permissões usado nos checkboxes da tela de Acesso.
 // Item sem `modulo` é visível para qualquer usuário logado.
 // `exato: true` quando o href é prefixo de outras rotas (caso de /producoes).
 export const MENU = [
-  { tipo: 'link', id: 'dashboard', label: 'Dashboard', href: '/', ic: '◆', exato: true },
+  { tipo: 'link', id: 'dashboard', label: 'Dashboard', href: '/', ic: 'dashboard', exato: true },
   {
-    tipo: 'grupo', id: 'cadastros', label: 'Cadastros', ic: '▤', itens: [
+    tipo: 'grupo', id: 'cadastros', label: 'Cadastros', ic: 'cadastros', itens: [
       { label: 'Clientes', href: '/clientes', modulo: 'clientes' },
       { label: 'Fornecedores', href: '/fornecedores', modulo: 'fornecedores' },
       { label: 'Produtos', href: '/produtos', modulo: 'produtos' },
@@ -14,7 +16,7 @@ export const MENU = [
     ],
   },
   {
-    tipo: 'grupo', id: 'producao', label: 'Produção', ic: '▨', itens: [
+    tipo: 'grupo', id: 'producao', label: 'Produção', ic: 'producao', itens: [
       { label: 'Visão Geral', href: '/producoes', modulo: 'producoes', exato: true },
       { label: 'Recebimento', href: '/recebimentos', modulo: 'recebimentos' },
       { label: 'Defumação', href: '/producoes/defumacao', modulo: 'producoes' },
@@ -27,7 +29,7 @@ export const MENU = [
     ],
   },
   {
-    tipo: 'grupo', id: 'vendas', label: 'Vendas', ic: '▩', itens: [
+    tipo: 'grupo', id: 'vendas', label: 'Vendas', ic: 'vendas', itens: [
       { label: 'Pedidos (Food Services)', href: '/pedidos', modulo: 'pedidos' },
       { label: 'Vendas PDV (Steakhouse/Afya)', href: '/vendas/importacao', modulo: 'pedidos' },
       { label: 'Vendas Buffet', href: '/vendas/buffet', modulo: 'pedidos' },
@@ -35,14 +37,19 @@ export const MENU = [
     ],
   },
   {
-    tipo: 'grupo', id: 'financeiro', label: 'Financeiro', ic: '◈', itens: [
+    tipo: 'grupo', id: 'financeiro', label: 'Financeiro', ic: 'financeiro', itens: [
       { label: 'Contas a Pagar', href: '/financeiro/contas-a-pagar', modulo: 'financeiro' },
       { label: 'Conciliação Bancária', href: '/financeiro/conciliacao', modulo: 'financeiro' },
       { label: 'Contas Bancárias', href: '/financeiro/contas-bancarias', modulo: 'financeiro' },
     ],
   },
   {
-    tipo: 'grupo', id: 'rh', label: 'RH', ic: '◔', itens: [
+    tipo: 'grupo', id: 'fiscal', label: 'Fiscal', ic: 'fiscal', itens: [
+      { label: 'Tributação', href: '/fiscal/tributacao', modulo: 'fiscal' },
+    ],
+  },
+  {
+    tipo: 'grupo', id: 'rh', label: 'RH', ic: 'rh', itens: [
       { label: 'Painel do gestor', href: '/ponto/painel', modulo: 'ponto' },
       { label: 'Colaboradores', href: '/ponto/colaboradores', modulo: 'ponto' },
       { label: 'Marcações', href: '/ponto/marcacoes', modulo: 'ponto' },
@@ -53,7 +60,7 @@ export const MENU = [
       { label: 'Dispositivos', href: '/ponto/dispositivos', modulo: 'ponto' },
     ],
   },
-  { tipo: 'link', id: 'relatorios', label: 'Relatórios', href: '/relatorios', ic: '▢', modulo: 'relatorios' },
+  { tipo: 'link', id: 'relatorios', label: 'Relatórios', href: '/relatorios', ic: 'relatorios', modulo: 'relatorios' },
 ];
 
 function podeVer(modulo, permissoes, isAdmin) {

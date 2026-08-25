@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { menuVisivel, itemAtivo, grupoDaRota } from '../lib/menu';
+import Icone from './Icone';
 
 const LS_KEY = 'menuGruposAbertos';
 
@@ -34,7 +35,7 @@ export default function SidebarNav({ permissoes, isAdmin }) {
         if (entrada.tipo === 'link') {
           return (
             <a key={entrada.id} href={entrada.href} className={itemAtivo(entrada, pathname) ? 'active' : ''}>
-              <span className="ic" aria-hidden="true">{entrada.ic}</span>{entrada.label}
+              <Icone nome={entrada.ic} />{entrada.label}
             </a>
           );
         }
@@ -49,9 +50,9 @@ export default function SidebarNav({ permissoes, isAdmin }) {
               aria-controls={`nav-sub-${entrada.id}`}
               onClick={() => alternar(entrada.id)}
             >
-              <span className="ic" aria-hidden="true">{entrada.ic}</span>
+              <Icone nome={entrada.ic} />
               <span className="nav-grupo-label">{entrada.label}</span>
-              <span className="chevron" aria-hidden="true">▸</span>
+              <Icone nome="seta" tamanho={12} className="chevron" />
             </button>
             {/* Sempre renderizado, só escondido: assim o aria-controls do botão
                 aponta para um elemento que existe mesmo com o grupo fechado. */}

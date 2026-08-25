@@ -24,19 +24,19 @@ export default function LoginPage() {
     else router.replace('/');
   }
 
-  const inputStyle = { width: '100%', padding: 10, marginBottom: 10, background: '#2f2921', border: '1px solid #413a2f', color: '#f4efe6', borderRadius: 4 };
+  const campoStyle = { marginBottom: 10 };
 
   return (
-    <main style={{ maxWidth: 380, margin: '80px auto', padding: 24 }}>
+    <main className="centro">
       <h1 style={{ fontSize: 22 }}>364 Foodservices</h1>
-      <p style={{ color: '#c9c0af', fontSize: 13 }}>Entre com seu usuário e senha.</p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Entre com seu usuário e senha.</p>
       <form onSubmit={handleLogin}>
         <input
           required
           placeholder="Usuário"
           value={usuario}
           onChange={(e) => setUsuario(e.target.value)}
-          style={inputStyle}
+          style={campoStyle}
         />
         <input
           type="password"
@@ -44,12 +44,12 @@ export default function LoginPage() {
           placeholder="Senha"
           value={senha}
           onChange={(e) => setSenha(e.target.value)}
-          style={inputStyle}
+          style={campoStyle}
         />
-        <button type="submit" disabled={entrando} style={{ width: '100%', padding: 10, background: '#c68a2e', border: 'none', borderRadius: 4, fontWeight: 700 }}>
+        <button className="btn" type="submit" disabled={entrando} style={{ width: '100%', padding: 10 }}>
           {entrando ? 'Entrando…' : 'Entrar'}
         </button>
-        {erro && <p style={{ color: '#e5806c', fontSize: 12 }}>{erro}</p>}
+        {erro && <p className="erro" style={{ fontSize: 12 }}>{erro}</p>}
       </form>
     </main>
   );

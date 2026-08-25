@@ -168,7 +168,7 @@ function Conteudo({ setFicha }) {
                   <tr><td>Horas extras</td><td className="num">{fmtMinutos(r.extraMinutos)}h</td></tr>
                   <tr><td>Faltas</td><td className="num">{r.diasFalta} dia(s)</td></tr>
                   <tr><td><b>Saldo do período{colaborador?.banco_horas ? ' (banco de horas)' : ''}</b></td>
-                    <td className="num" style={{ color: r.saldoMinutos < 0 ? 'var(--ember-bright, #e5806c)' : 'var(--amber-bright)' }}>
+                    <td className="num" style={{ color: r.saldoMinutos < 0 ? 'var(--danger)' : 'var(--amber-bright)' }}>
                       <b>{fmtMinutos(r.saldoMinutos)}h</b>
                     </td></tr>
                 </tbody>
