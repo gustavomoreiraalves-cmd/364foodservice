@@ -24,7 +24,7 @@
 
 ## File Structure
 
-- `supabase/atualizacao_39_emissao_fiscal.sql` — cria `empresas_emissao_fiscal`, `fiscal_numeracao`, trigger de `empregador_id`, coluna `empresas.informacoes_complementares_padrao`.
+- `supabase/atualizacao_40_emissao_fiscal.sql` — cria `empresas_emissao_fiscal`, `fiscal_numeracao`, trigger de `empregador_id`, coluna `empresas.informacoes_complementares_padrao`.
 - `lib/emissaoFiscal.js` (novo) — funções puras de validação, sem I/O.
 - `tests/emissao-fiscal.test.mjs` (novo) — testa `lib/emissaoFiscal.js`.
 - `lib/certificadoServer.js` (modificado) — extrai `cifrarCom`/`decifrarCom` reutilizáveis, mantém `cifrar`/`decifrar` como estavam para quem já os usa.
@@ -39,7 +39,7 @@
 ### Task 1: Migração — tabelas e trigger
 
 **Files:**
-- Create: `supabase/atualizacao_39_emissao_fiscal.sql`
+- Create: `supabase/atualizacao_40_emissao_fiscal.sql`
 
 **Interfaces:**
 - Produces: tabelas `empresas_emissao_fiscal(id, empresa_id, empregador_id, modelo, ambiente, ativo, serie, csc_id, csc_token_cifrado, csc_key_version, created_at, updated_at)` e `fiscal_numeracao(id, empregador_id, modelo, ambiente, serie, ultimo_numero, updated_at)`; coluna `empresas.informacoes_complementares_padrao`.
@@ -48,7 +48,7 @@
 
 ```sql
 -- =========================================================
--- Atualização 39 — Configuração de emissão fiscal (NF-e/NFC-e)
+-- Atualização 40 — Configuração de emissão fiscal (NF-e/NFC-e)
 --
 -- empresas_emissao_fiscal é a config por marca (empresa_id); fiscal_numeracao
 -- é o contador, chaveado por empregador_id (o CNPJ real, quem emite de
@@ -160,7 +160,7 @@ de desenvolvimento primeiro.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add supabase/atualizacao_39_emissao_fiscal.sql
+git add supabase/atualizacao_40_emissao_fiscal.sql
 git commit -m "feat(fiscal): criar empresas_emissao_fiscal e fiscal_numeracao"
 ```
 

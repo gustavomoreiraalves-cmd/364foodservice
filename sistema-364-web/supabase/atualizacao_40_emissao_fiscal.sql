@@ -1,5 +1,5 @@
 -- =========================================================
--- Atualização 39 — Configuração de emissão fiscal (NF-e/NFC-e)
+-- Atualização 40 — Configuração de emissão fiscal (NF-e/NFC-e)
 --
 -- empresas_emissao_fiscal é a config por marca (empresa_id); fiscal_numeracao
 -- é o contador, chaveado por empregador_id (o CNPJ real, quem emite de
