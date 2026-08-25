@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { caminhoLogo } from './logo';
 
 const BUCKET = 'recebimentos';
 
@@ -94,4 +95,33 @@ export async function signedUrlExtrato(path, segundos = 300) {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, segundos);
   if (error) throw error;
   return data.signedUrl;
+}
+
+// ---------- EMPRESAS: logo da marca (bucket público 'logos') ----------
+// Público porque o cabeçalho renderiza em toda navegação — signed URL custaria
+// um round-trip por página e expiraria. A escrita continua sendo só de admin
+// (policies da atualização 42). Validação do arquivo fica em lib/logo.js.
+
+export async function uploadLogoEmpresa(empresaId, file) {
+  const path = caminhoLogo(empresaId, Date.now());
+  const { error } = await supabase.storage.from('logos').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: 'image/png',
+  });
+  if (error) throw error;
+  return path;
+}
+
+export function urlLogoEmpresa(path) {
+  if (!path) return '';
+  const { data } = supabase.storage.from('logos').getPublicUrl(path);
+  return data?.publicUrl || '';
+}
+
+// Melhor esforço: se o arquivo antigo ficar para trás, o cadastro já aponta
+// para o novo e a tela não quebra.
+export async function removerLogoEmpresa(path) {
+  if (!path) return;
+  await supabase.storage.from('logos').remove([path]);
 }

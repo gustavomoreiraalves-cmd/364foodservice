@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
 import CertificadoA1, { BadgeCertificado } from '../../components/CertificadoA1';
+import LogoEmpresa from '../../components/LogoEmpresa';
 import { useEmpresaAtual, limparCachePessoaJuridica } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
 import { formatarCnpj, somenteDigitos, cnpjValido } from '../../lib/cnpj';
@@ -45,7 +46,7 @@ function Conteudo() {
     setLoading(true);
     const [{ data: emps, error: erroEmps }, { data: mcs, error: erroMcs }] = await Promise.all([
       supabase.from('empregadores').select('*').order('razao_social'),
-      supabase.from('empresas').select('id, nome, empregador_id').order('nome'),
+      supabase.from('empresas').select('id, nome, empregador_id, logo_path').order('nome'),
     ]);
     const erro = erroEmps || erroMcs;
     setErroCarga(erro ? 'Não foi possível carregar as empresas: ' + erro.message : '');
@@ -186,7 +187,13 @@ function Conteudo() {
               <legend><strong>Operações vinculadas</strong></legend>
               <ul>
                 {marcas.filter(m => m.empregador_id === emEdicao.id).map(m => (
-                  <li key={m.id}>{m.nome} <button className="btn secondary small" type="button" onClick={() => vincularMarca(m.id, null)}>Desvincular</button></li>
+                  <li key={m.id} style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {m.nome}
+                      <button className="btn secondary small" type="button" onClick={() => vincularMarca(m.id, null)}>Desvincular</button>
+                    </div>
+                    <LogoEmpresa marca={m} aoMudar={carregar} />
+                  </li>
                 ))}
               </ul>
               {marcas.some(m => !m.empregador_id) && (

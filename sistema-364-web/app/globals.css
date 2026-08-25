@@ -112,12 +112,15 @@ a{color:var(--green-deep);}
   display:flex; flex-direction:column;
   height:100vh; position:sticky; top:0;
 }
-.brand{padding:0 16px 14px; border-bottom:1px solid var(--seam); margin-bottom:10px;}
+.brand{padding:0 16px 14px; border-bottom:1px solid var(--seam); margin-bottom:10px; text-align:center;}
 .brand .num{
   color:var(--ink); font-size:19px; font-weight:600; letter-spacing:.04em;
-  display:flex; align-items:center; gap:8px;
+  display:flex; align-items:center; justify-content:center; gap:8px;
 }
 .brand .sub{color:var(--ink-muted); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; margin-top:3px;}
+/* Logo da marca no lugar do "364" textual (atualização 42). Teto de altura e
+   largura livre: a arte pode ser quadrada ou deitada e não pode esticar. */
+.brand-logo{display:block; max-height:80px; max-width:100%; width:auto; object-fit:contain; margin:0 auto 2px;}
 .empresa-switch{padding:0 16px 12px;}
 
 .sidebar nav{display:flex; flex-direction:column; gap:1px; padding:0 8px; flex:1; min-height:0; overflow-y:auto;}
@@ -424,7 +427,7 @@ tbody tr:hover td{background:var(--sunken);}
   /* A sidebar deixa de empurrar o conteúdo para fora da primeira tela: marca e
      seletor de empresa dividem a linha, e a navegação rola dentro de si. */
   .sidebar{border-right:0; border-bottom:1px solid var(--seam);}
-  .brand{display:flex; align-items:baseline; gap:10px; padding-bottom:10px;}
+  .brand{display:flex; align-items:center; justify-content:center; gap:10px; padding-bottom:10px;}
   .brand .sub{margin-top:0;}
   .sidebar nav{max-height:44vh;}
   .sidebar-foot{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, sair } from '../lib/auth';
 import { EmpresaContext } from '../lib/empresa';
+import { urlLogoEmpresa } from '../lib/storage';
 import SidebarNav from './SidebarNav';
 import VersaoBadge from './VersaoBadge';
 
@@ -36,12 +37,18 @@ export default function AppShell({ modulo, titulo, desc, children }) {
 
   const nome = session.user.user_metadata?.nome || session.user.email;
 
+  // Logo da marca selecionada (atualização 42). Sem logo cadastrada, o
+  // cabeçalho continua no texto de sempre.
+  const logoUrl = urlLogoEmpresa(empresaAtual.logo_path);
+
   return (
     <EmpresaContext.Provider value={{ empresaAtual, empresas, setEmpresaAtual }}>
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="num">364</div>
+          {logoUrl
+            ? <img className="brand-logo" src={logoUrl} alt={empresaAtual.nome} />
+            : <div className="num">364</div>}
           <div className="sub">Grupo 364 · Gestão</div>
         </div>
         <div className="empresa-switch" style={{ padding: '0 18px 14px' }}>

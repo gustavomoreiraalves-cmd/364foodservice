@@ -42,7 +42,7 @@ export function useAuth(moduloRequerido) {
       const [{ data: permData }, { data: empresas }] = await Promise.all([
         supabase.from('permissoes').select('modulo').eq('user_id', session.user.id),
         // RLS de `empresas` já filtra pelas empresas permitidas (admin vê todas)
-        supabase.from('empresas').select('id, nome, slug, prefixo_codigo, grupo_id').eq('ativo', true).order('nome'),
+        supabase.from('empresas').select('id, nome, slug, prefixo_codigo, grupo_id, logo_path').eq('ativo', true).order('nome'),
       ]);
       const permissoes = (permData || []).map(p => p.modulo);
       const isAdmin = permissoes.includes('admin');
