@@ -629,3 +629,371 @@ begin
   end if;
   raise notice 'OK 18: fornecedor e responsável da própria empresa continuam sendo aceitos';
 end $$;
+
+-- ================= LINHA DE FATURA PELO "CRIAR E CONCILIAR" =================
+-- O cenário 11 prova a regra do cartão pelo caminho de fn_conciliar_lancamento
+-- (a parcela já existe no contas a pagar). O caminho que o manual manda usar no
+-- passo 5 é o outro: a compra da fatura não tem conta a pagar nenhuma, e o
+-- colaborador cria uma dali mesmo — fn_criar_conta_e_conciliar. Compra no
+-- cartão não pode nascer paga: o dinheiro só sai do banco quando a fatura for
+-- paga, e é o pagamento da fatura que baixa. Sem este cenário a regra do cartão
+-- só era testada pela metade.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-000000000006', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura4.pdf', 'pdf');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000027', 'dddddddd-0000-0000-0000-000000000006',
+          :'empresa', '2026-08-02', 'MERCADO LIVRE 111', 'MERCADO LIVRE A', 120.00, 'saida', 'hash-h1'),
+         ('eeeeeeee-0000-0000-0000-000000000028', 'dddddddd-0000-0000-0000-000000000006',
+          :'empresa', '2026-08-03', 'MERCADO LIVRE 222', 'MERCADO LIVRE B', 80.00, 'saida', 'hash-h2');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000029', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-05', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 4',
+          200.00, 'saida', 'hash-h3');
+do $$
+declare
+  lanc1 record; lanc2 record; parc record; vinc1 record; vinc2 record;
+  id_parc1 uuid; id_parc2 uuid; ret jsonb;
+begin
+  perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000027',
+    'Insumos Mercado Livre A', 'Custos Variáveis', 'aaaaaaaa-0000-0000-0000-000000000001',
+    null, 'Cartão de Crédito');
+  perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000028',
+    'Insumos Mercado Livre B', 'Custos Variáveis', 'aaaaaaaa-0000-0000-0000-000000000001',
+    null, 'Cartão de Crédito');
+
+  select * into lanc1 from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000027';
+  select * into lanc2 from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000028';
+  select id into id_parc1 from public.contas_a_pagar_parcelas where conta_a_pagar_id = lanc1.conta_criada_id;
+  select id into id_parc2 from public.contas_a_pagar_parcelas where conta_a_pagar_id = lanc2.conta_criada_id;
+
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc1;
+  if parc.status <> 'Pendente' or parc.data_pagamento is not null or parc.forma_pagamento is not null then
+    raise exception 'FALHA 19: compra de fatura criada pelo "criar e conciliar" nasceu paga (status=%, data=%, forma=%)',
+      parc.status, parc.data_pagamento, parc.forma_pagamento;
+  end if;
+  if parc.vencimento <> '2026-08-02' then
+    raise exception 'FALHA 19: vencimento devia ser a data da compra, veio %', parc.vencimento;
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc2;
+  if parc.status <> 'Pendente' then
+    raise exception 'FALHA 19: segunda compra da fatura também nasceu paga (%)', parc.status;
+  end if;
+  select * into vinc1 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000027';
+  if vinc1.baixou_parcela is not false then
+    raise exception 'FALHA 19: vínculo de linha de fatura não pode nascer com baixou_parcela = true';
+  end if;
+
+  -- quem baixa é o pagamento da fatura no extrato da conta corrente
+  ret := public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000029',
+    'dddddddd-0000-0000-0000-000000000006', false);
+  if (ret->>'baixadas')::int <> 2 then
+    raise exception 'FALHA 19: o pagamento da fatura devia baixar 2 parcelas, baixou %', ret->>'baixadas';
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc1;
+  if parc.status <> 'Pago' or parc.data_pagamento <> '2026-09-05'
+     or parc.forma_pagamento <> 'Cartão de Crédito' then
+    raise exception 'FALHA 19: pagamento da fatura não baixou a parcela criada pelo "criar e conciliar" (status=%, data=%)',
+      parc.status, parc.data_pagamento;
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc2;
+  if parc.status <> 'Pago' or parc.data_pagamento <> '2026-09-05' then
+    raise exception 'FALHA 19: segunda parcela não foi baixada pelo pagamento da fatura (status=%)', parc.status;
+  end if;
+
+  -- desfazer o pagamento reabre exatamente essas duas, e só elas
+  ret := public.fn_desfazer_conciliacao('eeeeeeee-0000-0000-0000-000000000029');
+  if (ret->>'reabertas')::int <> 2 then
+    raise exception 'FALHA 19: desfazer o pagamento devia reabrir 2 parcelas, reabriu %', ret->>'reabertas';
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc1;
+  if parc.status <> 'Pendente' or parc.data_pagamento is not null then
+    raise exception 'FALHA 19: desfazer o pagamento não devolveu a parcela da primeira compra';
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = id_parc2;
+  if parc.status <> 'Pendente' then
+    raise exception 'FALHA 19: desfazer o pagamento não devolveu a parcela da segunda compra';
+  end if;
+  select * into vinc1 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000027';
+  select * into vinc2 from public.conciliacao_vinculos
+    where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000028';
+  if vinc1 is null or vinc2 is null then
+    raise exception 'FALHA 19: as compras deviam continuar conciliadas — só o pagamento foi desfeito';
+  end if;
+  if vinc1.baixou_parcela is not false or vinc2.baixou_parcela is not false then
+    raise exception 'FALHA 19: baixou_parcela das compras devia voltar a false';
+  end if;
+
+  raise notice 'OK 19: "criar e conciliar" numa linha de fatura cria a parcela em aberto, e quem baixa é o pagamento da fatura';
+end $$;
+
+-- ================= UMA PARCELA, UM LANÇAMENTO =================
+-- Cenário 20: a linha de fatura conciliada deixa a parcela 'Pendente' de
+-- propósito — e por isso ela volta a aparecer no pool de sugestões da próxima
+-- importação. Sem guarda, um débito do extrato de mesmo valor e data próxima é
+-- aceito contra a MESMA obrigação: duas saídas reais contabilizadas contra uma
+-- dívida só, os dois lançamentos verdes. O unique de conciliacao_vinculos é
+-- (lancamento_id, parcela_id), então ele não impede nada disso.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-000000000007', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura5.pdf', 'pdf');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-000000000008', 'Insumos loja B', 'Custos Variáveis',
+          'aaaaaaaa-0000-0000-0000-000000000001', 150.00, :'empresa');
+insert into public.contas_a_pagar_parcelas (id, conta_a_pagar_id, numero, valor, vencimento, empresa_id)
+  values ('99999999-0000-0000-0000-000000000009', 'ffffffff-0000-0000-0000-000000000008',
+          1, 150.00, '2026-08-14', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000030', 'dddddddd-0000-0000-0000-000000000007',
+          :'empresa', '2026-08-14', 'LOJA B INSUMOS', 'LOJA B INSUMOS', 150.00, 'saida', 'hash-h4'),
+         ('eeeeeeee-0000-0000-0000-000000000031', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-08-14', 'PIX ENVIADO LOJA B', 'PIX ENVIADO LOJA B', 150.00, 'saida', 'hash-h5');
+do $$
+declare parc record; lanc record; n int;
+begin
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000030',
+    '[{"parcela_id":"99999999-0000-0000-0000-000000000009","valor_aplicado":150.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-000000000009';
+  if parc.status <> 'Pendente' then
+    raise exception 'FALHA 20: pré-condição quebrou — linha de fatura não devia baixar a parcela (%)', parc.status;
+  end if;
+
+  begin
+    perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000031',
+      '[{"parcela_id":"99999999-0000-0000-0000-000000000009","valor_aplicado":150.00}]'::jsonb,
+      'Pix', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+    raise exception 'FALHA 20: a mesma parcela foi conciliada por dois lançamentos diferentes';
+  exception when others then
+    if sqlerrm like 'FALHA 20%' then raise; end if;
+    raise notice 'OK 20a: parcela já vinculada a outro lançamento é recusada (%)', sqlerrm;
+  end;
+
+  select count(*) into n from public.conciliacao_vinculos
+    where parcela_id = '99999999-0000-0000-0000-000000000009';
+  if n <> 1 then raise exception 'FALHA 20: a parcela ficou com % vínculos', n; end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-000000000009';
+  if parc.status <> 'Pendente' then
+    raise exception 'FALHA 20: o lançamento recusado baixou a parcela mesmo assim (%)', parc.status;
+  end if;
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000031';
+  if lanc.status = 'conciliado' then
+    raise exception 'FALHA 20: o lançamento recusado ficou conciliado';
+  end if;
+  raise notice 'OK 20b: a recusa não deixou rastro — nem vínculo a mais, nem baixa, nem lançamento verde';
+end $$;
+
+-- ================= DESFAZER A COMPRA COM A FATURA JÁ PAGA =================
+-- Cenário 21: desfazer a linha da fatura depois que o pagamento dela já foi
+-- conciliado apaga o vínculo e reabre a parcela, mas o lançamento do pagamento
+-- continua conciliado — e ele nunca roda de novo. Reconciliar a mesma compra
+-- cria um vínculo com baixou_parcela = false, e a parcela fica 'Pendente' para
+-- sempre, apesar de a fatura ter sido paga. A ordem certa é desfazer o
+-- pagamento primeiro.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-000000000008', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura6.pdf', 'pdf');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-000000000009', 'Insumos loja C', 'Custos Variáveis',
+          'aaaaaaaa-0000-0000-0000-000000000001', 90.00, :'empresa');
+insert into public.contas_a_pagar_parcelas (id, conta_a_pagar_id, numero, valor, vencimento, empresa_id)
+  values ('99999999-0000-0000-0000-00000000000a', 'ffffffff-0000-0000-0000-000000000009',
+          1, 90.00, '2026-08-16', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000032', 'dddddddd-0000-0000-0000-000000000008',
+          :'empresa', '2026-08-16', 'LOJA C INSUMOS', 'LOJA C INSUMOS', 90.00, 'saida', 'hash-h6'),
+         ('eeeeeeee-0000-0000-0000-000000000033', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-06', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 5',
+          90.00, 'saida', 'hash-h7');
+do $$
+declare parc record; lanc record;
+begin
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000032',
+    '[{"parcela_id":"99999999-0000-0000-0000-00000000000a","valor_aplicado":90.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+  perform public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000033',
+    'dddddddd-0000-0000-0000-000000000008', false);
+
+  begin
+    perform public.fn_desfazer_conciliacao('eeeeeeee-0000-0000-0000-000000000032');
+    raise exception 'FALHA 21: desfez a compra com o pagamento da fatura ainda conciliado';
+  exception when others then
+    if sqlerrm like 'FALHA 21%' then raise; end if;
+    raise notice 'OK 21a: desfazer a compra é recusado enquanto o pagamento da fatura está conciliado (%)', sqlerrm;
+  end;
+
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-00000000000a';
+  if parc.status <> 'Pago' then
+    raise exception 'FALHA 21: a recusa deixou a parcela reaberta (%)', parc.status;
+  end if;
+
+  -- controle: desfeito o pagamento, a compra volta a poder ser desfeita
+  perform public.fn_desfazer_conciliacao('eeeeeeee-0000-0000-0000-000000000033');
+  perform public.fn_desfazer_conciliacao('eeeeeeee-0000-0000-0000-000000000032');
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000032';
+  if lanc.status = 'conciliado' then
+    raise exception 'FALHA 21: a compra devia poder ser desfeita depois do pagamento';
+  end if;
+  if exists (select 1 from public.conciliacao_vinculos
+             where lancamento_id = 'eeeeeeee-0000-0000-0000-000000000032') then
+    raise exception 'FALHA 21: vínculo da compra sobreviveu ao desfazer';
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-00000000000a';
+  if parc.status <> 'Pendente' then
+    raise exception 'FALHA 21: parcela devia voltar a Pendente (%)', parc.status;
+  end if;
+  raise notice 'OK 21b: desfeito o pagamento, a compra volta a poder ser desfeita normalmente';
+end $$;
+
+-- ================= FATURA PAGA DUAS VEZES / PAGAMENTO QUE NÃO BAIXA NADA ====
+-- Cenário 22: a segunda saída associada à MESMA fatura não baixava nada
+-- (todas as parcelas já estavam 'Pago'), devolvia baixadas = 0 — que a tela
+-- anunciava como "0 parcela(s) baixada(s)" — e ainda assim ficava conciliada:
+-- uma saída real do banco contabilizada contra nada. Duas guardas: fatura já
+-- paga é recusada, e baixar zero parcela é erro, nunca sucesso.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-000000000009', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura7.pdf', 'pdf');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-00000000000a', 'Insumos loja D', 'Custos Variáveis',
+          'aaaaaaaa-0000-0000-0000-000000000001', 70.00, :'empresa');
+insert into public.contas_a_pagar_parcelas (id, conta_a_pagar_id, numero, valor, vencimento, empresa_id)
+  values ('99999999-0000-0000-0000-00000000000b', 'ffffffff-0000-0000-0000-00000000000a',
+          1, 70.00, '2026-08-18', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000034', 'dddddddd-0000-0000-0000-000000000009',
+          :'empresa', '2026-08-18', 'LOJA D INSUMOS', 'LOJA D INSUMOS', 70.00, 'saida', 'hash-h8'),
+         ('eeeeeeee-0000-0000-0000-000000000035', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-07', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 6',
+          70.00, 'saida', 'hash-h9'),
+         ('eeeeeeee-0000-0000-0000-000000000036', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-08', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 7',
+          70.00, 'saida', 'hash-h10');
+do $$
+declare lanc record; parc record;
+begin
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000034',
+    '[{"parcela_id":"99999999-0000-0000-0000-00000000000b","valor_aplicado":70.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+  perform public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000035',
+    'dddddddd-0000-0000-0000-000000000009', false);
+
+  begin
+    perform public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000036',
+      'dddddddd-0000-0000-0000-000000000009', false);
+    raise exception 'FALHA 22: a mesma fatura foi paga duas vezes';
+  exception when others then
+    if sqlerrm like 'FALHA 22%' then raise; end if;
+    raise notice 'OK 22a: fatura que já teve o pagamento conciliado recusa um segundo pagamento (%)', sqlerrm;
+  end;
+
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000036';
+  if lanc.status = 'conciliado' or lanc.fatura_id is not null then
+    raise exception 'FALHA 22: o segundo pagamento ficou conciliado mesmo recusado (status=%, fatura_id=%)',
+      lanc.status, lanc.fatura_id;
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-00000000000b';
+  if parc.data_pagamento <> '2026-09-07' then
+    raise exception 'FALHA 22: o segundo pagamento mexeu na baixa feita pelo primeiro (%)', parc.data_pagamento;
+  end if;
+end $$;
+
+-- 22b: fatura cuja única linha foi conciliada contra parcela que já estava
+-- paga por fora. O pagamento não tem o que baixar — antes isso devolvia
+-- baixadas = 0 e conciliava assim mesmo.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-00000000000a', :'empresa',
+          'cccccccc-0000-0000-0000-000000000002', 'fatura_cartao', 'p/fatura8.pdf', 'pdf');
+insert into public.contas_a_pagar (id, descricao, categoria_conta, fornecedor_id, valor_total, empresa_id)
+  values ('ffffffff-0000-0000-0000-00000000000b', 'Insumos loja E', 'Custos Variáveis',
+          'aaaaaaaa-0000-0000-0000-000000000001', 65.00, :'empresa');
+insert into public.contas_a_pagar_parcelas
+  (id, conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento, forma_pagamento, empresa_id)
+  values ('99999999-0000-0000-0000-00000000000c', 'ffffffff-0000-0000-0000-00000000000b',
+          1, 65.00, '2026-08-19', 'Pago', '2026-07-28', 'Dinheiro', :'empresa');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe)
+  values ('eeeeeeee-0000-0000-0000-000000000037', 'dddddddd-0000-0000-0000-00000000000a',
+          :'empresa', '2026-08-19', 'LOJA E INSUMOS', 'LOJA E INSUMOS', 65.00, 'saida', 'hash-h11'),
+         ('eeeeeeee-0000-0000-0000-000000000038', 'dddddddd-0000-0000-0000-000000000001',
+          :'empresa', '2026-09-09', 'PAGAMENTO FATURA CARTAO', 'PAGAMENTO FATURA CARTAO 8',
+          65.00, 'saida', 'hash-h12');
+do $$
+declare lanc record; parc record;
+begin
+  perform public.fn_conciliar_lancamento('eeeeeeee-0000-0000-0000-000000000037',
+    '[{"parcela_id":"99999999-0000-0000-0000-00000000000c","valor_aplicado":65.00}]'::jsonb,
+    'Cartão de Crédito', 'aaaaaaaa-0000-0000-0000-000000000001', 'Custos Variáveis');
+  begin
+    perform public.fn_conciliar_pagamento_fatura('eeeeeeee-0000-0000-0000-000000000038',
+      'dddddddd-0000-0000-0000-00000000000a', false);
+    raise exception 'FALHA 22: pagamento de fatura que não baixou nenhuma parcela passou como sucesso';
+  exception when others then
+    if sqlerrm like 'FALHA 22%' then raise; end if;
+    raise notice 'OK 22b: pagamento que não baixaria nenhuma parcela é erro, não sucesso silencioso (%)', sqlerrm;
+  end;
+
+  select * into lanc from public.extrato_lancamentos where id = 'eeeeeeee-0000-0000-0000-000000000038';
+  if lanc.status = 'conciliado' then
+    raise exception 'FALHA 22: pagamento sem baixa nenhuma ficou conciliado';
+  end if;
+  select * into parc from public.contas_a_pagar_parcelas where id = '99999999-0000-0000-0000-00000000000c';
+  if parc.data_pagamento <> '2026-07-28' or parc.forma_pagamento <> 'Dinheiro' then
+    raise exception 'FALHA 22: a recusa pisou na baixa que já existia (data=%, forma=%)',
+      parc.data_pagamento, parc.forma_pagamento;
+  end if;
+end $$;
+
+-- ================= CONTADOR DA IMPORTAÇÃO =================
+-- Cenário 23: conciliados/total_lancamentos é lido na tela como "quanto falta".
+-- conciliados só conta saídas; total_lancamentos contava TODAS as linhas, então
+-- um extrato com entradas nunca chegava a 1/1 — um extrato inteiramente
+-- conciliado exibia "1/3" ao lado da tag verde "Conciliada". As duas pontas da
+-- razão têm que contar a mesma população.
+insert into public.extrato_importacoes (id, empresa_id, conta_bancaria_id, tipo, arquivo_path, formato)
+  values ('dddddddd-0000-0000-0000-00000000000b', :'empresa',
+          'cccccccc-0000-0000-0000-000000000001', 'extrato', 'p/3.ofx', 'ofx');
+insert into public.extrato_lancamentos
+  (id, importacao_id, empresa_id, data, descricao, descricao_normalizada, valor, tipo, hash_dedupe, status)
+  values ('eeeeeeee-0000-0000-0000-000000000039', 'dddddddd-0000-0000-0000-00000000000b',
+          :'empresa', '2026-08-26', 'TARIFA CESTA BASICA', 'TARIFA CESTA BASICA',
+          32.00, 'saida', 'hash-i1', 'pendente'),
+         ('eeeeeeee-0000-0000-0000-000000000040', 'dddddddd-0000-0000-0000-00000000000b',
+          :'empresa', '2026-08-26', 'PIX RECEBIDO CLIENTE A', 'PIX RECEBIDO CLIENTE A',
+          500.00, 'entrada', 'hash-i2', 'ignorado'),
+         ('eeeeeeee-0000-0000-0000-000000000041', 'dddddddd-0000-0000-0000-00000000000b',
+          :'empresa', '2026-08-27', 'PIX RECEBIDO CLIENTE B', 'PIX RECEBIDO CLIENTE B',
+          300.00, 'entrada', 'hash-i3', 'ignorado');
+do $$
+declare imp record;
+begin
+  perform public.fn_recalcular_importacao('dddddddd-0000-0000-0000-00000000000b');
+  select * into imp from public.extrato_importacoes where id = 'dddddddd-0000-0000-0000-00000000000b';
+  if imp.total_lancamentos <> 1 then
+    raise exception 'FALHA 23: total_lancamentos devia contar só as saídas (1), veio %', imp.total_lancamentos;
+  end if;
+  if imp.conciliados <> 0 or imp.status <> 'aguardando_conciliacao' then
+    raise exception 'FALHA 23: importação com saída aberta devia ficar aguardando (conciliados=%, status=%)',
+      imp.conciliados, imp.status;
+  end if;
+
+  perform public.fn_criar_conta_e_conciliar('eeeeeeee-0000-0000-0000-000000000039',
+    'Tarifa cesta básica', 'Custos Fixos', 'aaaaaaaa-0000-0000-0000-000000000001',
+    null, 'Débito Automático');
+  select * into imp from public.extrato_importacoes where id = 'dddddddd-0000-0000-0000-00000000000b';
+  if imp.conciliados <> imp.total_lancamentos then
+    raise exception 'FALHA 23: extrato inteiramente conciliado exibiria %/%', imp.conciliados, imp.total_lancamentos;
+  end if;
+  if imp.status <> 'concluida' then
+    raise exception 'FALHA 23: status devia ser concluida, veio %', imp.status;
+  end if;
+  raise notice 'OK 23: o contador da importação compara saídas com saídas e fecha em %/%',
+    imp.conciliados, imp.total_lancamentos;
+end $$;

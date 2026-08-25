@@ -200,6 +200,12 @@ end $$;
 
 -- Recalcula contadores e status da importação. Uma importação está concluída
 -- quando não sobra saída pendente nem sugerida.
+--
+-- total_lancamentos conta SAÍDAS, não todas as linhas: a tela exibe
+-- conciliados/total_lancamentos como "quanto falta", e conciliados só conta
+-- saídas (entradas estão fora da conciliação nesta fase). Contando as duas
+-- pontas em populações diferentes, um extrato inteiramente conciliado exibia
+-- "12/40" ao lado da tag verde "Conciliada" — a razão nunca podia chegar a 1.
 create or replace function public.fn_recalcular_importacao(p_importacao_id uuid)
 returns void language plpgsql as $$
 declare v_total int; v_conciliados int; v_abertos int;
@@ -211,8 +217,7 @@ begin
     from public.extrato_lancamentos where importacao_id = p_importacao_id;
 
   update public.extrato_importacoes
-     set total_lancamentos = (select count(*) from public.extrato_lancamentos
-                               where importacao_id = p_importacao_id),
+     set total_lancamentos = coalesce(v_total, 0),
          conciliados = coalesce(v_conciliados, 0),
          status = case when status = 'erro' then 'erro'
                        when coalesce(v_abertos, 0) = 0 then 'concluida'
@@ -238,6 +243,12 @@ begin
   if p_fornecedor_id is null or coalesce(trim(p_padrao), '') = '' then return null; end if;
   if not exists (select 1 from public.fornecedores
                   where id = p_fornecedor_id and empresa_id = p_empresa_id) then
+    -- Só ESTE ramo avisa. Fornecedor nulo (acima) é o caso normal de quem
+    -- concilia sem informar fornecedor e tem que continuar silencioso; já um
+    -- fornecedor que existe mas é de outra empresa é sempre bug de chamador
+    -- ou tentativa de atravessar a fronteira, e sem rastro nenhum some.
+    raise warning 'fn_registrar_padrao: fornecedor % não pertence à empresa % — padrão "%" não foi aprendido.',
+      p_fornecedor_id, p_empresa_id, p_padrao;
     return null;
   end if;
   insert into public.conciliacao_padroes
@@ -268,7 +279,7 @@ returns jsonb language plpgsql as $$
 declare
   v_lanc record; v_parc record; v_item jsonb;
   v_baixou boolean; v_padrao_id uuid; v_baixadas int := 0; v_vinculadas int := 0;
-  v_ehFatura boolean;
+  v_ehFatura boolean; v_outro record;
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
@@ -293,6 +304,23 @@ begin
     if v_parc is null then raise exception 'Parcela % não encontrada.', v_item->>'parcela_id'; end if;
     if v_parc.empresa_id <> v_lanc.empresa_id then
       raise exception 'Parcela de outra empresa não pode ser conciliada aqui.';
+    end if;
+
+    -- Uma parcela é uma obrigação só: se outro lançamento já a reivindica,
+    -- conciliar esta aqui contabilizaria duas saídas reais do banco contra a
+    -- mesma dívida. O unique de conciliacao_vinculos é (lancamento_id,
+    -- parcela_id) e não impede isso, e o status da parcela também não: a linha
+    -- de fatura de cartão concilia deixando a parcela 'Pendente' de propósito,
+    -- que é exatamente o estado que a devolve para o pool de sugestões da
+    -- importação seguinte.
+    select l.id, l.descricao, l.data into v_outro
+      from public.conciliacao_vinculos v
+      join public.extrato_lancamentos l on l.id = v.lancamento_id
+     where v.parcela_id = v_parc.id and v.lancamento_id <> p_lancamento_id
+     limit 1;
+    if found then
+      raise exception 'Esta parcela já está conciliada com o lançamento "%" de %. Desfaça aquela conciliação antes de associar esta.',
+        v_outro.descricao, to_char(v_outro.data, 'DD/MM/YYYY');
     end if;
 
     v_baixou := (v_parc.status = 'Pendente') and not coalesce(v_ehFatura, false);
@@ -324,11 +352,19 @@ begin
   return jsonb_build_object('vinculadas', v_vinculadas, 'baixadas', v_baixadas);
 end $$;
 
--- Saída sem conta a pagar: cria conta + parcela única já paga + vínculo, e
--- guarda a conta em conta_criada_id para o desfazer poder apagá-la.
+-- Saída sem conta a pagar: cria conta + parcela única + vínculo, e guarda a
+-- conta em conta_criada_id para o desfazer poder apagá-la.
 -- Fornecedor e responsável chegam da requisição, então revalida os dois
 -- contra a empresa do lançamento antes de gravar — senão a conta a pagar
 -- nasceria com FK apontando para o cadastro de outra empresa do grupo.
+--
+-- A parcela nasce paga no extrato bancário (o dinheiro saiu na data do
+-- lançamento) e ABERTA na fatura de cartão — mesma regra de
+-- fn_conciliar_lancamento, e o caminho MAIS usado dela: a compra do cartão
+-- quase nunca tem conta a pagar prévia, então é por aqui que ela entra. O
+-- dinheiro da compra ainda não saiu do banco; quem baixa é
+-- fn_conciliar_pagamento_fatura, quando o débito da fatura aparecer no extrato
+-- da conta corrente. Sem essa distinção a mesma despesa era contada duas vezes.
 create or replace function public.fn_criar_conta_e_conciliar(
   p_lancamento_id uuid,
   p_descricao text,
@@ -337,7 +373,9 @@ create or replace function public.fn_criar_conta_e_conciliar(
   p_responsavel_id uuid default null,
   p_forma_pagamento text default null)
 returns jsonb language plpgsql as $$
-declare v_lanc record; v_conta_id uuid; v_parcela_id uuid; v_padrao_id uuid;
+declare
+  v_lanc record; v_conta_id uuid; v_parcela_id uuid; v_padrao_id uuid;
+  v_ehFatura boolean;
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
@@ -354,21 +392,30 @@ begin
     raise exception 'Responsável de outra empresa.';
   end if;
 
+  select tipo = 'fatura_cartao' into v_ehFatura
+    from public.extrato_importacoes where id = v_lanc.importacao_id;
+
   insert into public.contas_a_pagar
     (descricao, categoria_conta, fornecedor_id, valor_total, responsavel_id, empresa_id)
     values (coalesce(nullif(trim(p_descricao), ''), v_lanc.descricao), p_categoria_conta,
             p_fornecedor_id, v_lanc.valor, p_responsavel_id, v_lanc.empresa_id)
     returning id into v_conta_id;
 
+  -- vencimento é sempre a data do lançamento (a data da compra, na fatura);
+  -- o que muda é se ela já nasce baixada.
   insert into public.contas_a_pagar_parcelas
     (conta_a_pagar_id, numero, valor, vencimento, status, data_pagamento, forma_pagamento, empresa_id)
-    values (v_conta_id, 1, v_lanc.valor, v_lanc.data, 'Pago', v_lanc.data,
-            p_forma_pagamento, v_lanc.empresa_id)
+    values (v_conta_id, 1, v_lanc.valor, v_lanc.data,
+            case when coalesce(v_ehFatura, false) then 'Pendente' else 'Pago' end,
+            case when coalesce(v_ehFatura, false) then null else v_lanc.data end,
+            case when coalesce(v_ehFatura, false) then null else p_forma_pagamento end,
+            v_lanc.empresa_id)
     returning id into v_parcela_id;
 
   insert into public.conciliacao_vinculos
     (lancamento_id, parcela_id, valor_aplicado, baixou_parcela, empresa_id)
-    values (p_lancamento_id, v_parcela_id, v_lanc.valor, true, v_lanc.empresa_id);
+    values (p_lancamento_id, v_parcela_id, v_lanc.valor,
+            not coalesce(v_ehFatura, false), v_lanc.empresa_id);
 
   v_padrao_id := public.fn_registrar_padrao(v_lanc.empresa_id, v_lanc.descricao_normalizada,
                                             p_fornecedor_id, p_categoria_conta);
@@ -396,6 +443,19 @@ declare v_lanc record; v_reabertas int := 0; v_fatura_reabertas int := 0;
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
+
+  -- Desfazer uma COMPRA cuja fatura já foi paga deixaria a parcela órfã: o
+  -- vínculo some, a parcela reabre, e o lançamento do pagamento continua
+  -- conciliado — e ele nunca roda de novo. Reconciliar a mesma compra criaria
+  -- um vínculo com baixou_parcela = false, e a parcela ficaria 'Pendente' para
+  -- sempre, apesar de a fatura ter sido paga. A ordem certa é desfazer o
+  -- pagamento primeiro; o cenário 21 prova as duas pontas.
+  if exists (select 1 from public.extrato_lancamentos pagamento
+              where pagamento.fatura_id = v_lanc.importacao_id
+                and pagamento.status = 'conciliado'
+                and pagamento.id <> p_lancamento_id) then
+    raise exception 'Esta compra está numa fatura cujo pagamento já foi conciliado no extrato. Desfaça primeiro o pagamento da fatura, depois esta linha.';
+  end if;
 
   update public.contas_a_pagar_parcelas p
      set status = 'Pendente', data_pagamento = null, forma_pagamento = null
@@ -445,7 +505,7 @@ create or replace function public.fn_conciliar_pagamento_fatura(
 returns jsonb language plpgsql as $$
 declare
   v_lanc record; v_fatura record; v_soma numeric(12,2);
-  v_baixadas int := 0; v_parcela_ids uuid[];
+  v_baixadas int := 0; v_parcela_ids uuid[]; v_outro_pagamento record;
 begin
   select * into v_lanc from public.extrato_lancamentos where id = p_lancamento_id for update;
   if v_lanc is null then raise exception 'Lançamento não encontrado.'; end if;
@@ -457,6 +517,20 @@ begin
   if v_fatura.tipo <> 'fatura_cartao' then raise exception 'A importação escolhida não é uma fatura.'; end if;
   if v_fatura.empresa_id <> v_lanc.empresa_id then
     raise exception 'Fatura de outra empresa.';
+  end if;
+
+  -- Uma fatura é paga uma vez. Sem esta guarda, a segunda saída associada à
+  -- mesma fatura não encontrava parcela 'Pendente' nenhuma para baixar,
+  -- devolvia baixadas = 0 — que a tela anunciava como "0 parcela(s)
+  -- baixada(s)" — e ficava conciliada assim mesmo: uma saída real do banco
+  -- contabilizada contra nada. A soma continuava batendo, então nem o aviso de
+  -- divergência disparava.
+  select * into v_outro_pagamento from public.extrato_lancamentos
+   where fatura_id = p_fatura_id and status = 'conciliado' and id <> p_lancamento_id
+   limit 1;
+  if found then
+    raise exception 'Esta fatura já teve o pagamento conciliado no lançamento "%" de %. Desfaça aquele pagamento antes de associar outro.',
+      v_outro_pagamento.descricao, to_char(v_outro_pagamento.data, 'DD/MM/YYYY');
   end if;
 
   select coalesce(sum(v.valor_aplicado), 0) into v_soma
@@ -489,6 +563,15 @@ begin
   select count(*), coalesce(array_agg(id), array[]::uuid[])
     into v_baixadas, v_parcela_ids
     from baixadas;
+
+  -- Baixar zero parcela não é sucesso: significa que todas as parcelas
+  -- vinculadas às linhas desta fatura já estavam 'Pago' antes deste pagamento
+  -- existir. Conciliar assim marcaria uma saída real do banco como resolvida
+  -- sem quitar obrigação nenhuma — e a tela ainda diria "0 parcela(s) da
+  -- fatura baixada(s)" com a linha ficando verde.
+  if v_baixadas = 0 then
+    raise exception 'Nenhuma parcela desta fatura ficou por baixar — todas já constavam como pagas. Confira se este débito é mesmo o pagamento desta fatura, ou desfaça as baixas anteriores antes.';
+  end if;
 
   update public.conciliacao_vinculos v
      set baixou_parcela = true
