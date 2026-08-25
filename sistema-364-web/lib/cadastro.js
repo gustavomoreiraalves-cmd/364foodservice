@@ -31,6 +31,12 @@ export function camposParaDuplicar(origem, formVazio, camposFiscaisChaves, opcoe
   if (!opcoes.fiscal) {
     for (const chave of camposFiscaisChaves) base[chave] = formVazio[chave];
   }
+  // Independem da escolha "copiar fiscal": são estado de revisão do registro
+  // original, não dado fiscal em si. Um clone nunca nasce liberado pra
+  // emissão nem marcado como sugestão automática — mesmo que o usuário tenha
+  // pedido pra copiar o resto do bloco fiscal.
+  if ('ativo_fiscal' in base) base.ativo_fiscal = formVazio.ativo_fiscal;
+  if ('sugerido_automaticamente' in base) base.sugerido_automaticamente = formVazio.sugerido_automaticamente;
   return base;
 }
 

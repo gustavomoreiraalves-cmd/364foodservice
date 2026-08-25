@@ -187,6 +187,10 @@ function Conteudo() {
     setSelecionado(p.id);
     setCriando(false);
     setAba('geral');
+    // Sem isto, um "Duplicar > Ficha técnica" cancelado deixa o alvo apontando
+    // pro produto de origem — e a próxima edição de QUALQUER produto herdaria
+    // a ficha técnica dele ao salvar.
+    setDuplicarFichaDe(null);
   }
 
   function abrirNovo() {
@@ -194,6 +198,7 @@ function Conteudo() {
     setSelecionado(null);
     setCriando(true);
     setAba('geral');
+    setDuplicarFichaDe(null);
   }
 
   function duplicar(origem, opcoes) {
@@ -211,6 +216,7 @@ function Conteudo() {
     setSelecionado(null);
     setCriando(false);
     setFormProd({ ...PROD_VAZIO, ...PROD_FISCAL_VAZIO });
+    setDuplicarFichaDe(null);
   }
 
   async function salvarProduto(e) {

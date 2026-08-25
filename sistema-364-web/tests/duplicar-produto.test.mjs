@@ -23,3 +23,19 @@ test('zera os campos fiscais quando fiscal não está marcado', () => {
   assert.equal(resultado.cest, '');
   assert.equal(resultado.nome, 'Pantaneiro');
 });
+
+// ativo_fiscal e sugerido_automaticamente são estado de revisão do registro
+// original (quem liberou, se veio de sugestão automática) — nunca fazem
+// sentido num clone recém-criado, mesmo quando o usuário pediu pra copiar o
+// resto do bloco fiscal.
+test('nunca copia ativo_fiscal nem sugerido_automaticamente, mesmo com fiscal marcado', () => {
+  const formVazioComRevisao = { ...FORM_VAZIO, ativo_fiscal: false, sugerido_automaticamente: false };
+  const origem = {
+    nome: 'Pantaneiro', categoria: 'Hambúrguer', ncm: '16025000', cest: '1708300',
+    ativo_fiscal: true, sugerido_automaticamente: true,
+  };
+  const resultado = camposParaDuplicar(origem, formVazioComRevisao, CAMPOS_FISCAIS, { fiscal: true });
+  assert.equal(resultado.ativo_fiscal, false);
+  assert.equal(resultado.sugerido_automaticamente, false);
+  assert.equal(resultado.ncm, '16025000');
+});
