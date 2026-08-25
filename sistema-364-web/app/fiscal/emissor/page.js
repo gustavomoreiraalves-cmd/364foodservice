@@ -39,6 +39,8 @@ function Conteudo() {
   const [form, setForm] = useState({});
   const [mensagem, setMensagem] = useState('');
   const [salvando, setSalvando] = useState(false);
+  const [conexao, setConexao] = useState({}); // { homologacao: {...}, producao: {...} }
+  const [testando, setTestando] = useState('');
 
   useEffect(() => {
     supabase.from('empresas').select('id, nome, empregador_id').order('nome')
@@ -116,6 +118,29 @@ function Conteudo() {
     await carregar(selecionada);
   }
 
+  async function testarConexao(ambiente) {
+    setTestando(ambiente);
+    setConexao(c => ({ ...c, [ambiente]: null }));
+    try {
+      const r = await fetch('/api/fiscal/testar-conexao', {
+        method: 'POST',
+        headers: await cabecalhoAuth(),
+        body: JSON.stringify({ empresaId: selecionada, ambiente }),
+      });
+      const json = await r.json();
+      setConexao(c => ({
+        ...c,
+        [ambiente]: r.ok
+          ? { ok: json.ok, texto: `${json.cStat} — ${json.xMotivo}` }
+          : { ok: false, texto: json.error || 'Falha ao testar.' },
+      }));
+    } catch (e) {
+      setConexao(c => ({ ...c, [ambiente]: { ok: false, texto: e.message } }));
+    } finally {
+      setTestando('');
+    }
+  }
+
   function campoCombo(modelo, ambiente, campo, valor) {
     const k = chave(modelo, ambiente);
     setForm(f => ({ ...f, combos: { ...f.combos, [k]: { ...f.combos[k], [campo]: valor } } }));
@@ -174,6 +199,23 @@ function Conteudo() {
               </fieldset>
             );
           })}
+
+          <fieldset className="form-grid" style={{ marginTop: 12 }}>
+            <legend><strong>Conexão com a SEFAZ</strong></legend>
+            {['homologacao', 'producao'].map(amb => (
+              <div key={amb} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn secondary" type="button" disabled={testando === amb} onClick={() => testarConexao(amb)}>
+                  {testando === amb ? 'Testando…' : `Testar ${amb === 'producao' ? 'produção' : 'homologação'}`}
+                </button>
+                {conexao[amb] && (
+                  <span className={`tag ${conexao[amb].ok ? 'ok' : 'bad'}`}>{conexao[amb].texto}</span>
+                )}
+              </div>
+            ))}
+            <p className="muted" style={{ gridColumn: '1 / -1' }}>
+              Consulta o status do serviço da SEFAZ com o certificado desta marca. Não emite nota nem consome numeração.
+            </p>
+          </fieldset>
 
           <div style={{ marginTop: 12 }}>
             <label>Informações complementares (texto seu — não substitui avisos fiscais automáticos)</label>
