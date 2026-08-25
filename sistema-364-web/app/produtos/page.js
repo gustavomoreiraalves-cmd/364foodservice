@@ -92,6 +92,7 @@ function Conteudo() {
   const [cfops, setCfops] = useState([]);
   const [configAberta, setConfigAberta] = useState(null); // { grupoId } ou { grupoId: null } para nova
   const [fiscalDisponivel, setFiscalDisponivel] = useState(false);
+  const [usuarios, setUsuarios] = useState({});
   // Sem esta trava, `proximoCodigoProduto` lê a contagem antes de qualquer
   // insert e dois cliques rápidos criam dois produtos com o mesmo 0364-XXX —
   // o código impresso na etiqueta, que não pode repetir.
@@ -102,16 +103,20 @@ function Conteudo() {
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       supabase.from('materias_primas').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
       supabase.from('produtos').select('*').eq('empresa_id', empresaAtual.id).order('codigo'),
       supabase.from('ficha_tecnica').select('*, materias_primas(nome, unidade)').eq('empresa_id', empresaAtual.id),
       supabase.from('produto_regras_validade').select('*').eq('empresa_id', empresaAtual.id),
+      supabase.from('funcionarios').select('user_id, nome').eq('empresa_id', empresaAtual.id).eq('ativo', true),
     ]);
     setMps(r1.data || []);
     setProdutos(r2.data || []);
     setFichas(r3.data || []);
     setRegras(r4.data || []);
+    const mapaUsuarios = {};
+    for (const f of (r5.data || [])) mapaUsuarios[f.user_id] = f.nome;
+    setUsuarios(mapaUsuarios);
     await carregarTabelasFiscais();
     setLoading(false);
   }
@@ -203,6 +208,8 @@ function Conteudo() {
     const custo = parseCustoUnitario(formProd.custo_unitario);
     if (custo === null) { alert(CUSTO_INVALIDO); return; }
 
+    const { data: sessao } = await supabase.auth.getUser();
+
     const campos = {
       nome: formProd.nome,
       categoria: formProd.categoria || null,
@@ -216,6 +223,7 @@ function Conteudo() {
         : Number(formProd.validade_dias),
       producao_interna: !!formProd.producao_interna,
       rastreado: !!formProd.rastreado,
+      atualizado_por_id: sessao?.user?.id || null,
       ...(fiscalDisponivel ? camposFiscais(formProd) : {}),
     };
 
@@ -423,9 +431,7 @@ function Conteudo() {
             <div className="modal-head">
               <div>
                 <h3 id="ficha-titulo">{produtoSelecionado ? produtoSelecionado.nome : 'Novo produto'}</h3>
-                {produtoSelecionado && (
-                  <span className="muted mono" style={{ fontSize: 11.5 }}>{produtoSelecionado.codigo}</span>
-                )}
+                {produtoSelecionado && <CabecalhoProduto produto={produtoSelecionado} usuarios={usuarios} />}
               </div>
               <button className="btn secondary small" type="button" onClick={fechar} aria-label="Fechar ficha">
                 <Icone nome="fechar" tamanho={14} />
@@ -586,6 +592,24 @@ function Conteudo() {
         />
       )}
     </>
+  );
+}
+
+function fmtDataHora(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function CabecalhoProduto({ produto, usuarios }) {
+  const nomeUsuario = produto.atualizado_por_id ? usuarios[produto.atualizado_por_id] : null;
+  return (
+    <span className="muted mono" style={{ fontSize: 11.5, display: 'block' }}>
+      #{produto.codigo} · {produto.ativo === false ? 'Inativo' : 'Ativo'}
+      {produto.updated_at && (
+        <> · Última alteração: {fmtDataHora(produto.updated_at)}{nomeUsuario ? ' por ' + nomeUsuario : ''}</>
+      )}
+    </span>
   );
 }
 
