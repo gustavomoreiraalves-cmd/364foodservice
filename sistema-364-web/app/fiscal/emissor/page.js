@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
 
@@ -41,6 +41,13 @@ function Conteudo() {
   const [salvando, setSalvando] = useState(false);
   const [conexao, setConexao] = useState({}); // { homologacao: {...}, producao: {...} }
   const [testando, setTestando] = useState('');
+  // Identifica a "sessão de carregamento" atual. Incrementado a cada chamada
+  // de carregar() — inclusive ao voltar para a mesma marca — para que um
+  // teste de conexão em voo possa ser comparado contra a sessão vigente no
+  // momento em que a resposta chega, e não contra o id da marca (que pode
+  // coincidir de novo se o usuário sair e voltar). Ref porque o closure
+  // async de testarConexao precisa ler o valor corrente, não o capturado.
+  const geracaoRef = useRef(0);
 
   useEffect(() => {
     supabase.from('empresas').select('id, nome, empregador_id').order('nome')
@@ -48,6 +55,7 @@ function Conteudo() {
   }, []);
 
   async function carregar(empresaId) {
+    geracaoRef.current += 1;
     setMensagem('');
     // Resultado de teste de conexão é por marca — nunca deve sobreviver a uma
     // troca de marca, senão a tag verde de uma marca fica exibida (e parece
@@ -126,15 +134,22 @@ function Conteudo() {
   }
 
   async function testarConexao(ambiente) {
+    // Captura a sessão de carregamento vigente no momento do clique. Se o
+    // usuário trocar de marca (mesmo para depois voltar à mesma) antes da
+    // resposta chegar, geracaoRef.current já terá avançado, e a resposta é
+    // descartada — ela pertence à marca antiga, não à selecionada agora.
+    const minhaGeracao = geracaoRef.current;
+    const empresaAlvo = selecionada;
     setTestando(ambiente);
     setConexao(c => ({ ...c, [ambiente]: null }));
     try {
       const r = await fetch('/api/fiscal/testar-conexao', {
         method: 'POST',
         headers: await cabecalhoAuth(),
-        body: JSON.stringify({ empresaId: selecionada, ambiente }),
+        body: JSON.stringify({ empresaId: empresaAlvo, ambiente }),
       });
       const json = await r.json();
+      if (geracaoRef.current !== minhaGeracao) return;
       setConexao(c => ({
         ...c,
         [ambiente]: r.ok
@@ -142,9 +157,10 @@ function Conteudo() {
           : { ok: false, texto: json.error || 'Falha ao testar.' },
       }));
     } catch (e) {
+      if (geracaoRef.current !== minhaGeracao) return;
       setConexao(c => ({ ...c, [ambiente]: { ok: false, texto: e.message } }));
     } finally {
-      setTestando('');
+      if (geracaoRef.current === minhaGeracao) setTestando('');
     }
   }
 
