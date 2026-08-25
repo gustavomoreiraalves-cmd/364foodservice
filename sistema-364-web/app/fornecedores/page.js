@@ -1,14 +1,19 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
+import Icone from '../../components/Icone';
+import ListaCadastro from '../../components/ListaCadastro';
+import FichaModal from '../../components/FichaModal';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
+import { filtrarRegistros } from '../../lib/listaCadastro';
 import { CATEGORIAS_FORNECEDOR, soDigitos, fornecedorParaGravar } from '../../lib/fornecedores';
 
 // As mesmas regras valem no cadastro rápido que abre no recebimento quando o XML
 // traz um emitente desconhecido; por isso elas moram em lib/fornecedores.js.
 const FORM_VAZIO = { nome: '', cnpj: '', categoria: 'Carnes', contato: '', telefone: '', email: '' };
+const CAMPOS_BUSCA = ['nome', 'cnpj', 'categoria', 'contato', 'email'];
 
 export default function FornecedoresPage() {
   return (
@@ -22,6 +27,9 @@ function Conteudo() {
   const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState('');
+  const [mostrarInativos, setMostrarInativos] = useState(false);
+  const [criando, setCriando] = useState(false);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -33,82 +41,134 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
-  const [mostrarInativos, setMostrarInativos] = useState(false);
   const { form, setForm, editando, salvando, iniciarEdicao, cancelarEdicao, salvar, alternarAtivo, excluir } =
     useCadastro({
       tabela: 'fornecedores',
       formVazio: FORM_VAZIO,
       empresaId: empresaAtual?.id,
-      aoTerminar: carregar,
+      aoTerminar: async () => { await carregar(); fechar(); },
       paraGravar: fornecedorParaGravar,
     });
 
   const emEdicao = editando ? lista.find(f => f.id === editando) : null;
-  const visiveis = mostrarInativos ? lista : lista.filter(f => f.ativo !== false);
+  const visiveis = useMemo(
+    () => filtrarRegistros(lista, { campos: CAMPOS_BUSCA, busca, mostrarInativos }),
+    [lista, busca, mostrarInativos],
+  );
+  const aberto = criando || !!editando;
+
+  function abrirNovo() { cancelarEdicao(); setCriando(true); }
+  function fechar() { cancelarEdicao(); setCriando(false); }
+  function abrir(f) { setCriando(false); iniciarEdicao(f); }
+
+  const COLUNAS = [
+    { titulo: 'Nome', principal: true, minimo: 200, render: f => f.nome, textoPuro: f => f.nome },
+    {
+      titulo: 'Categoria', largura: 128,
+      render: f => (f.categoria ? <span className="tag categoria">{f.categoria}</span> : null),
+      textoPuro: f => f.categoria || '',
+    },
+    { titulo: 'CNPJ', largura: 132, mono: true, render: f => f.cnpj || null, textoPuro: f => f.cnpj || '' },
+    { titulo: 'Contato', largura: 150, render: f => f.contato || null, textoPuro: f => f.contato || '' },
+    { titulo: 'Telefone', largura: 118, mono: true, render: f => f.telefone || null, textoPuro: f => f.telefone || '' },
+    { titulo: 'E-mail', largura: 190, render: f => f.email || null, textoPuro: f => f.email || '' },
+  ];
+
+  if (loading) return <p className="muted">Carregando…</p>;
 
   return (
     <>
-      <div className="panel">
-        <h3>{emEdicao ? `Editando: ${emEdicao.nome}` : 'Novo fornecedor'}</h3>
-        <form onSubmit={salvar} className="form-grid">
-          <div><label>Nome / Razão social</label><input required value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} /></div>
-          <div><label>CNPJ</label>
-            <input inputMode="numeric" maxLength={14} placeholder="Só números"
-              value={form.cnpj} onChange={e => setForm({ ...form, cnpj: soDigitos(e.target.value) })} />
+      <section className="panel">
+        <div className="filter-bar" style={{ marginBottom: 10 }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label htmlFor="busca-fornecedor">Buscar</label>
+            <input id="busca-fornecedor" value={busca} placeholder="nome, CNPJ, categoria ou contato"
+                   onChange={e => setBusca(e.target.value)} />
           </div>
-          <div><label>Categoria</label>
-            <select value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })}>
-              {CATEGORIAS_FORNECEDOR.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-          <div><label>Contato</label><input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} /></div>
-          <div><label>Telefone</label><input value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} /></div>
-          <div><label>E-mail</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <button className="btn" type="submit" disabled={salvando}>
-              {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Adicionar fornecedor')}
-            </button>
-            {editando && <button className="btn secondary" type="button" onClick={cancelarEdicao}>Cancelar</button>}
-          </div>
-        </form>
-      </div>
+          <button className="btn" type="button" onClick={abrirNovo}>
+            <Icone nome="mais" tamanho={14} /> Novo fornecedor
+          </button>
+        </div>
 
-      <div className="panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <h3>Fornecedores cadastrados ({visiveis.length})</h3>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {visiveis.length} de {lista.length} fornecedor{lista.length === 1 ? '' : 'es'}
+          </span>
+          <label className="check-line" style={{ fontSize: 12 }}>
             <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} />
             Mostrar inativos
           </label>
         </div>
-        {loading ? <p className="muted">Carregando…</p> : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Nome</th><th>Categoria</th><th>CNPJ</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th></th></tr></thead>
-              <tbody>
-                {visiveis.length ? visiveis.map(f => {
-                  const inativo = f.ativo === false;
-                  return (
-                    <tr key={f.id} style={inativo ? { opacity: 0.55 } : undefined}>
-                      <td>{f.nome} {inativo && <span className="tag warn">inativo</span>}</td>
-                      <td>{f.categoria || '—'}</td>
-                      <td className="muted">{f.cnpj || '—'}</td>
-                      <td>{f.contato || '—'}</td>
-                      <td className="muted">{f.telefone || '—'}</td>
-                      <td className="muted">{f.email || '—'}</td>
-                      <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button className="btn secondary" onClick={() => iniciarEdicao(f)}>Editar</button>
-                        <button className="btn secondary" onClick={() => alternarAtivo(f)}>{inativo ? 'Reativar' : 'Desativar'}</button>
-                        <button className="btn danger" onClick={() => excluir(f, `Excluir o fornecedor ${f.nome}?`)}>Excluir</button>
-                      </td>
-                    </tr>
-                  );
-                }) : <tr className="empty-row"><td colSpan={7}>Nenhum fornecedor {mostrarInativos ? 'cadastrado' : 'ativo'}.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+
+        <ListaCadastro
+          colunas={COLUNAS} registros={visiveis} selecionado={editando} onAbrir={abrir}
+          rotulo="Fornecedores"
+          vazio={busca ? 'Nenhum fornecedor encontrado para essa busca.' : 'Nenhum fornecedor cadastrado ainda.'} />
+      </section>
+
+      {aberto && (
+        <FichaModal
+          titulo={emEdicao ? emEdicao.nome : 'Novo fornecedor'}
+          subtitulo={emEdicao?.cnpj || null}
+          onFechar={fechar}>
+          <form onSubmit={salvar}>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="secao">Identificação</div>
+                <div className="largo">
+                  <label htmlFor="f-nome">Nome / Razão social</label>
+                  <input id="f-nome" required autoFocus value={form.nome}
+                         onChange={e => setForm({ ...form, nome: e.target.value })} />
+                </div>
+                <div>
+                  <label htmlFor="f-cnpj">CNPJ</label>
+                  <input id="f-cnpj" inputMode="numeric" maxLength={14} placeholder="Só números"
+                         value={form.cnpj} onChange={e => setForm({ ...form, cnpj: soDigitos(e.target.value) })} />
+                </div>
+                <div>
+                  <label htmlFor="f-cat">Categoria</label>
+                  <select id="f-cat" value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })}>
+                    {CATEGORIAS_FORNECEDOR.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div className="secao">Contato</div>
+                <div>
+                  <label htmlFor="f-contato">Pessoa de contato</label>
+                  <input id="f-contato" value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} />
+                </div>
+                <div>
+                  <label htmlFor="f-fone">Telefone</label>
+                  <input id="f-fone" value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} />
+                </div>
+                <div>
+                  <label htmlFor="f-email">E-mail</label>
+                  <input id="f-email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-foot">
+              <button className="btn" type="submit" disabled={salvando}>
+                {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Criar fornecedor')}
+              </button>
+              <button className="btn secondary" type="button" onClick={fechar}>Cancelar</button>
+              {emEdicao && (
+                <>
+                  <button className="btn secondary small" type="button" style={{ marginLeft: 'auto' }}
+                          onClick={() => alternarAtivo(emEdicao)}>
+                    {emEdicao.ativo === false ? 'Reativar' : 'Desativar'}
+                  </button>
+                  <button className="btn danger" type="button"
+                          onClick={() => excluir(emEdicao, `Excluir o fornecedor ${emEdicao.nome}?`)}>
+                    <Icone nome="lixeira" tamanho={13} /> Excluir
+                  </button>
+                </>
+              )}
+            </div>
+          </form>
+        </FichaModal>
+      )}
     </>
   );
 }
