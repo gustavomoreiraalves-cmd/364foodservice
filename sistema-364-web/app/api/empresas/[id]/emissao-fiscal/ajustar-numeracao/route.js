@@ -5,7 +5,7 @@ import { podeAjustarNumero } from '../../../../../../lib/emissaoFiscal';
 export const runtime = 'nodejs';
 
 export async function POST(request, { params }) {
-  const { sb, erro } = await autorizarModulo(request, 'fiscal');
+  const { sb, user, erro } = await autorizarModulo(request, 'fiscal');
   if (erro) return erro;
 
   const { data: empresa, error: erroEmpresa } = await sb.from('empresas')
@@ -57,12 +57,19 @@ export async function POST(request, { params }) {
   // falhar, sinalizamos 500 em vez de devolver 200 silenciando a lacuna na trilha
   // de auditoria (o valor em fiscal_numeracao já foi gravado, mas sem essa
   // confirmação o operador não tem como saber que a auditoria não foi registrada).
-  const { error: erroAuditoria } = await sb.rpc('fn_registrar_auditoria', {
-    p_entidade: 'fiscal_numeracao', p_entidade_id: gravado.id, p_acao: 'ajuste',
-    p_empresa_id: empresa.id,
-    p_antes: { ultimo_numero: ultimoAtual }, p_depois: { ultimo_numero: novoNumero },
-    p_motivo: motivo,
-  });
+  //
+  // Insert direto em audit_logs (em vez de fn_registrar_auditoria): a função
+  // grava usuario_id = auth.uid(), mas autorizarModulo() chama sb via
+  // clienteAdmin() (service role), que nunca carrega o JWT do usuário nas
+  // chamadas subsequentes — auth.uid() sempre resolveria NULL ali. Gravando
+  // usuario_id explicitamente a partir de `user.id` (já validado por
+  // autorizarModulo) preservamos a autoria do ajuste.
+  const { error: erroAuditoria } = await sb.from('audit_logs').insert([{
+    usuario_id: user.id, acao: 'ajuste', recurso: 'fiscal_numeracao', recurso_id: gravado.id,
+    empresa_id: empresa.id,
+    valores_anteriores: { ultimo_numero: ultimoAtual }, valores_novos: { ultimo_numero: novoNumero },
+    justificativa: motivo,
+  }]);
   if (erroAuditoria) {
     return NextResponse.json({ error: `Numeração ajustada, mas falha ao registrar auditoria: ${erroAuditoria.message}` }, { status: 500 });
   }
