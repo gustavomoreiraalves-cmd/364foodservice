@@ -21,19 +21,28 @@ function chave() {
 }
 
 // Buffer -> "iv:tag:cipher" (base64). IV novo a cada chamada: repetir IV em GCM
-// quebra a cifra.
-export function cifrar(plano) {
+// quebra a cifra. Extraído para lib/fiscalSecretServer.js reaproveitar com
+// outra chave (CSC), sem duplicar a lógica de cifra.
+export function cifrarCom(chaveBuf, plano) {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', chave(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', chaveBuf, iv);
   const cifrado = Buffer.concat([cipher.update(plano), cipher.final()]);
   return [iv.toString('base64'), cipher.getAuthTag().toString('base64'), cifrado.toString('base64')].join(':');
 }
 
-export function decifrar(texto) {
+export function decifrarCom(chaveBuf, texto) {
   const [ivB64, tagB64, dadoB64] = String(texto).split(':');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', chave(), Buffer.from(ivB64, 'base64'));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', chaveBuf, Buffer.from(ivB64, 'base64'));
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(dadoB64, 'base64')), decipher.final()]);
+}
+
+export function cifrar(plano) {
+  return cifrarCom(chave(), plano);
+}
+
+export function decifrar(texto) {
+  return decifrarCom(chave(), texto);
 }
 
 // O CNPJ no certificado ICP-Brasil vem no otherName 2.16.76.1.3.3 do
