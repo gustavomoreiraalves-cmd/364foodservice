@@ -382,6 +382,19 @@ tbody tr:hover td{background:var(--sunken);}
 .item-line:last-child{border-bottom:0;}
 .item-line span{flex:1;}
 .subtotal{text-align:right; margin-top:8px; font-weight:600; font-family:var(--font-mono);}
+.barra-custo{
+  display:inline-block;
+  height:6px;
+  border-radius:3px;
+  background:var(--border);
+  overflow:hidden;
+}
+.barra-custo-preenchida{
+  display:block;
+  height:100%;
+  background:var(--accent);
+  border-radius:3px;
+}
 
 /* ---------- AVISOS ---------- */
 .banner{

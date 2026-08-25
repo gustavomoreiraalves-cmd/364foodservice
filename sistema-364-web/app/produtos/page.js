@@ -627,7 +627,10 @@ function FichaTecnica({
                   {Number(f.quantidade)} {f.materias_primas?.unidade || ''}
                 </span>
                 <span className="num" style={{ minWidth: 76 }}>{fmtMoney(custo)}</span>
-                <span className="muted mono" style={{ minWidth: 42, textAlign: 'right', fontSize: 11.5 }}>
+                <span className="barra-custo" style={{ minWidth: 60 }} aria-hidden="true">
+                  <span className="barra-custo-preenchida" style={{ width: `${Math.min(fatia, 100)}%` }} />
+                </span>
+                <span className="muted mono" style={{ minWidth: 36, textAlign: 'right', fontSize: 11.5 }}>
                   {fatia.toFixed(0)}%
                 </span>
                 <button className="btn danger" type="button" onClick={() => onRemover(f.id)}
