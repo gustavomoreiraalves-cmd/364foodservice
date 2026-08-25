@@ -100,10 +100,12 @@ export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, edit
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!form.sujeito_st}
                    onChange={e => set({ sujeito_st: e.target.checked })} />
-            Sujeito a substituição tributária
+            Sujeito a substituição tributária (indicativo de cadastro)
           </label>
           <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
-            Marque conforme a orientação do contador. Quem decide se há retenção nesta nota é o grupo tributário.
+            Marque conforme a orientação do contador — exige CEST preenchido. Este campo não decide
+            a retenção: quem resolve se há ST nesta nota é a regra tributária do grupo fiscal,
+            configurada na aba Tributação abaixo.
           </p>
         </div>
       </div>
