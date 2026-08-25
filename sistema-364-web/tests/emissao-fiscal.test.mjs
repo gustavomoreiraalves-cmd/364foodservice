@@ -28,6 +28,16 @@ test('modelo 65 ativo exige CSC completo', () => {
   assert.deepEqual(completo, []);
 });
 
+test('modelo 65 ativo com CSC já configurado aceita reenvio em branco', () => {
+  const semCscMasJaConfigurado = validarConfiguracaoEmissao({ ...BASE, modelo: '65', ativo: true, cscId: null, cscToken: null, cscJaConfigurado: true });
+  assert.deepEqual(semCscMasJaConfigurado, []);
+});
+
+test('modelo 65 ativo sem CSC e sem cscJaConfigurado continua exigindo os dois campos', () => {
+  const semCscSemConfigurar = validarConfiguracaoEmissao({ ...BASE, modelo: '65', ativo: true, cscId: null, cscToken: null, cscJaConfigurado: false });
+  assert.ok(semCscSemConfigurar.some(e => /CSC/i.test(e)));
+});
+
 test('modelo 65 inativo não exige CSC', () => {
   assert.deepEqual(validarConfiguracaoEmissao({ ...BASE, modelo: '65', ativo: false, cscId: null, cscToken: null }), []);
 });

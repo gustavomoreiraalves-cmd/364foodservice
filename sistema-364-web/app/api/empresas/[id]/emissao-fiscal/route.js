@@ -83,7 +83,7 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: `Falha ao verificar séries existentes do CNPJ: ${erroExistentesEmpregador.message}` }, { status: 500 });
   }
   const { data: existentesMarca, error: erroExistentesMarca } = await sb.from('empresas_emissao_fiscal')
-    .select('id, modelo, ambiente').eq('empresa_id', empresa.id);
+    .select('id, modelo, ambiente, csc_token_cifrado').eq('empresa_id', empresa.id);
   if (erroExistentesMarca) {
     return NextResponse.json({ error: `Falha ao verificar configurações existentes da marca: ${erroExistentesMarca.message}` }, { status: 500 });
   }
@@ -106,6 +106,7 @@ export async function PUT(request, { params }) {
     const erros = validarConfiguracaoEmissao({
       modelo: entrada.modelo, ativo: entrada.ativo, ambiente: entrada.ambiente, serie: entrada.serie,
       cscId: entrada.cscId, cscToken: entrada.cscToken, certificadoValido: certValido,
+      cscJaConfigurado: Boolean(linhaAtual?.csc_token_cifrado),
     });
     if (erros.length) return NextResponse.json({ error: erros.join(' ') }, { status: 400 });
 

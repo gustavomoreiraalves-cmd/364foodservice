@@ -2,7 +2,7 @@
 export const MODELOS_EMISSAO = ['55', '65'];
 export const AMBIENTES_EMISSAO = ['producao', 'homologacao'];
 
-export function validarConfiguracaoEmissao({ modelo, ativo, ambiente, serie, cscId, cscToken, certificadoValido }) {
+export function validarConfiguracaoEmissao({ modelo, ativo, ambiente, serie, cscId, cscToken, certificadoValido, cscJaConfigurado = false }) {
   const erros = [];
   if (!(Number.isInteger(serie) && serie > 0)) erros.push('Série precisa ser um número inteiro maior que zero.');
 
@@ -10,7 +10,7 @@ export function validarConfiguracaoEmissao({ modelo, ativo, ambiente, serie, csc
   if (modelo === '55' && temCsc) {
     erros.push('NF-e (modelo 55) não usa CSC — esse campo é só para NFC-e.');
   }
-  if (modelo === '65' && ativo && !(cscId && cscToken)) {
+  if (modelo === '65' && ativo && !((cscId && cscToken) || cscJaConfigurado)) {
     erros.push('NFC-e ativa exige CSC ID e CSC Token preenchidos.');
   }
 
