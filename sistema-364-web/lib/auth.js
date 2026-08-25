@@ -7,12 +7,11 @@ import { supabase } from './supabase';
 // O módulo especial 'admin' dá acesso a todas + à aba Usuários.
 export const MODULOS = [
   { id: 'grupo', label: 'Grupo 364', href: '/grupo', ic: '◉', desc: 'Consolidado de todas as empresas' },
-  { id: 'fornecedores', label: 'Fornecedores', href: '/fornecedores', ic: '▤', desc: 'Cadastro de fornecedores e categorias' },
   { id: 'recebimentos', label: 'Recebimento', href: '/recebimentos', ic: '▣', desc: 'Entrada de matéria-prima e geração de lotes' },
   { id: 'estoque', label: 'Estoque', href: '/estoque', ic: '▥', desc: 'Saldo de matéria-prima e produto acabado' },
   { id: 'produtos', label: 'Produtos', href: '/produtos', ic: '▧', desc: 'Catálogo, ficha técnica, custo e preço de venda' },
   { id: 'producoes', label: 'Produção', href: '/producoes', ic: '▨', desc: 'Lançamento de lotes produzidos e cálculo de custo' },
-  { id: 'clientes', label: 'Clientes', href: '/clientes', ic: '▦', desc: 'Cadastro de clientes e revendas' },
+  { id: 'clientes', label: 'Clientes/Fornecedores', href: '/clientes', ic: '▦', desc: 'Cadastro de clientes, fornecedores e revendas' },
   { id: 'pedidos', label: 'Pedidos de Venda', href: '/pedidos', ic: '▩', desc: 'Pedidos, faturamento e baixa de estoque' },
   // 'funcionarios' foi unificado ao cadastro de colaboradores (Ponto) — ver ROADMAP.md
   { id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', desc: 'Categorias de conta e contas a pagar' },

@@ -8,8 +8,7 @@ export const MENU = [
   { tipo: 'link', id: 'dashboard', label: 'Dashboard', href: '/', ic: 'dashboard', exato: true },
   {
     tipo: 'grupo', id: 'cadastros', label: 'Cadastros', ic: 'cadastros', itens: [
-      { label: 'Clientes', href: '/clientes', modulo: 'clientes' },
-      { label: 'Fornecedores', href: '/fornecedores', modulo: 'fornecedores' },
+      { label: 'Clientes/Fornecedores', href: '/clientes', modulo: 'clientes' },
       { label: 'Produtos', href: '/produtos', modulo: 'produtos' },
       { label: 'Matéria-prima / Insumos', href: '/materias-primas', modulo: 'produtos' },
       { label: 'Empresas (CNPJ)', href: '/empresas', modulo: 'admin' },
