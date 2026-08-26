@@ -37,7 +37,7 @@ function criarBuilder(resolver) {
   return builder;
 }
 
-const CONTA_PADRAO = { id: 'cb1', empresa_id: 'e1', tipo: 'conta_corrente' };
+const CONTA_PADRAO = { id: 'cb1', tipo: 'conta_corrente' };
 
 // `chamadas` registra toda operação que saiu do dublê (tabela + verbo,
 // mais os argumentos relevantes) — é o que permite asserir "isto não foi
@@ -102,7 +102,7 @@ function criarSbFalso(cfg = {}) {
       }
       if (verbo === 'upsert') {
         const linhas = chamadasDaCadeia[0].args[0];
-        registrar('extrato_lancamentos', 'upsert', { linhas });
+        registrar('extrato_lancamentos', 'upsert', { linhas, opcoes: chamadasDaCadeia[0].args[1] });
         if (config.upsertResultado) return config.upsertResultado(linhas);
         // Eco padrão: toda linha volta como "inserida", com o status que a
         // própria função já calculou — suficiente para testar a aritmética
@@ -273,7 +273,7 @@ test('extrato com pelo menos uma saída não levanta esse alerta', async () => {
 
 test('fatura sem saída nenhuma não usa esse alerta — a regra é de extrato', async () => {
   const buffer = csvExtrato([{ data: '10/08/2026', descricao: 'ESTORNO COMPRA', valor: '120,00' }]);
-  const { sb } = criarSbFalso({ conta: { id: 'cb1', empresa_id: 'e1', tipo: 'cartao_credito' } });
+  const { sb } = criarSbFalso({ conta: { id: 'cb1', tipo: 'cartao_credito' } });
 
   const resultado = await importar(sb, { buffer, tipo: 'fatura_cartao' });
 
@@ -366,21 +366,30 @@ test('novas, duplicadas e sugeridas batem com o que o dublê devolveu do upsert'
   assert.equal(resultado.sugeridas, 1);
 });
 
-// ---------- Escopo de empresa antes de qualquer escrita ----------
+// ---------- Conta compartilhada no grupo ----------
 
-test('conta bancária de outra empresa é recusada antes de qualquer escrita', async () => {
+test('conta cadastrada por outra empresa do grupo é aceita', async () => {
+  // Desde a atualização 45 o cadastro é do grupo: quem importa não precisa ser
+  // a empresa que cadastrou a conta. A separação vive na importação.
   const buffer = csvExtrato([{ data: '10/08/2026', descricao: 'TARIFA', valor: '-50,00' }]);
-  const { sb, chamadas } = criarSbFalso({
-    conta: { id: 'cb1', empresa_id: 'OUTRA-EMPRESA', tipo: 'conta_corrente' },
-  });
+  const { sb, chamadas } = criarSbFalso();
 
-  await assert.rejects(
-    () => importar(sb, { buffer }),
-    /Conta bancária de outra empresa/,
-  );
+  const resultado = await importar(sb, { buffer });
 
-  assert.equal(chamadas.some(c => c.tabela.startsWith('storage:')), false,
-    'não deveria ter subido arquivo nenhum');
-  assert.equal(chamou(chamadas, 'extrato_importacoes', 'insert'), false,
-    'não deveria ter criado a importação');
+  assert.equal(resultado.total, 1);
+  assert.equal(chamou(chamadas, 'extrato_importacoes', 'insert'), true);
+});
+
+test('lançamento grava a conta e deduplica por ela, não pela empresa', async () => {
+  // O unique passou a ser (conta_bancaria_id, hash_dedupe): sem a coluna na
+  // linha, o upsert quebraria; com onConflict pela empresa, o mesmo extrato
+  // importado por duas empresas duplicaria.
+  const buffer = csvExtrato([{ data: '10/08/2026', descricao: 'TARIFA', valor: '-50,00' }]);
+  const { sb, chamadas } = criarSbFalso();
+
+  await importar(sb, { buffer });
+
+  const upsert = chamadas.find(c => c.tabela === 'extrato_lancamentos' && c.metodo === 'upsert');
+  assert.equal(upsert.linhas[0].conta_bancaria_id, 'cb1');
+  assert.equal(upsert.opcoes.onConflict, 'conta_bancaria_id,hash_dedupe');
 });

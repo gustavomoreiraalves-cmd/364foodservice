@@ -48,7 +48,8 @@ function Conteudo() {
     if (!empresaAtual) return;
     setLoading(true);
     const [r1, r2, r3, r4] = await Promise.all([
-      supabase.from('contas_bancarias').select('*').eq('empresa_id', empresaAtual.id).order('nome'),
+      // Contas são do grupo desde a atualização 45 — sem filtro por empresa.
+      supabase.from('contas_bancarias').select('*').order('nome'),
       supabase.from('extrato_importacoes')
         .select('*, contas_bancarias(nome, instituicao, tipo)')
         .eq('empresa_id', empresaAtual.id).order('created_at', { ascending: false }).limit(30),

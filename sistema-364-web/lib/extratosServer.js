@@ -114,10 +114,12 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
   const importacaoId = crypto.randomUUID();
   const caminho = `${empresaId}/extratos/${importacaoId}/${formato === 'pdf' ? 'arquivo.pdf' : `arquivo.${formato}`}`;
 
+  // Sem checagem de empresa: desde a atualização 45 a conta é do grupo, e
+  // qualquer empresa importa contra ela. Quem separa é a importação, que
+  // continua nascendo com a empresa selecionada.
   const { data: conta, error: erroConta } = await sb.from('contas_bancarias')
-    .select('id, empresa_id, tipo').eq('id', contaBancariaId).maybeSingle();
+    .select('id, tipo').eq('id', contaBancariaId).maybeSingle();
   if (erroConta || !conta) throw new Error('Conta bancária não encontrada.');
-  if (conta.empresa_id !== empresaId) throw new Error('Conta bancária de outra empresa.');
   if (tipo === 'fatura_cartao' && conta.tipo !== 'cartao_credito') {
     throw new Error('Fatura só pode ser importada contra uma conta de cartão de crédito.');
   }
@@ -192,6 +194,7 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
 
       return {
         importacao_id: importacaoId, empresa_id: empresaId,
+        conta_bancaria_id: contaBancariaId,
         data: l.data, descricao: l.descricao, descricao_normalizada: descricaoNormalizada,
         valor: l.valor, tipo: l.tipo, documento: l.documento, status,
         parcela_sugerida_id: parcelaSugeridaId, padrao_id: padrao?.id || null,
@@ -203,8 +206,10 @@ export async function processarImportacao({ sb, empresaId, contaBancariaId, tipo
     });
 
     // ignoreDuplicates: reimportar o mesmo período não duplica nem trava.
+    // O dedupe é por conta, não por empresa: com a conta compartilhada no
+    // grupo, o mesmo extrato importado por duas empresas é o mesmo extrato.
     const { data: inseridas, error: erroLinhas } = await sb.from('extrato_lancamentos')
-      .upsert(linhas, { onConflict: 'empresa_id,hash_dedupe', ignoreDuplicates: true })
+      .upsert(linhas, { onConflict: 'conta_bancaria_id,hash_dedupe', ignoreDuplicates: true })
       .select('id, status');
     if (erroLinhas) throw new Error('Não consegui gravar os lançamentos: ' + erroLinhas.message);
 

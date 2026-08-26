@@ -17,7 +17,7 @@ const VAZIO = () => ({
 export default function ContasBancariasPage() {
   return (
     <AppShell modulo="financeiro" titulo="Contas Bancárias"
-      desc="Contas e cartões usados na conciliação dos extratos">
+      desc="Contas e cartões do grupo, usados na conciliação dos extratos">
       <Conteudo />
     </AppShell>
   );
@@ -31,11 +31,14 @@ function Conteudo() {
   const [loading, setLoading] = useState(true);
   const [editando, setEditando] = useState(null);
 
+  // Sem filtro por empresa: conta de banco e cartão são do Grupo 364, não da
+  // marca (atualização 45). `empresa_id` continua gravado no cadastro, mas só
+  // como registro de quem cadastrou primeiro.
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
     const { data, error } = await supabase.from('contas_bancarias').select('*')
-      .eq('empresa_id', empresaAtual.id).order('nome');
+      .order('nome');
     if (error) console.error(error);
     setLista(data || []);
     setLoading(false);
@@ -43,7 +46,7 @@ function Conteudo() {
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
 
-  // As seis do grupo mais o que já foi cadastrado nesta empresa, sem repetir.
+  // As seis conhecidas mais o que já foi cadastrado no grupo, sem repetir.
   // Sai da lista que a tabela já carregou — nenhuma consulta a mais.
   const instituicoesSugeridas = [...new Set([
     ...INSTITUICOES_SUGERIDAS,
@@ -80,6 +83,10 @@ function Conteudo() {
     <>
       <div className="panel">
         <strong>Nova conta</strong>
+        <p className="muted" style={{ marginTop: 4 }}>
+          O cadastro é do grupo: a conta aparece em todas as empresas, qualquer que
+          seja a que estiver selecionada aqui.
+        </p>
         <form className="form-grid" onSubmit={salvar} style={{ marginTop: 10 }}>
           <div>
             <label>Nome</label>
@@ -131,7 +138,7 @@ function Conteudo() {
               {loading && <tr className="empty-row"><td colSpan={7}>Carregando…</td></tr>}
               {!loading && !lista.length && (
                 <tr className="empty-row"><td colSpan={7}>
-                  Nenhuma conta cadastrada. Comece pelas contas dos bancos que você usa.
+                  Nenhuma conta cadastrada no grupo. Comece pelas contas dos bancos que você usa.
                 </td></tr>
               )}
               {lista.map(c => (
