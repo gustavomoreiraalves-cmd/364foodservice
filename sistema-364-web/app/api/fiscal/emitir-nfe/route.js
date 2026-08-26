@@ -57,6 +57,14 @@ export async function POST(request) {
     // e.status vem de lib/nfe/emitir.js (erro() local): 400 para dado de
     // cadastro/negócio faltando, 409 para nota já autorizada, 500 para falha
     // de banco/certificado, 502 para falha de comunicação com a SEFAZ.
-    return NextResponse.json({ error: e.message }, { status: e.status || 400 });
+    //
+    // Achado da revisão (fix round 1, Importante): e.codigo (quando presente)
+    // é o mesmo sinal estruturado que os dois throws de "resultado
+    // indeterminado" de emitir.js agora carregam — propagado aqui em vez de
+    // deixar quem chama adivinhar pelo texto de `error`. Ausente na maioria
+    // dos erros; `codigo` simplesmente não aparece no JSON nesse caso.
+    const corpo = { error: e.message };
+    if (e.codigo) corpo.codigo = e.codigo;
+    return NextResponse.json(corpo, { status: e.status || 400 });
   }
 }

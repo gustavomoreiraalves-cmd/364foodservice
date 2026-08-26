@@ -60,9 +60,17 @@ const STATUS_REAPROVEITAVEL = ['rascunho', 'numero_reservado', 'assinado'];
 // nova tentativa com número novo é o fluxo normal esperado.
 const STATUS_INDETERMINADO = ['enviado', 'erro_comunicacao'];
 
-function erro(mensagem, status = 400) {
+function erro(mensagem, status = 400, codigo) {
   const e = new Error(mensagem);
   e.status = status;
+  // Achado da revisão (fix round 1, Importante): dois pontos diferentes deste
+  // arquivo lançam "resultado indeterminado" (o pré-check aqui embaixo e a
+  // falha de comunicação com a SEFAZ, passo 8) com textos parecidos mas não
+  // idênticos — quem consumia isso por regex (app/pedidos/[id]/page.js) só
+  // casava um dos dois. `codigo` é o sinal estruturado que os dois agora
+  // carregam, do mesmo jeito que já carregam `.status`; a mensagem continua
+  // livre para mudar de texto sem quebrar quem lê o código.
+  if (codigo) e.codigo = codigo;
   return e;
 }
 
@@ -185,6 +193,7 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
       + 'não ficou confirmado neste sistema. Antes de tentar emitir de novo, confira essa chave diretamente '
       + 'na SEFAZ (consulta de protocolo) — emitir agora arrisca autorizar duas notas para o mesmo pedido.',
       409,
+      'resultado_indeterminado',
     );
   }
 
@@ -476,6 +485,7 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
       + `(chave ${chave}) ficou indeterminado — confirme na SEFAZ antes de tentar emitir de novo para `
       + 'este pedido.',
       502,
+      'resultado_indeterminado',
     );
   }
 

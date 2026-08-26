@@ -38,14 +38,6 @@ const SITUACAO_NOTA = {
 };
 const STATUS_INDETERMINADO_UI = ['enviado', 'erro_comunicacao'];
 
-// A rota (app/api/fiscal/emitir-nfe/route.js) devolve só { error: mensagem } —
-// não há campo estruturado para "resultado indeterminado". O texto abaixo é o
-// mesmo, palavra por palavra, que lib/nfe/emitir.js usa para os dois casos de
-// STATUS_INDETERMINADO; se aquele texto mudar, esta função precisa acompanhar.
-function erroDeResultadoIndeterminado(status, mensagem) {
-  return status === 409 && /resultado.*não ficou confirmado/.test(mensagem || '');
-}
-
 // Rótulo do botão de ação: propositalmente diferente para o caso
 // indeterminado ("Emitir mesmo assim", não "Tentar novamente") — a palavra
 // "tentar de novo" sugere um clique despreocupado, e é exatamente o que não
@@ -421,7 +413,15 @@ function Conteudo({ setFicha }) {
         // decidiu, e tentar de novo sem conferir arrisca autorizar duas notas
         // para o mesmo pedido. Sinalizado à parte para o JSX tratar diferente
         // de um erro qualquer — não é "clique de novo", é "confira na SEFAZ".
-        if (erroDeResultadoIndeterminado(r.status, json.error)) setEmissaoIndeterminada(true);
+        //
+        // Achado da revisão (fix round 1, Importante): isto casava por regex
+        // no texto de `error`, e um dos dois throws de resultado indeterminado
+        // (a falha de comunicação com a SEFAZ, 502) tinha um texto que não
+        // batia com aquele regex — o caso mais comum de "não sabemos o que
+        // aconteceu" caía no tratamento de erro comum. `json.codigo` é o sinal
+        // estruturado que lib/nfe/emitir.js agora anexa aos dois throws (via
+        // app/api/fiscal/emitir-nfe/route.js), imune a reformulação de texto.
+        if (json.codigo === 'resultado_indeterminado') setEmissaoIndeterminada(true);
         setErroEmissao(json.error || 'Falha ao emitir a NF-e.');
         return;
       }
