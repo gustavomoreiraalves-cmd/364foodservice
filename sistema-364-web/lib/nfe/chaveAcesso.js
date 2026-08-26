@@ -18,10 +18,34 @@ function comZeros(valor, largura, rotulo) {
   return s.padStart(largura, '0');
 }
 
+// AAMM (ano/mês com 2 dígitos cada) do instante de emissão, no fuso horário
+// informado — nunca no fuso do processo. `Intl.DateTimeFormat` com `timeZone`
+// resolve o ano/mês civil correspondente àquele instante naquele fuso,
+// independentemente de onde o Node está rodando (ex.: Vercel roda em UTC).
+function aammNoFuso(d, fusoHorario) {
+  if (typeof fusoHorario !== 'string' || fusoHorario.trim() === '') {
+    throw new Error('fusoHorario é obrigatório para montar a chave de acesso (ex.: "America/Porto_Velho").');
+  }
+  let partes;
+  try {
+    partes = new Intl.DateTimeFormat('en-US', {
+      timeZone: fusoHorario,
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(d);
+  } catch {
+    throw new Error(`fusoHorario inválido: ${fusoHorario}`);
+  }
+  const ano = partes.find((p) => p.type === 'year')?.value;
+  const mes = partes.find((p) => p.type === 'month')?.value;
+  if (!ano || !mes) throw new Error(`fusoHorario inválido: ${fusoHorario}`);
+  return ano.slice(2) + mes;
+}
+
 // Módulo 11, pesos 2..9 ciclando da direita para a esquerda. Resto 0 ou 1 → 0.
 export function digitoVerificadorChave(chave43) {
-  const s = apenasDigitos(chave43);
-  if (s.length !== 43) throw new Error(`O dígito verificador exige 43 dígitos, recebi ${s.length}.`);
+  const s = String(chave43 ?? '');
+  if (!/^\d{43}$/.test(s)) throw new Error(`O dígito verificador exige exatamente 43 dígitos, recebi ${s.length}.`);
   let soma = 0;
   let peso = 2;
   for (let i = s.length - 1; i >= 0; i--) {
@@ -32,11 +56,11 @@ export function digitoVerificadorChave(chave43) {
   return resto === 0 || resto === 1 ? 0 : 11 - resto;
 }
 
-export function montarChaveAcesso({ cUF, dataEmissao, cnpj, modelo, serie, numero, tipoEmissao, codigoNumerico }) {
+export function montarChaveAcesso({ cUF, dataEmissao, cnpj, modelo, serie, numero, tipoEmissao, codigoNumerico, fusoHorario }) {
   const d = dataEmissao instanceof Date ? dataEmissao : new Date(dataEmissao);
   if (Number.isNaN(d.getTime())) throw new Error('Data de emissão inválida para a chave de acesso.');
 
-  const aamm = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0');
+  const aamm = aammNoFuso(d, fusoHorario);
   const cnpjLimpo = apenasDigitos(cnpj);
   if (cnpjLimpo.length !== 14) throw new Error(`CNPJ do emitente precisa ter 14 dígitos: ${cnpj}`);
 
