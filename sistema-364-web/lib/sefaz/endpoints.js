@@ -85,6 +85,11 @@ export function namespaceServico(servico) {
 // verificada (undici aceitando .pfx bruto) que causou esta sessão de debug.
 const METODO_SOAP_VERIFICADO = {
   statusServico: 'nfeStatusServicoNF',
+  // Conferidos contra o WSDL real via mTLS (não adivinhados) na Task 6 do motor
+  // de emissão, 2026-08-25 — os dois confirmam nfeDadosMsg como elemento do
+  // corpo, mesma forma dos demais serviços já verificados.
+  autorizacao: 'nfeAutorizacaoLote',
+  retAutorizacao: 'nfeRetAutorizacaoLote',
 };
 
 export function acaoSoapServico(servico) {

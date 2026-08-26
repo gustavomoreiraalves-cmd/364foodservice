@@ -64,8 +64,22 @@ test('acaoSoapServico devolve a SOAPAction verificada de statusServico', () => {
   );
 });
 
+// Verificadas contra o WSDL real via mTLS na Task 6 do motor de emissão
+// (2026-08-25) — não são mais chute nem pendência, ao contrário das que
+// seguem abaixo ainda sem verificação.
+test('acaoSoapServico devolve a SOAPAction verificada de autorizacao e retAutorizacao', () => {
+  assert.equal(
+    acaoSoapServico('autorizacao'),
+    'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote',
+  );
+  assert.equal(
+    acaoSoapServico('retAutorizacao'),
+    'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4/nfeRetAutorizacaoLote',
+  );
+});
+
 test('acaoSoapServico lança para serviço sem SOAPAction verificada, em vez de adivinhar', () => {
-  for (const servico of ['autorizacao', 'retAutorizacao', 'recepcaoEvento', 'consultaProtocolo', 'inutilizacao']) {
+  for (const servico of ['recepcaoEvento', 'consultaProtocolo', 'inutilizacao']) {
     assert.throws(() => acaoSoapServico(servico), /verificad/i, servico);
   }
 });
