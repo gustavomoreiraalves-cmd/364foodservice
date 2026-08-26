@@ -99,6 +99,42 @@ test('pedido sem itens aborta', () => {
   assert.throws(() => resolverNota({ ...ENTRADA, itens: [] }), /item/i);
 });
 
+test('ind_ie_dest 1 (contribuinte de ICMS) resolve normalmente', () => {
+  const nota = resolverNota({ ...ENTRADA, cliente: { ...CLIENTE, ind_ie_dest: 1 } });
+  assert.equal(nota.dest.indIEDest, '1');
+});
+
+test('ind_ie_dest 2 (contribuinte isento de inscrição) resolve normalmente', () => {
+  const nota = resolverNota({ ...ENTRADA, cliente: { ...CLIENTE, ind_ie_dest: 2 } });
+  assert.equal(nota.dest.indIEDest, '2');
+});
+
+test('ind_ie_dest string "1" resolve igual ao numérico 1', () => {
+  const nota = resolverNota({ ...ENTRADA, cliente: { ...CLIENTE, ind_ie_dest: '1' } });
+  assert.equal(nota.dest.indIEDest, '1');
+});
+
+test('ind_ie_dest 9 (não contribuinte / consumidor final) aborta explicando o motivo', () => {
+  assert.throws(
+    () => resolverNota({ ...ENTRADA, cliente: { ...CLIENTE, ind_ie_dest: 9 } }),
+    /SUPERMERCADO MANAR LTDA.*(não contribuinte|consumidor final)/is,
+  );
+});
+
+test('ind_ie_dest ausente aborta em vez de assumir consumidor final (9)', () => {
+  const cliente = { ...CLIENTE };
+  delete cliente.ind_ie_dest;
+  let erro;
+  try {
+    resolverNota({ ...ENTRADA, cliente });
+  } catch (e) {
+    erro = e;
+  }
+  assert.ok(erro, 'era esperado que a emissão abortasse com ind_ie_dest ausente');
+  assert.doesNotMatch(erro.message, /9/, 'não pode silenciosamente virar indIEDest 9 (consumidor final)');
+  assert.match(erro.message, /ind_ie_dest|inscri[çc][ãa]o estadual/i);
+});
+
 test('PIS e COFINS saem da regra, sobre o valor do produto', () => {
   const comAliquota = { ...ITEM, regra: { ...ITEM.regra, cst_pis: '01', aliquota_pis: 1.65, cst_cofins: '01', aliquota_cofins: 7.6 } };
   const nota = resolverNota({ ...ENTRADA, itens: [comAliquota] });

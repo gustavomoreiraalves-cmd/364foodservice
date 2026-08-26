@@ -88,6 +88,34 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
   };
 }
 
+// Esta fase cobre só destinatário contribuinte (ind_ie_dest 1 ou 2). Ausência
+// do campo não é evidência de nenhum valor — muito menos de um valor fiscal —
+// então não há default: falta ou valor fora do escopo tem que parar a emissão
+// aqui, explicitamente, e não virar uma nota de consumidor final por acaso.
+function resolverIndIEDest(cliente) {
+  const bruto = cliente.ind_ie_dest;
+  if (bruto === null || bruto === undefined || bruto === '') {
+    throw new Error(
+      `O cliente "${cliente.nome}" está sem indicador de inscrição estadual do destinatário `
+      + '(ind_ie_dest). Preencha o cadastro em /clientes antes de emitir.',
+    );
+  }
+  const valor = String(bruto).trim();
+  if (valor === '1' || valor === '2') return valor;
+  if (valor === '9') {
+    throw new Error(
+      `O cliente "${cliente.nome}" está cadastrado como não contribuinte / consumidor final `
+      + '(ind_ie_dest = 9). Esta fase do motor de emissão cobre apenas vendas para destinatário '
+      + 'contribuinte (ind_ie_dest 1 ou 2); venda para consumidor final exige DIFAL, indFinal e '
+      + 'campos relacionados, que ainda não foram implementados — isso será tratado em fase futura.',
+    );
+  }
+  throw new Error(
+    `O cliente "${cliente.nome}" tem indicador de inscrição estadual do destinatário inválido `
+    + `(ind_ie_dest = "${bruto}"). Corrija o cadastro em /clientes antes de emitir.`,
+  );
+}
+
 function resolverDestinatario(cliente, ambiente) {
   const doc = digitos(cliente.cnpj);
   if (doc.length !== 14 && doc.length !== 11) {
@@ -99,7 +127,7 @@ function resolverDestinatario(cliente, ambiente) {
     // Em homologação a razão social é fixada pela SEFAZ; usar o nome real
     // ali é rejeição.
     xNome: ambiente === 'homologacao' ? RAZAO_SOCIAL_HOMOLOGACAO : exigir(cliente.nome, 'O cliente está sem nome.'),
-    indIEDest: String(cliente.ind_ie_dest ?? '9'),
+    indIEDest: resolverIndIEDest(cliente),
     IE: cliente.ie ? digitos(cliente.ie) : undefined,
     email: cliente.email_nfe || undefined,
     enderDest: {
