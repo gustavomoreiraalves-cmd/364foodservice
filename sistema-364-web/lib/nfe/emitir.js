@@ -29,7 +29,11 @@ import { resolverNota } from './resolverNota.js';
 import { montarXmlNFe, validarCsosnItem } from './montarXml.js';
 import { assinarXml } from '../sefaz/assinatura.js';
 import { chamarSefaz } from '../sefaz/transporte.js';
-import { envelopeSoap, extrairCorpoResposta, lerCampos, extrairBloco } from '../sefaz/envelope.js';
+import { envelopeSoap, extrairCorpoResposta, extrairBloco } from '../sefaz/envelope.js';
+import {
+  classificarResposta,
+  STATUS_REAPROVEITAVEL, STATUS_INDETERMINADO, STATUS_BLOQUEIA_REEMISSAO,
+} from './classificacao.js';
 import { endpointSefaz, namespaceServico, acaoSoapServico } from '../sefaz/endpoints.js';
 import { obterCertificadoAtivo, extrairChaveECert, statusCertificado } from '../certificadoServer.js';
 
@@ -42,48 +46,10 @@ const MODELO = '55';
 // rota já injeta.
 const BUCKET_XML = 'recebimentos';
 
-// Estados em que uma nova tentativa para o MESMO pedido reaproveita o mesmo
-// documento e (quando já existir) o mesmo número — porque a SEFAZ ainda não
-// viu nada. A partir de 'enviado' (gravado ANTES de chamar a SEFAZ — ver o
-// passo 7), uma nova tentativa NUNCA reaproveita nem o documento nem o
-// número: o anterior já pode ter sido visto pela SEFAZ e não pode voltar.
-const STATUS_REAPROVEITAVEL = ['rascunho', 'numero_reservado', 'assinado'];
-
-// Estados pós-transmissão cujo veredito da SEFAZ não ficou registrado de
-// forma confiável neste sistema: 'enviado' sem nunca ter avançado para
-// 'autorizado'/'rejeitado' (o UPDATE que gravaria o veredito falhou, ou o
-// processo caiu no meio) e 'erro_comunicacao' (a chamada à SEFAZ falhou sem
-// resposta — pode ter sido recebida e processada mesmo assim). Em nenhum dos
-// dois emitir de novo para o mesmo pedido é seguro: pode duplicar uma nota
-// que a SEFAZ já autorizou. 'rejeitado' fica de fora deste conjunto de
-// propósito — ali o veredito da SEFAZ é conhecido e está gravado, então uma
-// nova tentativa com número novo é o fluxo normal esperado.
-const STATUS_INDETERMINADO = ['enviado', 'erro_comunicacao'];
-
-// Estados que travam uma nova emissão para o MESMO pedido porque já existe
-// um veredito definitivo da SEFAZ que não se resolve tentando de novo por
-// este caminho: 'autorizado' (reemitir duplicaria a nota) e 'denegado'
-// (achado da revisão, Crítico 3 — cStat 110/301/302: CNPJ irregular, IE
-// inválida etc. Denegação consome o número definitivamente; mesmo depois de
-// regularizar a pendência, a reemissão correta usa numeração nova e passa
-// por fora deste guard, não por uma nova tentativa automática aqui).
-const STATUS_BLOQUEIA_REEMISSAO = ['autorizado', 'denegado'];
-
-// cStat de infProt (o veredito da NOTA, nunca o do lote) que valem como
-// autorização. 100 é o caso comum (autorizada dentro da janela síncrona);
-// 150 é "Autorizado o uso da NF-e, autorização fora de prazo" — também é
-// autorização, e antes da revisão (Crítico 3) só 100 era reconhecido: 150
-// caía no branch de 'rejeitado', abrindo caminho pra reemitir (com número
-// novo) uma nota que a SEFAZ já tinha autorizado.
-const CSTAT_AUTORIZADO = ['100', '150'];
-
-// cStat de infProt que valem como denegação (situação cadastral do
-// destinatário: CNPJ irregular = 110, inapto = 301, destinatário não
-// contribuinte quando deveria ser = 302 — os três consomem o número
-// definitivamente, ao contrário de uma rejeição comum). Antes da revisão
-// caíam no mesmo branch de 'rejeitado' que uma falha de schema comum, o que
-// convidava a reemitir e queimar outro número na mesma denegação.
-const CSTAT_DENEGADO = ['110', '301', '302'];
+// STATUS_REAPROVEITAVEL / STATUS_INDETERMINADO / STATUS_BLOQUEIA_REEMISSAO e
+// os cStat de autorização e denegação vivem em ./classificacao.js, junto de
+// classificarResposta — puro, sem banco e sem rede, e por isso coberto por
+// tests/nfe-classificacao.test.mjs.
 
 function erro(mensagem, status = 400, codigo) {
   const e = new Error(mensagem);
@@ -551,22 +517,20 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   }
 
   // ---------- 9. Ler o retorno e gravar o veredito ----------
-  // A resposta síncrona traz cStat no nível do lote E dentro de
-  // protNFe/infProt. O veredito da NOTA (100/150 = autorizada) só pode vir do
-  // segundo — ler o do lote (ex.: 104 "lote processado") marcaria como
-  // autorizada uma nota que a SEFAZ rejeitou. Ver o comentário de
-  // lerCampos em lib/sefaz/envelope.js.
+  // A leitura da resposta (qual nível do XML vale, o que é autorização, o que
+  // é denegação, o que é "ainda não sei") está toda em classificarResposta,
+  // em ./classificacao.js — pura e coberta por testes. Aqui só resta o efeito
+  // colateral: gravar o veredito no banco e devolver ao chamador.
   //
   // A partir daqui os UPDATEs só REFINAM o resultado (autorizado/denegado/
   // rejeitado, recibo_lote) — o documento já é irreversivelmente não-
   // reaproveitável desde o passo 7, então nada aqui muda esse fato caso
   // falhe.
   const corpoResposta = extrairCorpoResposta(respostaXml);
-  const lote = lerCampos(corpoResposta, ['cStat', 'xMotivo', 'nRec']);
-  const veredito = lerCampos(corpoResposta, ['cStat', 'xMotivo', 'nProt'], { dentroDe: 'infProt' });
+  const { situacao, motivo, nRec, protocolo } = classificarResposta(corpoResposta);
 
   // ---- 9a. Autorizada (100 dentro do prazo, 150 fora do prazo) ----
-  if (veredito.cStat && CSTAT_AUTORIZADO.includes(veredito.cStat)) {
+  if (situacao === 'autorizado') {
     // I8: xml_path já guardava a NFe que ENVIAMOS; DANFE e o arquivo legal
     // precisam de nfeProc (NFe + protNFe) — sem isso, digVal/dhRecbto/
     // verAplic da autorização não sobrevivem, só nProt (achado da revisão,
@@ -602,8 +566,8 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
 
     const { error } = await sb.from('nfe_saida_documentos').update({
       status: 'autorizado',
-      recibo_lote: lote.nRec || null,
-      protocolo_autorizacao: veredito.nProt,
+      recibo_lote: nRec,
+      protocolo_autorizacao: protocolo,
       xml_path: xmlPath,
       nfeproc_path: nfeProcPath,
       emitida_em: new Date().toISOString(),
@@ -615,14 +579,14 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
       // qualquer nova tentativa para este pedido até alguém confirmar; por
       // isso a mensagem nomeia protocolo e chave.
       throw erro(
-        `A nota foi autorizada pela SEFAZ (protocolo ${veredito.nProt}, chave ${chave}), mas falhou ao `
+        `A nota foi autorizada pela SEFAZ (protocolo ${protocolo}, chave ${chave}), mas falhou ao `
         + `gravar isso neste sistema: ${error.message}. A nota está autorizada de verdade — não tente `
         + 'emitir de novo para este pedido; registre manualmente ou concilie com a SEFAZ.',
         500,
       );
     }
 
-    return { status: 'autorizado', chave, numero, protocolo: veredito.nProt, motivo: null };
+    return { status: 'autorizado', chave, numero, protocolo, motivo: null };
   }
 
   // ---- 9b. Denegada (110/301/302 — situação cadastral do destinatário) ----
@@ -632,18 +596,17 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   // reemitir o mesmo número), e por isso vira status próprio — que também
   // passa a bloquear reemissão automática para este pedido (ver
   // STATUS_BLOQUEIA_REEMISSAO, checado no início desta função).
-  if (veredito.cStat && CSTAT_DENEGADO.includes(veredito.cStat)) {
-    const motivoDenegacao = `${veredito.cStat} - ${veredito.xMotivo}`;
+  if (situacao === 'denegado') {
     const { error: erroGravaDenegado } = await sb.from('nfe_saida_documentos')
-      .update({ status: 'denegado', recibo_lote: lote.nRec || null, motivo_rejeicao: motivoDenegacao }).eq('id', documento.id);
+      .update({ status: 'denegado', recibo_lote: nRec, motivo_rejeicao: motivo }).eq('id', documento.id);
     if (erroGravaDenegado) {
       throw erro(
-        `A nota foi denegada pela SEFAZ (${motivoDenegacao}, chave ${chave}), mas falhou ao gravar isso `
+        `A nota foi denegada pela SEFAZ (${motivo}, chave ${chave}), mas falhou ao gravar isso `
         + `neste sistema: ${erroGravaDenegado.message}.`,
         500,
       );
     }
-    return { status: 'denegado', chave, numero, protocolo: null, motivo: motivoDenegacao };
+    return { status: 'denegado', chave, numero, protocolo: null, motivo };
   }
 
   // ---- 9c. Só recibo do lote, sem protNFe (indSinc estourou a janela) ----
@@ -652,7 +615,7 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   // processamento síncrono não termina a tempo — não é rejeição, é "ainda não
   // sei". Gravar 'rejeitado' aqui (como este arquivo fazia antes da revisão)
   // descartava a própria evidência que a linha grava junto (recibo_lote:
-  // lote.nRec) e, como 'rejeitado' fica de fora de STATUS_INDETERMINADO, a
+  // nRec do lote) e, como 'rejeitado' fica de fora de STATUS_INDETERMINADO, a
   // tela oferecia reemissão comum — que cria um documento NOVO, com número e
   // chave novos, e transmite, enquanto o lote original ainda podia estar a
   // caminho de autorizar. Duas notas autorizadas por causa de latência da
@@ -667,14 +630,14 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   // lib/sefaz/endpoints.js, só não são chamados por nada ainda. Isso é tarefa
   // separada, já arquivada; aqui só paramos e nomeamos o que dá para
   // conferir manualmente.
-  if (!veredito.cStat && lote.nRec) {
+  if (situacao === 'indeterminado') {
     const { error: erroGravaRecibo } = await sb.from('nfe_saida_documentos')
-      .update({ recibo_lote: lote.nRec }).eq('id', documento.id);
+      .update({ recibo_lote: nRec }).eq('id', documento.id);
     const sufixoRecibo = erroGravaRecibo
       ? ` (e também falhou ao registrar o recibo do lote: ${erroGravaRecibo.message})`
       : '';
     throw erro(
-      `A SEFAZ recebeu esta nota (chave ${chave}) e devolveu o recibo do lote (nRec ${lote.nRec}), mas o `
+      `A SEFAZ recebeu esta nota (chave ${chave}) e devolveu o recibo do lote (nRec ${nRec}), mas o `
       + `processamento síncrono não terminou a tempo de dizer se foi autorizada ou não${sufixoRecibo}. `
       + 'Confira esse nRec diretamente na SEFAZ (NFeRetAutorizacao4) antes de tentar emitir de novo para '
       + 'este pedido — reemitir agora arrisca autorizar duas notas.',
@@ -684,17 +647,13 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   }
 
   // ---- 9d. Rejeitada de verdade ----
-  // Só chega aqui um veredito genuíno de rejeição (schema, duplicidade etc.):
-  // prioriza o veredito de dentro de infProt; cai para o do lote só se a nota
-  // nem chegou a ter protNFe nem nRec (lote inteiro rejeitado antes disso).
-  // Este é o único caso em que 'rejeitado' é gravado — autorização, denegação
-  // e recibo-sem-protocolo já foram tratados e retornaram/lançaram acima.
-  const motivo = veredito.cStat
-    ? `${veredito.cStat} - ${veredito.xMotivo}`
-    : `${lote.cStat} - ${lote.xMotivo}`;
-
+  // Só chega aqui um veredito genuíno de rejeição (schema, duplicidade etc.)
+  // — classificarResposta já prioriza o veredito de dentro de infProt e só cai
+  // para o do lote quando a nota nem chegou a ter protNFe nem nRec. Este é o
+  // único caso em que 'rejeitado' é gravado: autorização, denegação e
+  // recibo-sem-protocolo já foram tratados e retornaram/lançaram acima.
   const { error: erroGravaRejeitado } = await sb.from('nfe_saida_documentos')
-    .update({ status: 'rejeitado', recibo_lote: lote.nRec || null, motivo_rejeicao: motivo }).eq('id', documento.id);
+    .update({ status: 'rejeitado', recibo_lote: nRec, motivo_rejeicao: motivo }).eq('id', documento.id);
   if (erroGravaRejeitado) {
     // Mesmo raciocínio do bloco de autorização acima: se este UPDATE falhar,
     // o documento fica em 'enviado' e STATUS_INDETERMINADO barra uma nova
