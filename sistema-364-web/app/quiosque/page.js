@@ -511,6 +511,9 @@ function TelaPin({ token, aoIdentificar, aoCancelar }) {
   return (
     <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
       <div className="qk-instrucao">Identificação por matrícula + PIN</div>
+      <p className="muted" style={{ fontSize: 11.5, maxWidth: 320, margin: '-4px 0 0' }}>
+        Primeira vez? Digite um PIN de 4 a 6 dígitos — ele vira o seu PIN de acesso a partir de agora.
+      </p>
       <input className="qk-input" style={{ fontSize: 20, letterSpacing: 2 }} placeholder="Matrícula"
         value={matricula} onChange={e => setMatricula(e.target.value)} autoFocus />
       <input className="qk-input" style={{ fontSize: 20 }} type="password" inputMode="numeric" maxLength={6} placeholder="PIN"
