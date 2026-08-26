@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { fmtMoney, fmtDate } from '../../../lib/format';
@@ -10,6 +10,52 @@ import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../../lib/pedidos';
+
+// Mesmo padrão de app/fiscal/emissor/page.js e app/empresas/page.js: o token
+// da sessão pode ter girado desde o mount, então pega sempre na hora da
+// chamada em vez de guardar um header calculado uma vez.
+async function cabecalhoAuth() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return { Authorization: `Bearer ${session?.access_token || ''}`, 'Content-Type': 'application/json' };
+}
+
+// Rótulo e cor de tag para cada status de nfe_saida_documentos (atualização
+// 43). 'enviado' e 'erro_comunicacao' são os dois estados "indeterminados" de
+// lib/nfe/emitir.js (STATUS_INDETERMINADO): a nota foi transmitida, mas o que
+// a SEFAZ decidiu não ficou confirmado neste sistema — visualmente e
+// textualmente isto precisa ficar diferente de uma rejeição comum, porque o
+// que resolve não é clicar de novo, é conferir na SEFAZ.
+const SITUACAO_NOTA = {
+  rascunho: { rotulo: 'Rascunho', classe: 'neutro' },
+  numero_reservado: { rotulo: 'Número reservado', classe: 'neutro' },
+  assinado: { rotulo: 'Assinada — não transmitida', classe: 'neutro' },
+  enviado: { rotulo: 'Enviada — resultado não confirmado', classe: 'warn' },
+  erro_comunicacao: { rotulo: 'Falha de comunicação — resultado não confirmado', classe: 'warn' },
+  autorizado: { rotulo: 'Autorizada', classe: 'ok' },
+  rejeitado: { rotulo: 'Rejeitada pela SEFAZ', classe: 'bad' },
+  contingencia: { rotulo: 'Contingência', classe: 'warn' },
+  cancelado: { rotulo: 'Cancelada', classe: 'neutro' },
+};
+const STATUS_INDETERMINADO_UI = ['enviado', 'erro_comunicacao'];
+
+// A rota (app/api/fiscal/emitir-nfe/route.js) devolve só { error: mensagem } —
+// não há campo estruturado para "resultado indeterminado". O texto abaixo é o
+// mesmo, palavra por palavra, que lib/nfe/emitir.js usa para os dois casos de
+// STATUS_INDETERMINADO; se aquele texto mudar, esta função precisa acompanhar.
+function erroDeResultadoIndeterminado(status, mensagem) {
+  return status === 409 && /resultado.*não ficou confirmado/.test(mensagem || '');
+}
+
+// Rótulo do botão de ação: propositalmente diferente para o caso
+// indeterminado ("Emitir mesmo assim", não "Tentar novamente") — a palavra
+// "tentar de novo" sugere um clique despreocupado, e é exatamente o que não
+// se quer sugerir quando o resultado da tentativa anterior é desconhecido.
+function rotuloBotaoEmitir(notaFiscal) {
+  if (!notaFiscal) return 'Emitir NF-e';
+  if (notaFiscal.status === 'rejeitado') return 'Tentar novamente';
+  if (STATUS_INDETERMINADO_UI.includes(notaFiscal.status)) return 'Emitir mesmo assim';
+  return 'Continuar emissão'; // rascunho/numero_reservado/assinado: retomar uma tentativa interrompida antes do envio é seguro.
+}
 
 export default function PedidoPage() {
   const [ficha, setFicha] = useState(null);
@@ -50,6 +96,55 @@ function Conteudo({ setFicha }) {
   const [reabrindo, setReabrindo] = useState(false);
   const [motivoReabertura, setMotivoReabertura] = useState('');
   const [erroReabrir, setErroReabrir] = useState('');
+
+  // notaFiscal é o último nfe_saida_documentos deste pedido (ou null se nunca
+  // emitiu). Carregado à parte do resto do pedido (carregarFiscal), não dentro
+  // do Promise.all principal de carregar(): a tabela só existe depois da
+  // atualização 43 (ainda não aplicada em todo ambiente), e um erro aqui não
+  // pode derrubar a tela do pedido inteira — só a seção fiscal fica ausente.
+  const [notaFiscal, setNotaFiscal] = useState(null);
+  const [erroFiscalCarregar, setErroFiscalCarregar] = useState('');
+  const [naturezas, setNaturezas] = useState([]);
+  const [naturezaEscolhida, setNaturezaEscolhida] = useState('');
+  const [escolhendoNatureza, setEscolhendoNatureza] = useState(false);
+  const [emitindoNota, setEmitindoNota] = useState(false);
+  const [erroEmissao, setErroEmissao] = useState('');
+  const [emissaoIndeterminada, setEmissaoIndeterminada] = useState(false);
+  // Mesmo papel do geracaoRef de app/fiscal/emissor/page.js: identifica a
+  // "sessão de pedido" vigente. Incrementado sempre que o efeito de troca de
+  // pedido/empresa roda, para que uma resposta de carregarFiscal/emitir ainda
+  // em voo possa ser descartada se o operador já tiver saído deste pedido —
+  // sem isto, o resultado de uma marca/pedido ficaria exibido por cima de
+  // outro, silenciosamente afirmando algo falso sobre o recém-selecionado
+  // (a mesma armadilha de estado obsoleto que a tela do emissor já teve).
+  const geracaoNotaRef = useRef(0);
+
+  // Carrega a situação fiscal deste pedido (documento mais recente) e as
+  // naturezas de operação de saída ativas da marca, para o passo de escolha.
+  // Separado de carregar() de propósito — ver comentário de notaFiscal acima.
+  async function carregarFiscal(pedidoAtual, eid) {
+    const minhaGeracao = geracaoNotaRef.current;
+    const [{ data: doc, error: eDoc }, { data: nats, error: eNats }] = await Promise.all([
+      // A mais recente: um pedido pode acumular mais de um documento ao longo
+      // do tempo (mesmo critério de lib/nfe/emitir.js) — só a última importa
+      // para a tela.
+      supabase.from('nfe_saida_documentos')
+        .select('status, chave, numero, protocolo_autorizacao, motivo_rejeicao')
+        .eq('pedido_id', pedidoAtual.id).eq('empresa_id', eid)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('naturezas_operacao')
+        .select('id, descricao')
+        .eq('empresa_id', eid).eq('tipo_operacao', 'saida').eq('ativo', true)
+        .order('descricao'),
+    ]);
+    if (geracaoNotaRef.current !== minhaGeracao) return; // pedido/empresa já trocou
+    setNotaFiscal(eDoc ? null : (doc || null));
+    setErroFiscalCarregar(eDoc ? eDoc.message : '');
+    const listaNats = eNats ? [] : (nats || []);
+    setNaturezas(listaNats);
+    // Pré-seleciona quando só houver uma para a marca — como pede a task.
+    setNaturezaEscolhida(listaNats.length === 1 ? listaNats[0].id : '');
+  }
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -112,6 +207,7 @@ function Conteudo({ setFicha }) {
       }));
       setItensOriginais(lista);
       setItens(lista);
+      await carregarFiscal(p, eid);
     }
     setLoading(false);
   }
@@ -122,7 +218,28 @@ function Conteudo({ setFicha }) {
   // tarja só sobrevive à troca de pedido ou de empresa se ninguém mandar
   // ela sumir antes — o que é exatamente o que queremos: ao trocar de
   // pedido/empresa, a última ação relevante para esta tela terminou.
-  useEffect(() => { setErro(''); carregar(); }, [empresaAtual?.id, id]);
+  //
+  // O estado de emissão fiscal (notaFiscal, escolha de natureza, erro de
+  // emissão) é resetado aqui do mesmo jeito, e por um motivo mais sério que
+  // "última ação irrelevante": deixar o resultado de UM pedido exibido depois
+  // de trocar para OUTRO afirmaria, em silêncio, algo falso sobre o pedido
+  // recém-aberto — numa tela que emite documento fiscal, isso é pior do que
+  // cosmético. geracaoNotaRef avança junto para que qualquer resposta de
+  // carregarFiscal/emitir ainda em voo da troca anterior seja descartada ao
+  // chegar.
+  useEffect(() => {
+    setErro('');
+    geracaoNotaRef.current += 1;
+    setNotaFiscal(null);
+    setErroFiscalCarregar('');
+    setNaturezas([]);
+    setNaturezaEscolhida('');
+    setEscolhendoNatureza(false);
+    setEmitindoNota(false);
+    setErroEmissao('');
+    setEmissaoIndeterminada(false);
+    carregar();
+  }, [empresaAtual?.id, id]);
 
   // `itensOriginais` (o que já está gravado), e não `itens` (o que está na
   // tela): o que a view descontou foi o que está no banco.
@@ -267,6 +384,61 @@ function Conteudo({ setFicha }) {
     carregar();
   }
 
+  // Emite a NF-e para este pedido (POST /api/fiscal/emitir-nfe, Task 6).
+  // Corpo e retorno conferidos lendo app/api/fiscal/emitir-nfe/route.js e
+  // lib/nfe/emitir.js: { pedidoId, naturezaOperacaoId } →
+  // { status, chave, numero, protocolo, motivo } no sucesso (200 — inclusive
+  // quando a SEFAZ rejeita, que não é erro HTTP), ou { error } com o status
+  // vindo de emitirNfe() (400/404/409/500/502) na falha.
+  async function emitir() {
+    if (!naturezaEscolhida) { alert('Selecione a natureza da operação.'); return; }
+    // Captura a geração vigente no momento do clique: se o operador sair
+    // deste pedido antes da resposta chegar, ela é descartada — pertence ao
+    // pedido antigo, não ao que está na tela agora.
+    const minhaGeracao = geracaoNotaRef.current;
+    const pedidoAlvo = pedido;
+    const eid = empresaAtual.id;
+    // Desabilita o botão durante toda a chamada, inclusive o caminho de erro
+    // (o finally cobre as duas saídas) — um duplo clique aqui gastaria
+    // numeração fiscal de verdade e pode pôr duas notas na rua para o mesmo
+    // pedido; o pipeline (lib/nfe/emitir.js) não tem trava própria contra
+    // isso, então esta é a única barreira contra o clique duplo hoje.
+    setEmitindoNota(true);
+    setErroEmissao('');
+    setEmissaoIndeterminada(false);
+    try {
+      const r = await fetch('/api/fiscal/emitir-nfe', {
+        method: 'POST',
+        headers: await cabecalhoAuth(),
+        body: JSON.stringify({ pedidoId: id, naturezaOperacaoId: naturezaEscolhida }),
+      });
+      const json = await r.json();
+      if (geracaoNotaRef.current !== minhaGeracao) return;
+      if (!r.ok) {
+        // "Resultado indeterminado" (a nota foi transmitida mas o veredito da
+        // SEFAZ não ficou confirmado neste sistema) é informação de natureza
+        // diferente de uma rejeição comum: aqui ninguém sabe o que a SEFAZ
+        // decidiu, e tentar de novo sem conferir arrisca autorizar duas notas
+        // para o mesmo pedido. Sinalizado à parte para o JSX tratar diferente
+        // de um erro qualquer — não é "clique de novo", é "confira na SEFAZ".
+        if (erroDeResultadoIndeterminado(r.status, json.error)) setEmissaoIndeterminada(true);
+        setErroEmissao(json.error || 'Falha ao emitir a NF-e.');
+        return;
+      }
+      // Sucesso inclui rejeição da SEFAZ (200 com status: 'rejeitado') — não é
+      // erro HTTP, é um veredito válido registrado no documento. Recarrega do
+      // banco (fonte da verdade) em vez de montar o objeto a partir da
+      // resposta: mesmo padrão de cancelar/reabrir/salvar acima.
+      setEscolhendoNatureza(false);
+      await carregarFiscal(pedidoAlvo, eid);
+    } catch (e) {
+      if (geracaoNotaRef.current !== minhaGeracao) return;
+      setErroEmissao(e.message);
+    } finally {
+      if (geracaoNotaRef.current === minhaGeracao) setEmitindoNota(false);
+    }
+  }
+
   function imprimir() {
     imprimirFicha(setFicha, {
       titulo: 'Pedido de Venda',
@@ -389,6 +561,105 @@ function Conteudo({ setFicha }) {
           <button className="btn" style={{ marginTop: 12 }} onClick={salvar} disabled={salvando}>
             {salvando ? 'Salvando…' : 'Salvar alterações'}
           </button>
+        )}
+
+        {/* Emissão de NF-e. O bloco de status (chave/número/situação) aparece
+            sempre que existe um documento para este pedido, mesmo depois de o
+            pedido avançar para Enviado — esconder a chave de uma nota já
+            emitida só porque o pedido mudou de status seria fazer
+            desaparecer informação fiscal verdadeira, o mesmo tipo de erro que
+            esta task existe para evitar. A AÇÃO de emitir (seletor de
+            natureza + botão) já é mais restrita: só com o pedido Faturado, e
+            nunca quando já existe documento autorizado — emitir de novo
+            duplicaria a nota. */}
+        {(pedido.status === 'Faturado' || notaFiscal) && (
+          <div className="panel" style={{ marginTop: 12 }}>
+            <h4 style={{ marginTop: 0 }}>Nota fiscal (NF-e)</h4>
+
+            {erroFiscalCarregar ? (
+              <div className="banner bad">
+                Não foi possível carregar a situação fiscal deste pedido: {erroFiscalCarregar}{' '}
+                <button className="btn secondary small" onClick={() => carregarFiscal(pedido, empresaAtual.id)}>Tentar novamente</button>
+              </div>
+            ) : (
+              <>
+                {notaFiscal && (
+                  <div style={{ marginBottom: 12, fontSize: 13 }}>
+                    <div>
+                      <b>Situação:</b>{' '}
+                      <span className={`tag ${(SITUACAO_NOTA[notaFiscal.status] || {}).classe || 'neutro'}`}>
+                        {(SITUACAO_NOTA[notaFiscal.status] || {}).rotulo || notaFiscal.status}
+                      </span>
+                    </div>
+                    {notaFiscal.chave && <div style={{ marginTop: 4 }}><b>Chave de acesso:</b> {notaFiscal.chave}</div>}
+                    {notaFiscal.numero != null && <div style={{ marginTop: 4 }}><b>Número:</b> {notaFiscal.numero}</div>}
+                    {notaFiscal.protocolo_autorizacao && (
+                      <div style={{ marginTop: 4 }}><b>Protocolo de autorização:</b> {notaFiscal.protocolo_autorizacao}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Rejeição: o motivo da própria SEFAZ (cStat + xMotivo), verbatim —
+                    é a única coisa acionável que o operador tem, não pode virar uma
+                    mensagem genérica. */}
+                {notaFiscal?.status === 'rejeitado' && notaFiscal.motivo_rejeicao && (
+                  <div className="banner bad">
+                    <b>Rejeitada pela SEFAZ:</b> {notaFiscal.motivo_rejeicao}
+                  </div>
+                )}
+
+                {/* Resultado indeterminado (nota transmitida, veredito não confirmado
+                    aqui) — visual e texto de propósito diferentes de uma rejeição: o
+                    que resolve é conferir a chave na SEFAZ, não clicar de novo. */}
+                {notaFiscal && STATUS_INDETERMINADO_UI.includes(notaFiscal.status) && (
+                  <div className="banner bad">
+                    <b>Situação desconhecida.</b> Esta nota foi transmitida à SEFAZ, mas o resultado não
+                    ficou confirmado neste sistema. Antes de tentar de novo, confira a chave{' '}
+                    {notaFiscal.chave || '(sem chave registrada)'} diretamente na SEFAZ (consulta de
+                    protocolo) — emitir agora arrisca autorizar duas notas para o mesmo pedido.
+                  </div>
+                )}
+
+                {emissaoIndeterminada ? (
+                  <div className="banner bad">
+                    <b>Situação desconhecida — não tente de novo sem conferir.</b> {erroEmissao}
+                  </div>
+                ) : erroEmissao && (
+                  <div className="banner bad">{erroEmissao}</div>
+                )}
+
+                {pedido.status === 'Faturado' && notaFiscal?.status !== 'autorizado' && (
+                  escolhendoNatureza ? (
+                    <div style={{ marginTop: 8 }}>
+                      <label>Natureza da operação</label>
+                      <select value={naturezaEscolhida} onChange={e => setNaturezaEscolhida(e.target.value)} disabled={emitindoNota}>
+                        <option value="">Selecione…</option>
+                        {naturezas.map(n => <option key={n.id} value={n.id}>{n.descricao}</option>)}
+                      </select>
+                      {!naturezas.length && (
+                        <p className="muted" style={{ fontSize: 12 }}>
+                          Nenhuma natureza de operação de saída ativa para esta marca — cadastre em /fiscal/tributacao antes de emitir.
+                        </p>
+                      )}
+                      <div className="row-actions" style={{ marginTop: 8 }}>
+                        <button className="btn" onClick={emitir} disabled={emitindoNota || !naturezaEscolhida}>
+                          {emitindoNota ? 'Emitindo…' : 'Confirmar emissão'}
+                        </button>
+                        <button className="btn secondary" disabled={emitindoNota}
+                          onClick={() => { setEscolhendoNatureza(false); setErroEmissao(''); setEmissaoIndeterminada(false); }}>
+                          Voltar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button className="btn" onClick={() => setEscolhendoNatureza(true)} disabled={emitindoNota}>
+                      {rotuloBotaoEmitir(notaFiscal)}
+                    </button>
+                  )
+                )}
+              </>
+            )}
+          </div>
         )}
 
         {pedido.status === 'Cancelado' && (
