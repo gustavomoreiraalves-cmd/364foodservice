@@ -10,6 +10,7 @@ import { TIPOS_MARCACAO } from '../../lib/ponto';
 const LS_TOKEN = 'quiosqueToken';
 const LS_INFO = 'quiosqueInfo';
 const VERSAO_APP = '1.0.0';
+const MARCAS = 'Steakhouse · Afya · Foodservices · Buffet & Eventos';
 
 export default function QuiosquePage() {
   const [token, setToken] = useState(undefined); // undefined = carregando
@@ -67,7 +68,8 @@ function TelaAtivacao({ aoAtivar }) {
 
   return (
     <div className="quiosque">
-      <div className="qk-brand">364</div>
+      <img className="qk-logo" src="/logo-364.png" alt="Grupo 364" />
+      <p className="qk-marcas">{MARCAS}</p>
       <div className="qk-unidade">Ativação do dispositivo</div>
       <p className="muted" style={{ maxWidth: 380 }}>
         Peça a um administrador para gerar o código de ativação em <b>Ponto → Dispositivos</b> e digite-o abaixo.
@@ -375,7 +377,8 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
 
   return (
     <div className="quiosque">
-      <div className="qk-brand">364</div>
+      <img className="qk-logo" src="/logo-364.png" alt="Grupo 364" />
+      <p className="qk-marcas">{MARCAS}</p>
       <div className="qk-unidade">{info?.unidade?.nome || 'Unidade'} · {info?.empresa?.nome || ''}</div>
 
       {fase === 'idle' && (

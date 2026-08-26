@@ -524,6 +524,8 @@ tbody tr:hover td{background:var(--sunken);}
   background:var(--ground); text-align:center; padding:24px; gap:18px;
 }
 .quiosque .qk-brand{font-size:28px; font-weight:600; letter-spacing:.04em; color:var(--ink);}
+.quiosque .qk-logo{display:block; max-height:120px; max-width:80%; width:auto; object-fit:contain; margin:0 auto;}
+.quiosque .qk-marcas{color:var(--ink-muted); font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:0;}
 .quiosque .qk-unidade{font-size:13px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink-muted);}
 .quiosque .qk-relogio{font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:64px; color:var(--ink); line-height:1;}
 .quiosque .qk-data{font-size:14px; color:var(--ink-muted);}
