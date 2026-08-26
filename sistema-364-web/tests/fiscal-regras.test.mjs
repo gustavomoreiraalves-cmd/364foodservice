@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   validarRegraTributaria, cfopSugerido, descreverDestinatario, resumoRegra,
   CSOSN_QUE_PERMITE_CREDITO, ST_RESPONSAVEL,
+  CST_PIS_COFINS, cstPisCofinsPara, regimeDoEmpregador,
 } from '../lib/fiscalRegras.js';
 
 const BASE = {
@@ -84,4 +85,81 @@ test('resumo mostra o essencial da regra numa linha', () => {
   assert.match(texto, /5401/);
   assert.match(texto, /202/);
   assert.match(texto, /35/);
+});
+
+// ---------- CST de PIS e COFINS ----------
+
+const CST_SAIDA = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '49'];
+const CST_ENTRADA = ['50', '51', '52', '53', '54', '55', '56',
+                     '60', '61', '62', '63', '64', '65', '66', '67',
+                     '70', '71', '72', '73', '74', '75', '98', '99'];
+
+const codigosDe = grupos => grupos.flatMap(g => g.itens.map(i => i.valor));
+
+test('a tabela de CST de PIS/COFINS traz saída e entrada do ADE Cofis 25/2010', () => {
+  assert.deepEqual(CST_PIS_COFINS.filter(c => c.sentido === 'S').map(c => c.codigo), CST_SAIDA);
+  assert.deepEqual(CST_PIS_COFINS.filter(c => c.sentido === 'E').map(c => c.codigo), CST_ENTRADA);
+  assert.ok(CST_PIS_COFINS.every(c => c.descricao.trim().length > 0), 'todo código tem descrição');
+});
+
+test('o select de CST oferece só os códigos do sentido da natureza', () => {
+  const saida = codigosDe(cstPisCofinsPara('saida', 'simples'));
+  assert.deepEqual(saida.slice().sort(), CST_SAIDA.slice().sort());
+
+  const entrada = codigosDe(cstPisCofinsPara('entrada', 'simples'));
+  assert.deepEqual(entrada.slice().sort(), CST_ENTRADA.slice().sort());
+});
+
+test('o regime destaca os usuais sem esconder nenhum código', () => {
+  const grupos = cstPisCofinsPara('saida', 'simples');
+  assert.equal(grupos.length, 2, 'usuais e outros');
+  assert.match(grupos[0].grupo, /simples/i);
+  assert.equal(grupos[0].itens[0].valor, '49', 'o mais usado do Simples na saída vem primeiro');
+
+  const todos = codigosDe(grupos);
+  assert.equal(todos.length, CST_SAIDA.length);
+  assert.equal(new Set(todos).size, CST_SAIDA.length, 'nenhum código repetido entre os grupos');
+});
+
+test('sem regime conhecido o select mostra um grupo só, sem destaque', () => {
+  const grupos = cstPisCofinsPara('saida', null);
+  assert.equal(grupos.length, 1);
+  assert.deepEqual(codigosDe(grupos).slice().sort(), CST_SAIDA.slice().sort());
+});
+
+test('o rótulo do CST mostra código e descrição', () => {
+  const item = codigosDe(cstPisCofinsPara('saida', null)).length &&
+    cstPisCofinsPara('saida', null)[0].itens.find(i => i.valor === '49');
+  assert.match(item.label, /^49 — /);
+});
+
+test('regime sai do CRT e cai no regime_tributario quando o CRT está vazio', () => {
+  assert.equal(regimeDoEmpregador({ crt: 1 }), 'simples');
+  assert.equal(regimeDoEmpregador({ crt: 2 }), 'simples', 'excesso de sublimite ainda é Simples');
+  assert.equal(regimeDoEmpregador({ crt: 3, regime_tributario: 'real' }), 'real');
+  assert.equal(regimeDoEmpregador({ crt: null, regime_tributario: 'simples' }), 'simples');
+  assert.equal(regimeDoEmpregador({ crt: 3 }), null,
+    'CRT 3 sozinho não distingue presumido de real — sem destaque é melhor que destaque errado');
+  assert.equal(regimeDoEmpregador(null), null);
+});
+
+test('CST de PIS/COFINS fora da tabela é recusado', () => {
+  assert.ok(validarRegraTributaria({ ...BASE, cst_pis: '88' }).some(e => /CST do PIS/i.test(e)));
+  assert.ok(validarRegraTributaria({ ...BASE, cst_cofins: '88' }).some(e => /CST da COFINS/i.test(e)));
+  assert.deepEqual(validarRegraTributaria({ ...BASE, cst_pis: '49', cst_cofins: '49' }), []);
+});
+
+test('CST de entrada não serve para natureza de saída', () => {
+  const saida = validarRegraTributaria({ ...BASE, tipo_operacao: 'saida', cst_pis: '70', cst_cofins: '70' });
+  assert.ok(saida.some(e => /CST do PIS 70 é de entrada/i.test(e)));
+  assert.ok(saida.some(e => /CST da COFINS 70 é de entrada/i.test(e)));
+
+  const entrada = validarRegraTributaria(
+    { ...BASE, tipo_operacao: 'entrada', cfop: '1202', cst_pis: '49', cst_cofins: '70' });
+  assert.ok(entrada.some(e => /CST do PIS 49 é de sa[íi]da/i.test(e)));
+  assert.ok(!entrada.some(e => /COFINS/i.test(e)), '70 está certo numa entrada');
+});
+
+test('CST em branco continua aceito — o campo ainda não é obrigatório', () => {
+  assert.deepEqual(validarRegraTributaria({ ...BASE, cst_pis: '', cst_cofins: null }), []);
 });

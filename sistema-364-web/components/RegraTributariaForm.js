@@ -1,9 +1,10 @@
 'use client';
 import {
   ST_RESPONSAVEL, ST_RESPONSAVEL_OPCOES, CSOSN_OPCOES, MOD_BC_OPCOES, MOD_BC_ST_OPCOES,
-  cfopSugerido, validarRegraTributaria,
+  cfopSugerido, validarRegraTributaria, cstPisCofinsPara, regimeDoEmpregador,
 } from '../lib/fiscalRegras.js';
 import { soDigitos } from '../lib/fiscal.js';
+import { usePessoaJuridica } from '../lib/empresa';
 
 // Formulário de uma regra tributária. A ordem das perguntas é a ordem em que
 // alguém decide: para qual operação, para quem, e só então como tributa.
@@ -12,6 +13,9 @@ export default function RegraTributariaForm({ form, setForm, naturezas, cfops, p
   const set = campos => setForm({ ...form, ...campos });
   const natureza = naturezas.find(n => n.id === form.natureza_operacao_id);
   const erros = validarRegraTributaria({ ...form, tipo_operacao: natureza?.tipo_operacao });
+  const { pessoaJuridica } = usePessoaJuridica();
+  const regime = regimeDoEmpregador(pessoaJuridica);
+  const gruposCst = cstPisCofinsPara(natureza?.tipo_operacao, regime);
   const retemSt = form.st_responsavel === ST_RESPONSAVEL.SUBSTITUTO;
   const jaRetido = form.st_responsavel === ST_RESPONSAVEL.SUBSTITUIDO;
 
@@ -172,13 +176,38 @@ export default function RegraTributariaForm({ form, setForm, naturezas, cfops, p
       <div className="form-grid">
         <div>
           <label>CST do PIS</label>
-          <input value={form.cst_pis || ''} maxLength={2}
-                 onChange={e => set({ cst_pis: soDigitos(e.target.value).slice(0, 2) })} />
+          {/* Escolher o CST do PIS preenche o da COFINS quando ele está vazio:
+              as duas contribuições andam com o mesmo código no caso normal, e o
+              campo continua editável para o caso que não é normal. */}
+          <select value={form.cst_pis || ''}
+                  onChange={e => set({
+                    cst_pis: e.target.value,
+                    cst_cofins: form.cst_cofins || e.target.value,
+                  })}>
+            <option value="">Não informar</option>
+            {gruposCst.map(g => (
+              <optgroup key={g.grupo} label={g.grupo}>
+                {g.itens.map(i => <option key={i.valor} value={i.valor}>{i.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
         </div>
         <div>
           <label>CST da COFINS</label>
-          <input value={form.cst_cofins || ''} maxLength={2}
-                 onChange={e => set({ cst_cofins: soDigitos(e.target.value).slice(0, 2) })} />
+          <select value={form.cst_cofins || ''}
+                  onChange={e => set({ cst_cofins: e.target.value })}>
+            <option value="">Não informar</option>
+            {gruposCst.map(g => (
+              <optgroup key={g.grupo} label={g.grupo}>
+                {g.itens.map(i => <option key={i.valor} value={i.valor}>{i.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            {natureza
+              ? `Lista da tabela do ADE Cofis 25/2010, filtrada pelo sentido desta natureza (${natureza.tipo_operacao}).`
+              : 'Escolha a natureza da operação acima: é ela que define se cabem CST de saída ou de entrada.'}
+          </p>
         </div>
         <div>
           <label>Vigência (início)</label>
