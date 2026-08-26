@@ -7,12 +7,13 @@ import LogoEmpresa from '../../components/LogoEmpresa';
 import { useEmpresaAtual, limparCachePessoaJuridica } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
 import { formatarCnpj, somenteDigitos, cnpjValido } from '../../lib/cnpj';
+import { FUSOS_BRASIL, FUSO_PADRAO } from '../../lib/fusos';
 
 const FORM_VAZIO = {
   razao_social: '', nome_fantasia: '', cnpj: '', inscricao_estadual: '', inscricao_municipal: '',
   regime_tributario: '', cnae_principal: '',
   endereco: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', cep: '', codigo_municipio_ibge: '',
-  fuso: 'America/Sao_Paulo',
+  fuso: FUSO_PADRAO,
   telefone: '', email: '', email_fiscal: '',
   responsavel_legal: '', responsavel_legal_cpf: '', responsavel_legal_email: '', responsavel_legal_telefone: '',
   contador_nome: '', contador_crc: '', contador_email: '', contador_telefone: '',
@@ -78,7 +79,7 @@ function Conteudo() {
     saida.codigo_municipio_ibge = somenteDigitos(f.codigo_municipio_ibge) || null;
     saida.responsavel_legal_cpf = somenteDigitos(f.responsavel_legal_cpf) || null;
     saida.uf = (f.uf || '').toUpperCase() || null;
-    saida.fuso = f.fuso || 'America/Sao_Paulo';
+    saida.fuso = f.fuso || FUSO_PADRAO;
     return saida;
   }
 
@@ -146,7 +147,11 @@ function Conteudo() {
             {campo('uf', 'UF', { maxLength: 2 })}
             {campo('cep', 'CEP')}
             {campo('codigo_municipio_ibge', 'Código IBGE do município', { placeholder: '3550308' })}
-            {campo('fuso', 'Fuso horário')}
+            <div><label>Fuso horário</label>
+              <select value={form.fuso || FUSO_PADRAO} onChange={e => setForm({ ...form, fuso: e.target.value })}>
+                {FUSOS_BRASIL.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+              </select>
+            </div>
           </fieldset>
 
           <fieldset className="form-grid" style={{ marginTop: 12 }}>
