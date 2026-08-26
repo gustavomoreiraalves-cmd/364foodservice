@@ -31,6 +31,12 @@ test('regime desconhecido e sem crt explícito falha, não chuta', () => {
   assert.throws(() => crtDoRegime('inventado', null), /regime/i);
 });
 
+test('CRT fora da faixa válida (1, 2, 3, 4) falha', () => {
+  assert.throws(() => crtDoRegime('simples', '5'), /CRT inválido/i);
+  assert.throws(() => crtDoRegime('simples', 5), /CRT inválido/i);
+  assert.throws(() => crtDoRegime('simples', 'X'), /CRT inválido/i);
+});
+
 test('monta o bloco do emitente com os campos que o leiaute exige', () => {
   const e = dadosEmitente(EMPREGADOR);
   assert.equal(e.cnpj, '37541736000187');
@@ -50,10 +56,23 @@ test('CNPJ e CEP saem só com dígitos, como o XML exige', () => {
 });
 
 test('campo obrigatório ausente falha nomeando o campo, antes de gastar número', () => {
-  for (const campo of ['inscricao_estadual', 'codigo_municipio_ibge', 'uf', 'endereco', 'cep']) {
+  const fieldPatterns = {
+    cnpj: /cnpj/i,
+    razao_social: /razão social/i,
+    inscricao_estadual: /inscricao.estadual/i,
+    endereco: /endereco/i,
+    numero: /número/i,
+    bairro: /bairro/i,
+    codigo_municipio_ibge: /codigo.municipio.ibge/i,
+    cidade: /cidade/i,
+    uf: /uf/i,
+    cep: /cep/i,
+  };
+
+  for (const campo of Object.keys(fieldPatterns)) {
     assert.throws(
       () => dadosEmitente({ ...EMPREGADOR, [campo]: null }),
-      new RegExp(campo.replace('_', '.'), 'i'),
+      fieldPatterns[campo],
       `faltando ${campo} deveria falhar citando o campo`,
     );
   }
