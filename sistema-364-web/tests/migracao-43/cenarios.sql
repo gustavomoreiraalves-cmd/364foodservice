@@ -216,4 +216,39 @@ begin
   raise notice 'OK 6: RLS ligada nas três tabelas, só com policy de SELECT (escrita é do service role)';
 end $$;
 
+-- Cenário 7: nfe_saida_documentos_um_autorizado_por_pedido rejeita uma
+-- segunda linha 'autorizado' para o mesmo pedido; cancelar a primeira libera
+-- o pedido para uma nova autorização (reemissão legítima).
+insert into public.nfe_saida_documentos
+  (id, empresa_id, empregador_id, pedido_id, natureza_operacao_id, ambiente, serie, numero, chave, status)
+  values ('ffffffff-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+          '99999999-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+          'dddddddd-0000-0000-0000-000000000001', 'homologacao', 3, 200, repeat('5', 44), 'autorizado');
+
+do $$
+begin
+  begin
+    insert into public.nfe_saida_documentos
+      (empresa_id, empregador_id, pedido_id, natureza_operacao_id, ambiente, serie, numero, chave, status)
+      values ('11111111-1111-1111-1111-111111111111', '99999999-0000-0000-0000-000000000001',
+              'aaaaaaaa-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
+              'homologacao', 3, 201, repeat('6', 44), 'autorizado');
+    raise exception 'FALHA 7a: segundo documento autorizado para o mesmo pedido foi aceito';
+  exception when unique_violation then null;
+  end;
+
+  -- cancelar a primeira nota libera o pedido: a condição parcial
+  -- (where status = 'autorizado') deixa de valer para a linha cancelada.
+  update public.nfe_saida_documentos set status = 'cancelado'
+    where id = 'ffffffff-0000-0000-0000-000000000001';
+
+  insert into public.nfe_saida_documentos
+    (empresa_id, empregador_id, pedido_id, natureza_operacao_id, ambiente, serie, numero, chave, status)
+    values ('11111111-1111-1111-1111-111111111111', '99999999-0000-0000-0000-000000000001',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
+            'homologacao', 3, 202, repeat('7', 44), 'autorizado');
+
+  raise notice 'OK 7: só uma NF-e autorizada por pedido; cancelar a anterior libera reemissão autorizada';
+end $$;
+
 select 'CENÁRIOS DA 43 OK' as resultado;

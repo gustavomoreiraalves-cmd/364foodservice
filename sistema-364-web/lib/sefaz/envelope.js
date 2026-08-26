@@ -40,6 +40,17 @@ export function extrairCorpoResposta(xmlResposta) {
 // no documento inteiro é sempre o do lote — quieto e errado justamente no
 // caso que decide se a nota foi autorizada. `consStatServ` não tem esse
 // problema (só um nível), por isso o default sem escopo continua igual.
+// Devolve o bloco de XML inteiro de `tag` (a tag e o que está dentro dela),
+// não só o texto de dentro como lerCampos — é o que I8 precisa para montar
+// nfeProc (NFe assinada + protNFe): o protNFe de retorno da SEFAZ vem com sua
+// própria assinatura e atributos (versao, xmlns), que teriam que ser
+// reconstruídos à mão se só o texto interno fosse guardado. null quando a
+// tag não aparece na resposta.
+export function extrairBloco(xml, tag) {
+  const m = String(xml).match(new RegExp(`<(?:\\w+:)?${tag}[^>]*>[\\s\\S]*?<\\/(?:\\w+:)?${tag}>`, 'i'));
+  return m ? m[0] : null;
+}
+
 export function lerCampos(xml, campos, { dentroDe } = {}) {
   let texto = String(xml);
   if (dentroDe) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { envelopeSoap, extrairCorpoResposta, lerCampos } from '../lib/sefaz/envelope.js';
+import { envelopeSoap, extrairCorpoResposta, lerCampos, extrairBloco } from '../lib/sefaz/envelope.js';
 
 const NS_STATUS_SERVICO = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4';
 
@@ -82,4 +82,26 @@ test('lerCampos com dentroDe ausente no documento devolve tudo null, não cai pa
     lerCampos(semProtNFe, ['cStat', 'xMotivo'], { dentroDe: 'infProt' }),
     { cStat: null, xMotivo: null },
   );
+});
+
+// extrairBloco devolve o elemento INTEIRO (tag, atributos e conteúdo), não só
+// o texto de dentro — é o que I8 precisa para reconstruir nfeProc (NFe +
+// protNFe) com os atributos e a assinatura que a SEFAZ devolveu, em vez de
+// perder digVal/dhRecbto/verAplic guardando só nProt.
+test('extrairBloco devolve o elemento inteiro, com atributos e conteúdo', () => {
+  const bloco = extrairBloco(RET_ENVI_NFE, 'protNFe');
+  assert.match(bloco, /^<protNFe>/);
+  assert.match(bloco, /<\/protNFe>$/);
+  assert.match(bloco, /<nProt>111250000000001<\/nProt>/);
+});
+
+test('extrairBloco preserva atributos e prefixo de namespace da tag', () => {
+  const xml = '<retEnviNFe><protNFe versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">'
+    + '<infProt><cStat>100</cStat></infProt></protNFe></retEnviNFe>';
+  const bloco = extrairBloco(xml, 'protNFe');
+  assert.match(bloco, /<protNFe versao="4\.00" xmlns="http:\/\/www\.portalfiscal\.inf\.br\/nfe">/);
+});
+
+test('extrairBloco devolve null quando a tag não aparece', () => {
+  assert.equal(extrairBloco('<retEnviNFe><cStat>104</cStat></retEnviNFe>', 'protNFe'), null);
 });

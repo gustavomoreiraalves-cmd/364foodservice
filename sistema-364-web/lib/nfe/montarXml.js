@@ -17,9 +17,67 @@ const FUSO_HORARIO = 'America/Porto_Velho';
 const MODELO = '55';
 const VERSAO_PROCESSO = '364-nfe-1.0.0';
 
-// CSOSN em que o Simples não destaca ICMS na nota (ICMSSN102): a nota informa
-// só a situação, sem base/alíquota/valor.
-const CSOSN_ICMSSN102 = ['101', '102', '103', '300', '400'];
+// tPag descreve COMO o destinatário pagou, não SE pagou. tPag 90 ("sem
+// pagamento") é para finNFe 3/4 (ajuste, devolução) — numa venda normal
+// (finNFe 1, o único que este arquivo emite) declarar tPag 90 com vPag igual
+// ao total da nota é uma contradição que o schema aceita mas que não faz
+// sentido de negócio (defeito do próprio plano desta fase, não drift de
+// implementação). Esta fase ainda não conhece a condição de pagamento real
+// do pedido — isso é do módulo de contas a receber, que ainda não existe —
+// então usa um valor provisório neutro: '01' (dinheiro), a forma que menos
+// inventa informação (não afirma cartão, boleto ou prazo que não aconteceu).
+// TROCAR aqui quando contas a receber existir: a forma de pagamento deve vir
+// da condição de pagamento do pedido, não desta constante fixa.
+const TPAG_PADRAO_SAIDA = '01';
+
+// CSOSN em que o Simples não destaca ICMS na nota (grupo ICMSSN102): a nota
+// informa só a situação, sem base/alíquota/valor. CSOSN 101 NÃO entra aqui —
+// tem grupo próprio (ICMSSN101), que o leiaute 4.00 exige com pCredSN e
+// vCredICMSSN. Botar 101 nesta lista (como este arquivo fazia antes da
+// revisão) gera <ICMSSN102><CSOSN>101</CSOSN></ICMSSN102>, que o schema da
+// SEFAZ rejeita (Rejeição 215) — com o número fiscal já queimado.
+const CSOSN_ICMSSN102 = ['102', '103', '300', '400'];
+
+// Todo CSOSN que este arquivo sabe montar. Uma nota com CSOSN fora desta
+// lista (ou sem CSOSN nenhum) é recusada explicitamente — nunca cai no
+// catch-all antigo que inventava CSOSN 900 (ver validarCsosnItem).
+const CSOSN_SUPORTADOS = ['102', '103', '300', '400', '500', '900'];
+
+// Mensagem única para a recusa de CSOSN 101 — usada tanto aqui (serializador)
+// quanto no pré-check de lib/nfe/emitir.js (mesmo texto, uma fonte só).
+const MENSAGEM_CSOSN_101 =
+  'CSOSN 101 (crédito presumido do Simples Nacional) precisa do grupo ICMSSN101, que o leiaute 4.00 '
+  + 'exige com pCredSN (percentual de crédito) e vCredICMSSN (valor do crédito) — nenhum dos dois é '
+  + 'opcional nesse grupo. O cadastro de regra tributária hoje só guarda permite_credito_simples '
+  + '(booleano) e percentual_credito_presumido, que não são o percentual de crédito do Simples (esse '
+  + 'muda todo mês com o RBT12 e viria de parametros_simples_nacional, que esta fase ainda não lê). '
+  + 'Sem um valor de verdade para pCredSN, a emissão não pode chutar um número nem omitir o grupo e '
+  + 'destacar ICMS por engano — por isso este item está fora do que esta fase do motor de emissão '
+  + 'sabe emitir. Isto é uma lacuna de cadastro/próxima fase, não uma falha do sistema.';
+
+// Valida o CSOSN de um item ANTES de montar qualquer XML — mesma lógica que
+// decide o grupo ICMS logo abaixo, fatorada para poder rodar de graça no
+// pipeline (lib/nfe/emitir.js), antes de reservar_numero_fiscal. Puro: só lê
+// o item, nunca escreve nada. Uma função só, chamada dos dois lugares, para
+// as duas checagens nunca divergirem uma da outra.
+export function validarCsosnItem(item) {
+  const csosn = String(item.csosn || '');
+  if (csosn === '101') throw new Error(MENSAGEM_CSOSN_101);
+  if (csosn === '500' || CSOSN_ICMSSN102.includes(csosn) || csosn === '900') return;
+  if (!csosn && item.cstIcms) {
+    throw new Error(
+      `O item "${item.xProd || item.cProd}" tem CST de ICMS ("${item.cstIcms}") em vez de CSOSN — isso `
+      + 'é regime normal (CRT 3), não Simples Nacional, e esta fase do motor de emissão só cobre CRT 1 '
+      + 'ou 2. Regime normal está previsto para uma fase seguinte.',
+    );
+  }
+  throw new Error(
+    `CSOSN "${csosn || '(vazio)'}" do item "${item.xProd || item.cProd}" não é suportado nesta fase do `
+    + `motor de emissão. Suportados aqui: ${CSOSN_SUPORTADOS.join(', ')} (101 também é reconhecido, mas `
+    + 'recusado explicitamente — ver mensagem própria). Revise a regra tributária deste item em '
+    + '/fiscal/tributacao.',
+  );
+}
 
 function escapar(valor) {
   return String(valor)
@@ -70,6 +128,11 @@ function isoComOffset(data, fusoHorario) {
 }
 
 function montarICMS(item) {
+  // Lança para os mesmos casos que o pré-check de emitir.js já barrou de
+  // graça antes de reservar número — mantido aqui também porque montarXml.js
+  // é chamado de outros lugares além do pipeline (ex.: um teste, ou um script
+  // futuro), e o serializador não pode confiar que quem o chama já validou.
+  validarCsosnItem(item);
   const csosn = String(item.csosn || '');
   if (csosn === '500') {
     return `<ICMS><ICMSSN500>${tag('orig', item.origem)}${tag('CSOSN', csosn)}</ICMSSN500></ICMS>`;
@@ -77,10 +140,11 @@ function montarICMS(item) {
   if (CSOSN_ICMSSN102.includes(csosn)) {
     return `<ICMS><ICMSSN102>${tag('orig', item.origem)}${tag('CSOSN', csosn)}</ICMSSN102></ICMS>`;
   }
-  // Destaca (900 ou qualquer outro CSOSN do Simples com valor).
+  // Só resta '900' depois de validarCsosnItem — nunca inventa CSOSN quando
+  // não reconhece o valor (isso já lançou acima).
   return '<ICMS><ICMSSN900>'
     + tag('orig', item.origem)
-    + tag('CSOSN', csosn || '900')
+    + tag('CSOSN', csosn)
     + tag('modBC', '3')
     + tag('vBC', numero(item.vBC, 2))
     + tag('pICMS', numero(item.pICMS, 4))
@@ -88,20 +152,38 @@ function montarICMS(item) {
     + '</ICMSSN900></ICMS>';
 }
 
+// CST 01/02: tributado, com base/alíquota/valor (grupo XAliq).
+// CST 04-09: não incidência/isenção/suspensão etc. — só a situação, sem
+// valor (grupo XNT). CST 49 e 50-99 ("outras operações"): no Simples, PIS/
+// COFINS são recolhidos pelo DAS, não calculados nota a nota — por isso vão
+// para o grupo XOutr com base/alíquota/valor zerados (padrão do Simples),
+// nunca para XNT: XNT só enumera 04-09 no leiaute 4.00, e botar 49 ali
+// (como este arquivo fazia antes da revisão) é <PISNT><CST>49</CST></PISNT>,
+// que o schema rejeita — e 49 é exatamente o que sai por padrão quando a
+// regra tributária não declara cst_pis/cst_cofins (ver resolverNota.js).
+const CST_PIS_COFINS_ALIQ = ['01', '02'];
+const CST_PIS_COFINS_NT = ['04', '05', '06', '07', '08', '09'];
+
 function montarPIS(item) {
   const cst = String(item.cstPis || '49');
-  if (cst === '01' || cst === '02') {
+  if (CST_PIS_COFINS_ALIQ.includes(cst)) {
     return `<PIS><PISAliq>${tag('CST', cst)}${tag('vBC', numero(item.vProd, 2))}${tag('pPIS', numero(item.pPIS, 4))}${tag('vPIS', numero(item.vPIS, 2))}</PISAliq></PIS>`;
   }
-  return `<PIS><PISNT>${tag('CST', cst)}</PISNT></PIS>`;
+  if (CST_PIS_COFINS_NT.includes(cst)) {
+    return `<PIS><PISNT>${tag('CST', cst)}</PISNT></PIS>`;
+  }
+  return `<PIS><PISOutr>${tag('CST', cst)}${tag('vBC', numero(0, 2))}${tag('pPIS', numero(0, 4))}${tag('vPIS', numero(0, 2))}</PISOutr></PIS>`;
 }
 
 function montarCOFINS(item) {
   const cst = String(item.cstCofins || '49');
-  if (cst === '01' || cst === '02') {
+  if (CST_PIS_COFINS_ALIQ.includes(cst)) {
     return `<COFINS><COFINSAliq>${tag('CST', cst)}${tag('vBC', numero(item.vProd, 2))}${tag('pCOFINS', numero(item.pCOFINS, 4))}${tag('vCOFINS', numero(item.vCOFINS, 2))}</COFINSAliq></COFINS>`;
   }
-  return `<COFINS><COFINSNT>${tag('CST', cst)}</COFINSNT></COFINS>`;
+  if (CST_PIS_COFINS_NT.includes(cst)) {
+    return `<COFINS><COFINSNT>${tag('CST', cst)}</COFINSNT></COFINS>`;
+  }
+  return `<COFINS><COFINSOutr>${tag('CST', cst)}${tag('vBC', numero(0, 2))}${tag('pCOFINS', numero(0, 4))}${tag('vCOFINS', numero(0, 2))}</COFINSOutr></COFINS>`;
 }
 
 function montarDet(item) {
@@ -236,11 +318,11 @@ function montarIde({ ide, cUF, cNF, dhEmi, serie, numero: nNF, tpAmb }) {
     + '</ide>';
 }
 
+// resolverNota já junta emit.informacoesComplementaresPadrao + observações do
+// pedido e sanitiza o resultado (sem quebra de linha, dentro do limite de
+// 5000 caracteres) em nota.ide.infCpl — aqui só falta empacotar na tag.
 function montarInfAdic(nota) {
-  const partes = [];
-  if (nota.emit?.informacoesComplementaresPadrao) partes.push(nota.emit.informacoesComplementaresPadrao);
-  if (nota.ide?.observacoes) partes.push(nota.ide.observacoes);
-  const texto = partes.join(' | ').trim();
+  const texto = nota.ide?.infCpl;
   if (!texto) return '';
   return `<infAdic>${tag('infCpl', texto)}</infAdic>`;
 }
@@ -289,7 +371,7 @@ export function montarXmlNFe(nota, { serie, numero: nNF, ambiente, dataEmissao, 
     + detXml
     + montarTotal(nota.total)
     + '<transp>' + tag('modFrete', '9') + '</transp>'
-    + '<pag>' + '<detPag>' + tag('indPag', '0') + tag('tPag', '90') + tag('vPag', numero(nota.total.vNF, 2)) + '</detPag>' + '</pag>'
+    + '<pag>' + '<detPag>' + tag('indPag', '0') + tag('tPag', TPAG_PADRAO_SAIDA) + tag('vPag', numero(nota.total.vNF, 2)) + '</detPag>' + '</pag>'
     + infAdicXml
     + '</infNFe>';
 

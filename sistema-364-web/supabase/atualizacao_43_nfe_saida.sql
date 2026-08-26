@@ -29,11 +29,16 @@ create table if not exists public.nfe_saida_documentos (
   codigo_numerico char(8),
   status text not null default 'rascunho'
     check (status in ('rascunho','numero_reservado','assinado','enviado',
-                      'autorizado','rejeitado','erro_comunicacao','contingencia','cancelado')),
+                      'autorizado','denegado','rejeitado','erro_comunicacao','contingencia','cancelado')),
   motivo_rejeicao text,
   protocolo_autorizacao text,
   recibo_lote text,
   xml_path text,
+  -- nfeProc (NFe assinada + protNFe da SEFAZ) — o que DANFE e o arquivo legal
+  -- exigem. Só protocolo_autorizacao (nProt) não é suficiente: digVal,
+  -- dhRecbto e verAplic da autorização não sobrevivem sem o protNFe inteiro
+  -- (achado da revisão, Importante I8).
+  nfeproc_path text,
   danfe_path text,
   valor_total numeric(12,2) not null default 0,
   emitida_em timestamptz,
@@ -51,6 +56,16 @@ create unique index if not exists nfe_saida_documentos_numero_unico
 create unique index if not exists nfe_saida_documentos_chave_unica
   on public.nfe_saida_documentos(chave) where chave is not null;
 create index if not exists nfe_saida_documentos_pedido_idx on public.nfe_saida_documentos(pedido_id);
+
+-- Terceira barreira, agora contra duas notas AUTORIZADAS para o mesmo
+-- pedido: as duas de cima protegem número e chave, mas nada até aqui impedia
+-- duas linhas 'autorizado' co-existindo para o mesmo pedido_id (achado da
+-- revisão, Importante I10) — o guard em lib/nfe/emitir.js (aplicação) já
+-- recusa isso, mas só a aplicação, não o banco. Parcial e forward-compatible:
+-- cancelar uma nota libera o pedido para uma reemissão legítima (a condição
+-- `where status = 'autorizado'` some da linha cancelada).
+create unique index if not exists nfe_saida_documentos_um_autorizado_por_pedido
+  on public.nfe_saida_documentos(pedido_id) where status = 'autorizado';
 
 create table if not exists public.nfe_saida_itens (
   id uuid primary key default gen_random_uuid(),

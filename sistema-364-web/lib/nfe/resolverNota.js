@@ -26,6 +26,46 @@ function exigir(valor, mensagem) {
   return v;
 }
 
+// Campos de texto livre do leiaute (tipo TString) proíbem espaço em branco no
+// início/fim e caractere de controle (quebra de linha inclusa) — e cada um
+// tem um tamanho máximo. Descumprir isso é a mesma Rejeição 215 opaca de
+// schema, só que descoberta DEPOIS de reservar_numero_fiscal ter queimado o
+// número. Por isso a normalização roda aqui, no resolver, antes da reserva —
+// nunca no serializador. Verificado: xProd chegou a sair com 141 caracteres e
+// espaço no fim (limite 120), e infCpl com quebra de linha crua vinda direto
+// de uma textarea (controle proibido).
+function normalizarTexto(valor, max, descricaoCampo) {
+  if (valor === null || valor === undefined) return valor;
+  const semControle = String(valor).replace(/[\x00-\x1F\x7F]/g, ' ');
+  const normalizado = semControle.replace(/\s+/g, ' ').trim();
+  if (normalizado.length > max) {
+    throw new Error(
+      `${descricaoCampo} excede o limite de ${max} caracteres do leiaute (tem ${normalizado.length}): `
+      + `"${normalizado.slice(0, 40)}…".`,
+    );
+  }
+  return normalizado;
+}
+
+// Sanitiza xNome + endereço do emitente sem alterar o objeto que
+// dadosEmitente() devolveu (outros lugares do pipeline ainda seguram essa
+// referência). Emitente muda pouco (é cadastro, não input por pedido), mas
+// nada garante que um logradouro longo ou com espaço sobrando nunca chegue
+// lá — a mesma trava vale para os dois lados da nota.
+function sanitizarEmit(emitente) {
+  return {
+    ...emitente,
+    xNome: normalizarTexto(emitente.xNome, 60, 'xNome do emitente'),
+    enderEmit: {
+      ...emitente.enderEmit,
+      xLgr: normalizarTexto(emitente.enderEmit.xLgr, 60, 'logradouro do emitente (xLgr)'),
+      xCpl: normalizarTexto(emitente.enderEmit.xCpl, 60, 'complemento do emitente (xCpl)'),
+      xBairro: normalizarTexto(emitente.enderEmit.xBairro, 60, 'bairro do emitente (xBairro)'),
+      xMun: normalizarTexto(emitente.enderEmit.xMun, 60, 'município do emitente (xMun)'),
+    },
+  };
+}
+
 function resolverItem({ pedidoItem, produto, regra }, indice) {
   const nome = produto?.nome || produto?.codigo || `item ${indice + 1}`;
 
@@ -67,7 +107,7 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     pedidoItemId: pedidoItem.id,
     produtoId: produto.id,
     cProd: String(produto.codigo || produto.id),
-    xProd: nome,
+    xProd: normalizarTexto(nome, 120, `xProd do produto "${nome}"`),
     NCM: digitos(produto.ncm),
     CEST: produto.cest ? digitos(produto.cest) : undefined,
     cEAN: produto.gtin || 'SEM GTIN',
@@ -126,17 +166,29 @@ function resolverDestinatario(cliente, ambiente) {
     documento: doc,
     // Em homologação a razão social é fixada pela SEFAZ; usar o nome real
     // ali é rejeição.
-    xNome: ambiente === 'homologacao' ? RAZAO_SOCIAL_HOMOLOGACAO : exigir(cliente.nome, 'O cliente está sem nome.'),
+    xNome: normalizarTexto(
+      ambiente === 'homologacao' ? RAZAO_SOCIAL_HOMOLOGACAO : exigir(cliente.nome, 'O cliente está sem nome.'),
+      60, `xNome do cliente "${cliente.nome}"`,
+    ),
     indIEDest: resolverIndIEDest(cliente),
     IE: cliente.ie ? digitos(cliente.ie) : undefined,
     email: cliente.email_nfe || undefined,
     enderDest: {
-      xLgr: exigir(cliente.logradouro, `O cliente "${cliente.nome}" está sem logradouro.`),
+      xLgr: normalizarTexto(
+        exigir(cliente.logradouro, `O cliente "${cliente.nome}" está sem logradouro.`),
+        60, `logradouro do cliente "${cliente.nome}" (xLgr)`,
+      ),
       nro: exigir(cliente.numero, `O cliente "${cliente.nome}" está sem número no endereço.`),
-      xCpl: cliente.complemento || undefined,
-      xBairro: exigir(cliente.bairro, `O cliente "${cliente.nome}" está sem bairro.`),
+      xCpl: normalizarTexto(cliente.complemento || undefined, 60, `complemento do cliente "${cliente.nome}" (xCpl)`),
+      xBairro: normalizarTexto(
+        exigir(cliente.bairro, `O cliente "${cliente.nome}" está sem bairro.`),
+        60, `bairro do cliente "${cliente.nome}" (xBairro)`,
+      ),
       cMun: exigir(digitos(cliente.codigo_municipio_ibge), `O cliente "${cliente.nome}" está sem o código do município (IBGE).`),
-      xMun: exigir(cliente.municipio, `O cliente "${cliente.nome}" está sem município.`),
+      xMun: normalizarTexto(
+        exigir(cliente.municipio, `O cliente "${cliente.nome}" está sem município.`),
+        60, `município do cliente "${cliente.nome}" (xMun)`,
+      ),
       UF: exigir(cliente.uf, `O cliente "${cliente.nome}" está sem UF.`),
       CEP: digitos(cliente.cep) || undefined,
       cPais: '1058',
@@ -154,6 +206,17 @@ export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperaca
   const resolvidos = itens.map(resolverItem);
   const vProd = duasCasas(resolvidos.reduce((s, i) => s + i.vProd, 0));
 
+  // infCpl junta o texto padrão do emitente (informacoesComplementaresPadrao,
+  // vindo de uma textarea em /fiscal/emissor) com as observações do pedido —
+  // as duas fontes livres de texto que alimentam este campo. A junção
+  // acontece aqui, não no serializador, porque a normalização (sem quebra de
+  // linha, dentro do limite de 5000 caracteres) tem que rodar antes de
+  // reservar_numero_fiscal.
+  const infCplBruto = [emitente.informacoesComplementaresPadrao, pedido.observacoes]
+    .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+    .join(' | ');
+  const infCpl = infCplBruto ? normalizarTexto(infCplBruto, 5000, 'infCpl (informações complementares)') : undefined;
+
   return {
     ide: {
       natOp: exigir(naturezaOperacao?.descricao, 'Escolha a natureza da operação antes de emitir.'),
@@ -164,8 +227,9 @@ export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperaca
       cMunFG: emitente.enderEmit.cMun,
       pedidoId: pedido.id,
       observacoes: pedido.observacoes || undefined,
+      infCpl,
     },
-    emit: emitente,
+    emit: sanitizarEmit(emitente),
     dest,
     itens: resolvidos,
     total: {

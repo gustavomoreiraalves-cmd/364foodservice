@@ -122,3 +122,124 @@ test('regime normal é recusado nesta fase', () => {
   const nota = { ...notaBase(), emit: emitenteNormal };
   assert.throws(() => montarXmlNFe(nota, OPCOES), /regime normal|CRT/i);
 });
+
+// ---------------------------------------------------------------------------
+// CRÍTICO 1 e 4 (achados da revisão): grupo ICMS certo por CSOSN, e nunca
+// inventar um CSOSN quando a regra tributária não é uma das que este arquivo
+// sabe montar.
+// ---------------------------------------------------------------------------
+
+function notaComRegra(regraExtra) {
+  const item = { ...ITEM, regra: { ...ITEM.regra, ...regraExtra } };
+  return resolverNota({
+    pedido: { id: 'ped1' }, cliente: CLIENTE, itens: [item], emitente: EMITENTE,
+    naturezaOperacao: { id: 'n1', descricao: 'Venda de mercadoria' }, ambiente: 'homologacao',
+  });
+}
+
+test('CSOSN 101 é recusado no serializador — falta pCredSN/vCredICMSSN, nunca vira ICMSSN102', () => {
+  const nota = notaComRegra({ csosn: '101' });
+  assert.throws(() => montarXmlNFe(nota, OPCOES), /pCredSN/i);
+});
+
+test('CSOSN fora do que este arquivo sabe montar é recusado, nunca vira ICMSSN900 900 chutado', () => {
+  // 201 é CSOSN de substituição tributária — teria vBCST/vICMSST próprios,
+  // que este arquivo não calcula; o catch-all antigo destacava ICMS comum
+  // (ICMSSN900/900) por cima disso, descartando a ST em silêncio.
+  const nota = notaComRegra({ csosn: '201' });
+  assert.throws(() => montarXmlNFe(nota, OPCOES), /não é suportado/i);
+});
+
+test('CST de ICMS sem CSOSN é recusado — é regime normal vazando para o Simples, não 900 chutado', () => {
+  const nota = notaComRegra({ csosn: undefined, cst_icms: '00' });
+  assert.throws(() => montarXmlNFe(nota, OPCOES), /regime normal|CST de ICMS/i);
+});
+
+test('CSOSN 900 destaca ICMS de verdade, com base/alíquota/valor', () => {
+  const nota = notaComRegra({ csosn: '900', reducao_base_percentual: 0, aliquota_interna_destino: 18 });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<ICMSSN900>/);
+  assert.match(xml, /<CSOSN>900<\/CSOSN>/);
+  assert.match(xml, /<vBC>255\.00<\/vBC>/);
+  assert.match(xml, /<pICMS>18\.0000<\/pICMS>/);
+  assert.match(xml, /<vICMS>45\.90<\/vICMS>/);
+});
+
+// ---------------------------------------------------------------------------
+// CRÍTICO 2 (achado da revisão): CST 49 (o padrão quando a regra não declara
+// cst_pis/cst_cofins) vai para PISOutr/COFINSOutr, nunca para PISNT/COFINSNT
+// — nenhum teste cobria o grupo PIS/COFINS antes desta revisão.
+// ---------------------------------------------------------------------------
+
+test('PIS/COFINS CST 01/02 vão para o grupo Aliq, com base/alíquota/valor', () => {
+  const nota = notaComRegra({ cst_pis: '01', aliquota_pis: 1.65, cst_cofins: '02', aliquota_cofins: 7.6 });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<PISAliq><CST>01<\/CST><vBC>255\.00<\/vBC><pPIS>1\.6500<\/pPIS><vPIS>4\.21<\/vPIS><\/PISAliq>/);
+  assert.match(xml, /<COFINSAliq><CST>02<\/CST><vBC>255\.00<\/vBC><pCOFINS>7\.6000<\/pCOFINS><vCOFINS>19\.38<\/vCOFINS><\/COFINSAliq>/);
+});
+
+test('PIS/COFINS CST 04-09 vão para o grupo NT, só com a situação (sem valor)', () => {
+  const nota = notaComRegra({ cst_pis: '06', cst_cofins: '07' });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<PISNT><CST>06<\/CST><\/PISNT>/);
+  assert.match(xml, /<COFINSNT><CST>07<\/CST><\/COFINSNT>/);
+});
+
+test('PIS/COFINS CST 49 (o padrão) vão para o grupo Outr zerado, nunca para NT', () => {
+  const nota = notaComRegra({ cst_pis: null, cst_cofins: null });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<PISOutr><CST>49<\/CST><vBC>0\.00<\/vBC><pPIS>0\.0000<\/pPIS><vPIS>0\.00<\/vPIS><\/PISOutr>/);
+  assert.match(xml, /<COFINSOutr><CST>49<\/CST><vBC>0\.00<\/vBC><pCOFINS>0\.0000<\/pCOFINS><vCOFINS>0\.00<\/vCOFINS><\/COFINSOutr>/);
+  assert.doesNotMatch(xml, /<PISNT>/);
+  assert.doesNotMatch(xml, /<COFINSNT>/);
+});
+
+test('CST 49 fica zerado no grupo Outr mesmo se a regra (por engano) tiver alíquota', () => {
+  // Padrão do Simples: PIS/COFINS são recolhidos pelo DAS, não calculados
+  // nota a nota — o grupo Outr sempre zerado, nunca reflete uma alíquota
+  // cadastrada por engano junto de CST 49.
+  const nota = notaComRegra({ cst_pis: '49', aliquota_pis: 5, cst_cofins: '49', aliquota_cofins: 5 });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<PISOutr><CST>49<\/CST><vBC>0\.00<\/vBC><pPIS>0\.0000<\/pPIS><vPIS>0\.00<\/vPIS><\/PISOutr>/);
+  assert.match(xml, /<COFINSOutr><CST>49<\/CST><vBC>0\.00<\/vBC><pCOFINS>0\.0000<\/pCOFINS><vCOFINS>0\.00<\/vCOFINS><\/COFINSOutr>/);
+});
+
+test('PIS/COFINS CST 50-99 também vão para o grupo Outr', () => {
+  const nota = notaComRegra({ cst_pis: '99', cst_cofins: '61' });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<PISOutr><CST>99<\/CST>/);
+  assert.match(xml, /<COFINSOutr><CST>61<\/CST>/);
+});
+
+// ---------------------------------------------------------------------------
+// IMPORTANTE I9 (achado da revisão, defeito do próprio plano): tPag não pode
+// mais ser 90 ("sem pagamento") numa venda normal (finNFe 1) com vPag igual
+// ao total da nota — as duas coisas juntas são uma contradição que o schema
+// aceita mas que não faz sentido de negócio.
+// ---------------------------------------------------------------------------
+
+test('tPag não é mais 90 (sem pagamento) numa venda normal', () => {
+  const { xml } = montarXmlNFe(notaBase(), OPCOES);
+  assert.doesNotMatch(xml, /<tPag>90<\/tPag>/);
+  assert.match(xml, /<tPag>01<\/tPag>/);
+});
+
+// ---------------------------------------------------------------------------
+// IMPORTANTE I2 (achado da revisão): infCpl sai de nota.ide.infCpl (já
+// normalizado pelo resolver), empacotado dentro de infAdic.
+// ---------------------------------------------------------------------------
+
+test('infAdic/infCpl aparece no XML quando resolverNota calculou infCpl', () => {
+  const emitenteComTexto = { ...EMITENTE, informacoesComplementaresPadrao: 'Aviso padrão' };
+  const nota = resolverNota({
+    pedido: { id: 'ped1', observacoes: 'Entregar até 18h' }, cliente: CLIENTE, itens: [ITEM],
+    emitente: emitenteComTexto, naturezaOperacao: { id: 'n1', descricao: 'Venda' }, ambiente: 'homologacao',
+  });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<infAdic><infCpl>Aviso padrão \| Entregar até 18h<\/infCpl><\/infAdic>/);
+});
+
+test('infAdic some do XML quando não há infCpl nenhum', () => {
+  const { xml } = montarXmlNFe(notaBase(), OPCOES);
+  assert.doesNotMatch(xml, /<infAdic>/);
+});

@@ -141,3 +141,71 @@ test('PIS e COFINS saem da regra, sobre o valor do produto', () => {
   assert.equal(nota.itens[0].vPIS, 4.21);   // 255 * 1.65%
   assert.equal(nota.itens[0].vCOFINS, 19.38); // 255 * 7.6%
 });
+
+// I2 (achado da revisão): campos de texto livre do leiaute proíbem espaço no
+// início/fim e caractere de controle, e têm tamanho máximo — descumprir isso
+// só aparecia depois de reservar_numero_fiscal, como Rejeição 215 opaca de
+// schema. A normalização/validação roda aqui, no resolver, antes da reserva.
+
+test('xProd maior que 120 caracteres é recusado antes de reservar número', () => {
+  const nomeGrande = 'Costela Defumada Extra Especial da Casa '.repeat(4); // > 120 chars
+  assert.throws(
+    () => resolverNota({ ...ENTRADA, itens: [{ ...ITEM, produto: { ...ITEM.produto, nome: nomeGrande } }] }),
+    /xProd.*120|120.*caracteres/i,
+  );
+});
+
+test('xProd com espaço sobrando e quebra de linha sai normalizado, sem lançar', () => {
+  const nota = resolverNota({
+    ...ENTRADA,
+    itens: [{ ...ITEM, produto: { ...ITEM.produto, nome: '  Costela   Defumada\n500g  ' } }],
+  });
+  assert.equal(nota.itens[0].xProd, 'Costela Defumada 500g');
+});
+
+test('xNome e endereço do destinatário saem normalizados (espaço sobrando, quebra de linha)', () => {
+  const nota = resolverNota({
+    ...ENTRADA,
+    ambiente: 'producao',
+    cliente: {
+      ...CLIENTE,
+      nome: '  Supermercado   Manar  ',
+      logradouro: 'Rua\tX  Bagunçada',
+      bairro: '  Nova   Brasília ',
+    },
+  });
+  assert.equal(nota.dest.xNome, 'Supermercado Manar');
+  assert.equal(nota.dest.enderDest.xLgr, 'Rua X Bagunçada');
+  assert.equal(nota.dest.enderDest.xBairro, 'Nova Brasília');
+});
+
+test('xNome do destinatário maior que 60 caracteres é recusado', () => {
+  const nomeGrande = 'Empresa Com Razão Social Extremamente Longa E Detalhada Demais Ltda';
+  assert.throws(
+    () => resolverNota({ ...ENTRADA, ambiente: 'producao', cliente: { ...CLIENTE, nome: nomeGrande } }),
+    /xNome.*60|60.*caracteres/i,
+  );
+});
+
+test('infCpl junta o texto padrão do emitente com as observações do pedido, sem quebra de linha', () => {
+  const emitenteComTexto = { ...EMITENTE, informacoesComplementaresPadrao: 'Texto padrão\nem duas linhas' };
+  const nota = resolverNota({
+    ...ENTRADA,
+    pedido: { ...PEDIDO, observacoes: '  observação   com espaço  ' },
+    emitente: emitenteComTexto,
+  });
+  assert.equal(nota.ide.infCpl, 'Texto padrão em duas linhas | observação com espaço');
+});
+
+test('infCpl fica undefined quando emitente e pedido não têm nada a dizer', () => {
+  const nota = resolverNota({ ...ENTRADA, pedido: { ...PEDIDO, observacoes: null } });
+  assert.equal(nota.ide.infCpl, undefined);
+});
+
+test('infCpl maior que 5000 caracteres é recusado', () => {
+  const nota5000 = { ...PEDIDO, observacoes: 'A'.repeat(5001) };
+  assert.throws(
+    () => resolverNota({ ...ENTRADA, pedido: nota5000 }),
+    /infCpl.*5000|5000.*caracteres/i,
+  );
+});
