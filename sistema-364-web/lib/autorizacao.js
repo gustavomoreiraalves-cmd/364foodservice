@@ -18,7 +18,12 @@ function recusa(mensagem, status) {
 
 // Garante que o id é um UUID de verdade. Além do escopo, isto protege quem usa
 // o valor como segmento de caminho no Storage (ver a rota de upload de NF-e).
-function exigirUuid(valor, rotulo) {
+// Exportada porque rotas que recebem um segundo id além do que
+// garantirLinhaDaEmpresa já cobre (ex.: naturezaOperacaoId em
+// app/api/fiscal/emitir-nfe/route.js) precisam da mesma checagem de forma —
+// sem isto, um id malformado só falha lá na frente como um 500 cru do
+// Postgrest em vez de um 400 explicando o que está errado.
+export function exigirUuid(valor, rotulo) {
   if (!UUID.test(String(valor))) {
     throw recusa(`${rotulo} inválido: o identificador não é um UUID.`, 400);
   }
@@ -77,5 +82,20 @@ export async function garantirUnidade(sb, user, isAdmin, unidadeId, campos = 'id
     campos,
     rotulo: { artigo: 'a', nome: 'unidade', titulo: 'Unidade' },
     naoEncontrado: 'Unidade não encontrada.',
+  });
+}
+
+// Achado da revisão do motor de NF-e: app/api/fiscal/emitir-nfe/route.js
+// tinha reimplementado à mão exatamente este padrão ("carregar a linha para
+// descobrir a empresa, então autorizar", com o mesmo cuidado de trocar 403 por
+// 404 para não virar oráculo de pedidoId de outro dono). Centralizado aqui
+// como as duas funções acima.
+export async function garantirPedido(sb, user, isAdmin, pedidoId, campos = 'id, empresa_id, cliente_id, observacoes, status') {
+  return garantirLinhaDaEmpresa(sb, user, isAdmin, {
+    tabela: 'pedidos',
+    id: pedidoId,
+    campos,
+    rotulo: { artigo: 'o', nome: 'pedido', titulo: 'Pedido' },
+    naoEncontrado: 'Pedido não encontrado.',
   });
 }

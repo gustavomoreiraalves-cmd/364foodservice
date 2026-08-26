@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo } from '../../../../lib/pontoServer';
-import { garantirEmpresa } from '../../../../lib/autorizacao';
+import { garantirPedido, exigirUuid } from '../../../../lib/autorizacao';
 import { emitirNfe } from '../../../../lib/nfe/emitir';
 
 export const runtime = 'nodejs';
@@ -25,26 +25,29 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Informe pedidoId e naturezaOperacaoId.' }, { status: 400 });
   }
 
-  // O corpo só traz pedidoId, sem empresaId — a empresa do pedido só se
-  // conhece lendo o pedido. Por isso a única leitura antes de garantirEmpresa
-  // é esta, e ela busca só o suficiente para descobrir a empresa; nenhum dado
-  // de negócio (cliente, itens, valores) é lido antes da autorização.
-  const { data: pedido, error: erroPedido } = await sb.from('pedidos')
-    .select('id, empresa_id, cliente_id, observacoes, status')
-    .eq('id', pedidoId).maybeSingle();
-  if (erroPedido) return NextResponse.json({ error: `Falha ao carregar o pedido: ${erroPedido.message}` }, { status: 500 });
-  if (!pedido) return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 });
-
+  // garantirPedido (lib/autorizacao.js) já centraliza "carregar a linha para
+  // descobrir a empresa, então autorizar" — o mesmo padrão que
+  // garantirColaborador/garantirUnidade usam para outras tabelas. Ele também
+  // já troca 403 por 404: "sem acesso à empresa deste pedido" viraria um
+  // oráculo aqui, confirmando que o pedidoId existe (só que em empresa de
+  // outro dono) para quem não tem acesso — a mesma classe de bug que a
+  // revisão de segurança de 24/08 fechou para outras rotas. E valida a forma
+  // do id antes de tocar o banco.
+  let pedido;
   try {
-    await garantirEmpresa(sb, user, isAdmin, pedido.empresa_id);
+    pedido = await garantirPedido(sb, user, isAdmin, pedidoId);
   } catch (e) {
-    // "Sem acesso a esta empresa" (403) viraria um oráculo aqui: confirmaria
-    // que o pedidoId existe (só que em empresa de outro dono) para quem não
-    // tem acesso a ele. A mesma classe de bug que a revisão de segurança de
-    // 24/08 fechou para outras rotas — devolve a mesma mensagem genérica de
-    // "não encontrado" que um pedidoId inexistente já recebeu acima.
-    if (e.status === 403) return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 });
-    return NextResponse.json({ error: e.message }, { status: e.status || 403 });
+    return NextResponse.json({ error: e.message }, { status: e.status || 404 });
+  }
+
+  // Achado da revisão: sem isto, um naturezaOperacaoId malformado só falhava
+  // lá dentro de emitirNfe como um 500 cru do Postgrest, em vez de um 400
+  // explicando o que está errado. exigirUuid é a mesma checagem que
+  // garantirPedido acabou de aplicar ao pedidoId.
+  try {
+    exigirUuid(naturezaOperacaoId, 'Natureza da operação');
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: e.status || 400 });
   }
 
   try {

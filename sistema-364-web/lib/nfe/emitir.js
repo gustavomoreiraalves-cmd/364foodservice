@@ -7,10 +7,18 @@
 // A ORDEM IMPORTA e é a mesma do plano (docs/superpowers/plans/
 // 2026-08-25-motor-emissao-nfe-nucleo.md, Task 6): tudo que pode falhar
 // barato (autorização, validação de cadastro, resolução de tributos,
-// certificado ausente, configuração inativa) roda ANTES de
+// certificado ausente/vencido, configuração inativa) roda ANTES de
 // reservar_numero_fiscal. Depois de reservar, um número foi gasto — e depois
 // de transmitir, a SEFAZ já viu a nota, então nem o número pode ser reusado
 // (rever "Reaproveitamento de número" abaixo).
+//
+// Achado da revisão (fix round 1): o status 'enviado' é gravado ANTES de
+// chamar a SEFAZ, não depois. O fato que precisa ficar durável antes da
+// chamada de rede é "estamos prestes a deixar a SEFAZ ver este número", não
+// "a SEFAZ já respondeu" — gravar depois deixava uma janela em que a
+// transmissão podia ter sido aceita pela SEFAZ e o banco, mesmo assim,
+// continuar mostrando um status reaproveitável (uma falha de escrita bem
+// ali no meio bastava). Ver o comentário do passo 7, abaixo.
 //
 // Quem chama (app/api/fiscal/emitir-nfe/route.js) já fez autorizarModulo() e
 // garantirEmpresa() antes de invocar esta função — aqui dentro só se lê o que
@@ -23,7 +31,7 @@ import { assinarXml } from '../sefaz/assinatura.js';
 import { chamarSefaz } from '../sefaz/transporte.js';
 import { envelopeSoap, extrairCorpoResposta, lerCampos } from '../sefaz/envelope.js';
 import { endpointSefaz, namespaceServico, acaoSoapServico } from '../sefaz/endpoints.js';
-import { obterCertificadoAtivo, extrairChaveECert } from '../certificadoServer.js';
+import { obterCertificadoAtivo, extrairChaveECert, statusCertificado } from '../certificadoServer.js';
 
 const MODELO = '55';
 
@@ -36,10 +44,21 @@ const BUCKET_XML = 'recebimentos';
 
 // Estados em que uma nova tentativa para o MESMO pedido reaproveita o mesmo
 // documento e (quando já existir) o mesmo número — porque a SEFAZ ainda não
-// viu nada. A partir de 'enviado' (inclusive rejeitado/erro_comunicacao, que
-// só se alcança depois de transmitir), uma nova tentativa cria um documento
-// novo com número novo: o anterior já foi visto pela SEFAZ e não pode voltar.
+// viu nada. A partir de 'enviado' (gravado ANTES de chamar a SEFAZ — ver o
+// passo 7), uma nova tentativa NUNCA reaproveita nem o documento nem o
+// número: o anterior já pode ter sido visto pela SEFAZ e não pode voltar.
 const STATUS_REAPROVEITAVEL = ['rascunho', 'numero_reservado', 'assinado'];
+
+// Estados pós-transmissão cujo veredito da SEFAZ não ficou registrado de
+// forma confiável neste sistema: 'enviado' sem nunca ter avançado para
+// 'autorizado'/'rejeitado' (o UPDATE que gravaria o veredito falhou, ou o
+// processo caiu no meio) e 'erro_comunicacao' (a chamada à SEFAZ falhou sem
+// resposta — pode ter sido recebida e processada mesmo assim). Em nenhum dos
+// dois emitir de novo para o mesmo pedido é seguro: pode duplicar uma nota
+// que a SEFAZ já autorizou. 'rejeitado' fica de fora deste conjunto de
+// propósito — ali o veredito da SEFAZ é conhecido e está gravado, então uma
+// nova tentativa com número novo é o fluxo normal esperado.
+const STATUS_INDETERMINADO = ['enviado', 'erro_comunicacao'];
 
 function erro(mensagem, status = 400) {
   const e = new Error(mensagem);
@@ -150,6 +169,25 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
     );
   }
 
+  // Achado da revisão (fix round 1, Crítico 2): um documento parado em
+  // 'enviado' ou 'erro_comunicacao' já foi transmitido, mas o que a SEFAZ
+  // decidiu não ficou gravado de forma confiável aqui (o UPDATE do veredito
+  // falhou, o processo caiu no meio, ou a resposta HTTP nunca chegou). Sem
+  // esta parada, uma nova tentativa criava um documento NOVO com número NOVO
+  // e reenviava — se a nota anterior tiver sido autorizada, duas notas
+  // autorizadas para o mesmo pedido. Aqui não adivinhamos: paramos e mandamos
+  // conferir com a SEFAZ antes de qualquer coisa. (Reconciliação automática
+  // via NfeConsultaProtocolo4 é a resposta completa e já está arquivada como
+  // tarefa separada — esse serviço ainda não existe.)
+  if (documentoExistente && STATUS_INDETERMINADO.includes(documentoExistente.status)) {
+    throw erro(
+      `Este pedido já teve uma NF-e transmitida à SEFAZ (chave ${documentoExistente.chave}) cujo resultado `
+      + 'não ficou confirmado neste sistema. Antes de tentar emitir de novo, confira essa chave diretamente '
+      + 'na SEFAZ (consulta de protocolo) — emitir agora arrisca autorizar duas notas para o mesmo pedido.',
+      409,
+    );
+  }
+
   const produtoIds = [...new Set(itensPedido.map(i => i.produto_id))];
   const [
     { data: produtos, error: erroProdutos },
@@ -201,6 +239,22 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   }
   if (!certificado) {
     throw erro('Nenhum certificado A1 ativo para o CNPJ desta marca. Envie o certificado em /empresas.', 400);
+  }
+  // Achado da revisão (fix round 1, Crítico 1): `ativo` é uma flag manual —
+  // só muda quando alguém envia um substituto (ver
+  // app/api/empresas/[id]/certificado/route.js) — e não tem nenhuma relação
+  // com a validade de calendário. Sem esta checagem, um certificado vencido
+  // mas ainda `ativo` só seria descoberto lá na frente, no handshake mTLS da
+  // transmissão — depois de já ter reservado número e assinado o XML. Mesmo
+  // padrão de app/api/fiscal/testar-conexao/route.js.
+  const { status: statusCert, diasParaVencer } = statusCertificado(certificado.meta.valido_ate);
+  if (statusCert === 'vencido') {
+    const dataVencimento = new Date(certificado.meta.valido_ate).toLocaleDateString('pt-BR');
+    throw erro(
+      `O certificado A1 desta marca venceu em ${dataVencimento} (há ${Math.abs(diasParaVencer)} dia(s)). `
+      + 'Envie um certificado novo em /empresas antes de emitir.',
+      400,
+    );
   }
 
   // ---------- 2. Resolver tributos item a item e resolver a nota ----------
@@ -349,7 +403,35 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
     if (error) throw erro(`Falha ao gravar o status assinado: ${error.message}`, 500);
   }
 
-  // ---------- 7. Transmitir (NFeAutorizacao4, síncrono) → enviado ----------
+  // ---------- 7. Marcar 'enviado' — ANTES de chamar a SEFAZ ----------
+  // Achado da revisão (fix round 1, Crítico 2): esta gravação precisa
+  // acontecer ANTES da chamada de rede, não depois. O fato que precisa ficar
+  // durável antes do passo arriscado é "estamos prestes a deixar a SEFAZ ver
+  // este número" — não "a SEFAZ já respondeu".
+  //
+  // Se este UPDATE falhar, abortamos AQUI: nada foi transmitido, o documento
+  // fica em 'assinado' (ainda em STATUS_REAPROVEITAVEL) e uma nova tentativa
+  // reaproveita o mesmo número sem risco — o pior caso vira "não emitiu",
+  // recuperável (lacuna na numeração, ou inutilização depois).
+  //
+  // A ordem antiga gravava 'enviado' só depois de chamarSefaz retornar: se a
+  // SEFAZ autorizasse a nota e o UPDATE seguinte falhasse, o documento ficava
+  // parado em 'assinado' — reaproveitável — e uma nova tentativa reservava o
+  // MESMO número e reenviava a MESMA chave para uma nota que a SEFAZ já podia
+  // ter autorizado: duas notas autorizadas para o mesmo pedido, o pior
+  // cenário e exatamente o que este pipeline existe para evitar. Invertendo a
+  // ordem, o pior caso possível vira um número queimado sem transmissão —
+  // recuperável — nunca uma nota duplicada — irrecuperável.
+  //
+  // Daqui em diante o status nunca mais volta a ser
+  // 'rascunho'/'numero_reservado'/'assinado': o número já está fora de jogo
+  // para reaproveitamento, aconteça o que acontecer com a chamada abaixo.
+  {
+    const { error } = await sb.from('nfe_saida_documentos').update({ status: 'enviado' }).eq('id', documento.id);
+    if (error) throw erro(`Falha ao gravar o status antes de transmitir a nota: ${error.message}`, 500);
+  }
+
+  // ---------- 8. Transmitir (NFeAutorizacao4, síncrono) ----------
   // idLote é só um identificador da nossa própria chamada (o layout pede um
   // número, não que ele signifique nada) — não é o nRec que a SEFAZ devolve.
   const idLote = String(Date.now());
@@ -369,31 +451,47 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
       senha: certificado.senha,
     });
   } catch (e) {
-    // Não sabemos se a SEFAZ recebeu ou não — por segurança tratamos como
-    // "viu": erro_comunicacao não está em STATUS_REAPROVEITAVEL, então uma
-    // nova tentativa reserva número novo em vez de arriscar reenviar a mesma
-    // chave. e.message é do chamarSefaz, que documenta nunca carregar
-    // material de certificado (só excerto de resposta HTTP da própria SEFAZ).
-    await sb.from('nfe_saida_documentos')
+    // O documento já está em 'enviado' desde o passo anterior — o número já
+    // está fora de jogo para reaproveitamento, não importa o que este UPDATE
+    // faça a seguir. Aqui só refinamos o status/motivo para quem for
+    // investigar manualmente: 'erro_comunicacao' registra que a chamada
+    // falhou sem resposta (pode ter sido recebida e processada pela SEFAZ
+    // mesmo assim — por isso STATUS_INDETERMINADO barra uma nova tentativa
+    // até alguém confirmar).
+    //
+    // Achado da revisão (Crítico 3): esta gravação tinha o erro descartado
+    // em silêncio. Agora é checado — se falhar, o documento continua em
+    // 'enviado' (já barrado do mesmo jeito por STATUS_INDETERMINADO), só sem
+    // o motivo anexado, e a mensagem abaixo diz isso em vez de fingir que
+    // gravou.
+    const { error: erroMotivo } = await sb.from('nfe_saida_documentos')
       .update({ status: 'erro_comunicacao', motivo_rejeicao: e.message }).eq('id', documento.id);
-    throw erro(`Falha ao transmitir a nota à SEFAZ: ${e.message}`, 502);
+    const sufixoMotivo = erroMotivo
+      ? ` (e também falhou ao registrar o motivo do erro de comunicação: ${erroMotivo.message})`
+      : '';
+    // e.message é do chamarSefaz, que documenta nunca carregar material de
+    // certificado (só excerto de resposta HTTP da própria SEFAZ).
+    throw erro(
+      `Falha ao transmitir a nota à SEFAZ: ${e.message}${sufixoMotivo}. O resultado desta nota `
+      + `(chave ${chave}) ficou indeterminado — confirme na SEFAZ antes de tentar emitir de novo para `
+      + 'este pedido.',
+      502,
+    );
   }
 
-  // ---------- 8. Ler o retorno ----------
+  // ---------- 9. Ler o retorno e gravar o veredito ----------
   // A resposta síncrona traz cStat no nível do lote E dentro de
   // protNFe/infProt. O veredito da NOTA (100 = autorizada) só pode vir do
   // segundo — ler o do lote (ex.: 104 "lote processado") marcaria como
   // autorizada uma nota que a SEFAZ rejeitou. Ver o comentário de
   // lerCampos em lib/sefaz/envelope.js.
+  //
+  // A partir daqui os UPDATEs só REFINAM o resultado (autorizado/rejeitado,
+  // recibo_lote) — o documento já é irreversivelmente não-reaproveitável
+  // desde o passo 7, então nada aqui muda esse fato caso falhe.
   const corpoResposta = extrairCorpoResposta(respostaXml);
   const lote = lerCampos(corpoResposta, ['cStat', 'xMotivo', 'nRec']);
   const veredito = lerCampos(corpoResposta, ['cStat', 'xMotivo', 'nProt'], { dentroDe: 'infProt' });
-
-  // A SEFAZ já viu a nota neste ponto, autorizada ou não — daqui em diante o
-  // status nunca mais volta a ser 'rascunho'/'numero_reservado'/'assinado'.
-  const { error: erroGravaEnviado } = await sb.from('nfe_saida_documentos')
-    .update({ status: 'enviado', recibo_lote: lote.nRec || null }).eq('id', documento.id);
-  if (erroGravaEnviado) throw erro(`A nota foi transmitida à SEFAZ, mas falhou ao gravar o status enviado: ${erroGravaEnviado.message}`, 500);
 
   if (veredito.cStat === '100') {
     // Guarda o XML assinado que a SEFAZ autorizou, melhor esforço: se o
@@ -411,11 +509,24 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
 
     const { error } = await sb.from('nfe_saida_documentos').update({
       status: 'autorizado',
+      recibo_lote: lote.nRec || null,
       protocolo_autorizacao: veredito.nProt,
       xml_path: xmlPath,
       emitida_em: new Date().toISOString(),
     }).eq('id', documento.id);
-    if (error) throw erro(`A nota foi autorizada pela SEFAZ (protocolo ${veredito.nProt}), mas falhou ao gravar: ${error.message}`, 500);
+    if (error) {
+      // Se este UPDATE falhar, o documento fica parado em 'enviado' — a
+      // SEFAZ autorizou de verdade (é o que está sendo dito aqui), mas este
+      // sistema não conseguiu registrar isso. STATUS_INDETERMINADO barra
+      // qualquer nova tentativa para este pedido até alguém confirmar; por
+      // isso a mensagem nomeia protocolo e chave.
+      throw erro(
+        `A nota foi autorizada pela SEFAZ (protocolo ${veredito.nProt}, chave ${chave}), mas falhou ao `
+        + `gravar isso neste sistema: ${error.message}. A nota está autorizada de verdade — não tente `
+        + 'emitir de novo para este pedido; registre manualmente ou concilie com a SEFAZ.',
+        500,
+      );
+    }
 
     return { status: 'autorizado', chave, numero, protocolo: veredito.nProt, motivo: null };
   }
@@ -427,8 +538,19 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
     : `${lote.cStat} - ${lote.xMotivo}`;
 
   const { error: erroGravaRejeitado } = await sb.from('nfe_saida_documentos')
-    .update({ status: 'rejeitado', motivo_rejeicao: motivo }).eq('id', documento.id);
-  if (erroGravaRejeitado) throw erro(`A nota foi rejeitada pela SEFAZ (${motivo}), mas falhou ao gravar: ${erroGravaRejeitado.message}`, 500);
+    .update({ status: 'rejeitado', recibo_lote: lote.nRec || null, motivo_rejeicao: motivo }).eq('id', documento.id);
+  if (erroGravaRejeitado) {
+    // Mesmo raciocínio do bloco de autorização acima: se este UPDATE falhar,
+    // o documento fica em 'enviado' e STATUS_INDETERMINADO barra uma nova
+    // tentativa até alguém confirmar na SEFAZ — mesmo a rejeição sendo, na
+    // prática, um resultado seguro para reemitir, este sistema não tem como
+    // confiar nisso se nem este UPDATE vingou.
+    throw erro(
+      `A nota foi rejeitada pela SEFAZ (${motivo}, chave ${chave}), mas falhou ao gravar isso neste `
+      + `sistema: ${erroGravaRejeitado.message}.`,
+      500,
+    );
+  }
 
   return { status: 'rejeitado', chave, numero, protocolo: null, motivo };
 }
