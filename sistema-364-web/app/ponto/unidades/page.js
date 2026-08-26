@@ -5,8 +5,9 @@ import AppShell from '../../../components/AppShell';
 import PontoTabs from '../../../components/PontoTabs';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { useIsAdmin, formatarCnpj } from '../../../lib/ponto';
+import { FUSOS_BRASIL, FUSO_PADRAO } from '../../../lib/fusos';
 
-const UNIDADE_VAZIA = { nome: '', codigo: '', tipo: 'operacao', empregador_id: '', endereco: '', cidade: '', uf: '', cep: '', latitude: '', longitude: '', responsavel: '' };
+const UNIDADE_VAZIA = { nome: '', codigo: '', tipo: 'operacao', empregador_id: '', endereco: '', cidade: '', uf: '', cep: '', fuso: FUSO_PADRAO, latitude: '', longitude: '', responsavel: '' };
 const CENTRO_VAZIO = { codigo: '', nome: '' };
 
 export default function UnidadesPage() {
@@ -50,6 +51,7 @@ function Conteudo() {
       ...fUni,
       empresa_id: empresaAtual.id,
       empregador_id: fUni.empregador_id || null,
+      fuso: fUni.fuso || FUSO_PADRAO,
       latitude: fUni.latitude === '' ? null : Number(fUni.latitude),
       longitude: fUni.longitude === '' ? null : Number(fUni.longitude),
     };
@@ -131,6 +133,14 @@ function Conteudo() {
           <div><label>Cidade</label><input value={fUni.cidade} onChange={e => setFUni({ ...fUni, cidade: e.target.value })} /></div>
           <div><label>UF</label><input maxLength={2} value={fUni.uf} onChange={e => setFUni({ ...fUni, uf: e.target.value.toUpperCase() })} /></div>
           <div><label>CEP</label><input value={fUni.cep} onChange={e => setFUni({ ...fUni, cep: e.target.value })} /></div>
+          {/* O fuso da unidade vira o `p_fuso` de registrar_marcacao: é ele que converte
+              a batida para hora local. Deixar no default de São Paulo numa unidade de
+              Rondônia não erra alto, erra por uma hora em todo o espelho de ponto. */}
+          <div><label>Fuso horário</label>
+            <select value={fUni.fuso || FUSO_PADRAO} onChange={e => setFUni({ ...fUni, fuso: e.target.value })}>
+              {FUSOS_BRASIL.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+          </div>
           <div><label>Latitude</label><input value={fUni.latitude} onChange={e => setFUni({ ...fUni, latitude: e.target.value })} placeholder="-16.6869" /></div>
           <div><label>Longitude</label><input value={fUni.longitude} onChange={e => setFUni({ ...fUni, longitude: e.target.value })} placeholder="-49.2648" /></div>
           <div><label>Responsável</label><input value={fUni.responsavel} onChange={e => setFUni({ ...fUni, responsavel: e.target.value })} /></div>
