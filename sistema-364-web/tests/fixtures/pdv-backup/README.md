@@ -37,6 +37,7 @@ observação e categoria são os do banco.
 | `caixas.json` | 2 | caixa 1561 fechado (saldo final R$ 7.902,13, o mesmo do painel) e 1562 fechado |
 | `caixa-operacoes.json` | 4 | um de cada `TIPO`: `A` suprimento, `S` sangria, `E` estorno, `D` despesa |
 | `itens-dia.json` | 18 | agregado de 21/08 por produto |
+| `produtos.json` | 7 | cadastro (`lib/pdvBackup/consultasProdutos.js`), não movimento — ver seção própria abaixo |
 
 ### Ressalvas
 
@@ -56,3 +57,35 @@ observação e categoria são os do banco.
 
 Consultas equivalentes às de `lib/pdvBackup/consultas.js`, rodadas com
 `isql -ch UTF8` no container, filtrando pelos códigos citados acima.
+
+## `produtos.json`
+
+Diferente dos demais arquivos, é cadastro, não movimento numa janela: veio de
+`lib/pdvBackup/consultasProdutos.js` (`SQL_PRODUTOS`), rodada em 26/08/2026 no
+mesmo container `fb364` (backup do Steakhouse restaurado).
+
+Cinco linhas são reais, filtradas por `codigo in (16, 339, 431, 3, 17)`:
+
+- **16** (Salsa) — insumo (`CODIGOPRODUTOTIPO` 2) vivo, com `PRECOCUSTO`
+  positivo (17,50) e `PRECOVENDA` zerado.
+- **339** (Costela Bovina) — insumo vivo com config em `CONFIGICMS`
+  (`ORIGEMMERCADORIA` 0, `CFOP` 5101).
+- **431** (Costela Defumada) — insumo vivo com config em `CONFIGICMS`, igual ao
+  339.
+- **3** (`* Excluído * Batata c/ Cheddar e Bacon`) — produto (`CODIGOPRODUTOTIPO`
+  1) descontinuado, com config e com `NCM` preenchido (`21069090`).
+- **17** (`* Excluído * Hambúrguer de Picanha`) — insumo descontinuado sem
+  config (`CFOP`, `SITUACAOTRIBUTARIA` e `ORIGEMMERCADORIA` nulos).
+
+As linhas **9001** e **9002** são sintéticas, escritas à mão para os casos de
+recusa de NCM curto e CEST fora do padrão — não existem no banco real.
+
+**Divergência em relação ao que a Task 2 esperava encontrar:** a descrição
+original tratava 339 como "produto vivo" e 431 como "produto vivo com CSOSN e
+NCM". Os dados reais mostram os dois como `CODIGOPRODUTOTIPO` 2 (insumo, não
+produto) e com `NCM` nulo — não há NCM preenchido em nenhum dos dois. As
+asserções específicas que a Task 3 precisa (16 = insumo com custo positivo e
+venda zerada; 339 = `ORIGEMMERCADORIA` 0 vindo de `CONFIGICMS`; 17 = insumo
+descontinuado sem config; 3 = produto descontinuado com config) continuam
+batendo com os dados reais — só a caracterização de 339/431 como "produto" e
+a menção a NCM em 431 não se confirmaram.
