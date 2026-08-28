@@ -16,14 +16,21 @@ export const CAMPOS_FISCAIS = [
 // numeric volta do supabase-js como string ('49.90') e do Firebird como número
 // (49.9). Comparar cru faria todo preço virar conflito na segunda rodada, e a
 // importação pararia de atualizar exatamente o que mais muda.
+//
+// Só entra no caminho numérico quem é número de verdade: `Number()` sozinho
+// aceita '0x10' e '1e3', e um falso "igual" aqui apaga edição humana.
+const NUMERICO = /^-?\d+(\.\d+)?$/;
+
+const ehNumero = v =>
+  typeof v === 'number' ? Number.isFinite(v) : NUMERICO.test(String(v).trim());
+
 export function mesmoValor(a, b) {
   if (a === null || a === undefined) return b === null || b === undefined;
   if (b === null || b === undefined) return false;
-  const na = Number(a);
-  const nb = Number(b);
-  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') {
-    return na === nb;
-  }
+  // String 'Infinity' nunca é igual a número Infinity ou qualquer outro não-finito
+  if (typeof a === 'string' && typeof b === 'number' && !Number.isFinite(b)) return false;
+  if (typeof b === 'string' && typeof a === 'number' && !Number.isFinite(a)) return false;
+  if (ehNumero(a) && ehNumero(b)) return Number(a) === Number(b);
   return String(a).trim() === String(b).trim();
 }
 

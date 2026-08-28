@@ -85,3 +85,17 @@ test('campo sem mudança nenhuma não entra no update', () => {
   assert.deepEqual(r.valores, {});
   assert.deepEqual(r.conflitos, []);
 });
+
+test('mesmoValor rejeita notação hexadecimal e científica (um falso "igual" apaga edição humana)', () => {
+  // Um falso "igual" aqui é pior que um falso "diferente": o primeiro sobrescreve
+  // edição humana em silêncio; o segundo só gera uma linha no relatório de
+  // conflitos. Por isso, `Number()` sozinho não é suficiente — aceita '0x10' e '1e3'.
+  assert.equal(mesmoValor('0x10', 16), false, '0x10 não é número decimal válido');
+  assert.equal(mesmoValor('1e3', 1000), false, '1e3 não é número decimal válido');
+  assert.equal(mesmoValor('Infinity', Infinity), false, 'Infinity literal não é número válido');
+  assert.equal(mesmoValor(false, false), true, 'boolean contra boolean funciona');
+  assert.equal(mesmoValor(true, true), true, 'boolean true contra true funciona');
+  assert.equal(mesmoValor(true, 1), false, 'boolean true não é igual a número 1');
+  assert.equal(mesmoValor(0, ''), false, '0 não é igual à string vazia');
+  assert.equal(mesmoValor('49.90', 49.9), true, 'motivo de existir: string e número decimais são iguais');
+});
