@@ -96,3 +96,8 @@ sistema-364-web/public/_globals.css
 
 # Worktrees isolados de execução de planos (superpowers:subagent-driven-development)
 .worktrees/
+
+# Diários das skills do superpowers (relatórios de fix, progresso e diffs de
+# review por sessão): 1,4 MB de artefato da ferramenta, não do sistema. O que
+# vale fica em docs/superpowers/specs e docs/superpowers/plans, versionado.
+.superpowers/
