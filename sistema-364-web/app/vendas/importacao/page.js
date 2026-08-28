@@ -54,6 +54,8 @@ function Conteudo() {
   const [movimentos, setMovimentos] = useState([]);
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [busca, setBusca] = useState('');
+  const [solicitacaoPendente, setSolicitacaoPendente] = useState(false);
+  const [enviandoPedido, setEnviandoPedido] = useState(false);
 
   useEffect(() => {
     if (!empresaAtual) return;
@@ -66,21 +68,54 @@ function Conteudo() {
       setTemLoja(true);
       const ant = periodoAnterior(periodo);
       const e = empresaAtual.id;
-      const [vendas, vendasAnt, formas, itens, caixas, importacao] = await Promise.all([
+      const [vendas, vendasAnt, formas, itens, caixas, importacao, pendente] = await Promise.all([
         supabase.from('vw_pdv_vendas_dia').select('*').eq('empresa_id', e).gte('dia', periodo.de).lte('dia', periodo.ate),
         supabase.from('vw_pdv_vendas_dia').select('*').eq('empresa_id', e).gte('dia', ant.de).lte('dia', ant.ate),
         supabase.from('vw_pdv_caixa_formas_dia').select('*').eq('empresa_id', e).gte('dia', periodo.de).lte('dia', periodo.ate),
         supabase.from('pdv_vendas_itens_dia').select('dia, codigo_detalhe, nome, categoria, quantidade, valor_vendido, lucro').eq('empresa_id', e).gte('dia', periodo.de).lte('dia', periodo.ate),
         supabase.from('pdv_caixas').select('id, codigo, aberto_em, fechado_em, saldo_inicial, saldo_final, status, dia_caixa').eq('empresa_id', e).gte('dia_caixa', periodo.de).lte('dia_caixa', periodo.ate).order('aberto_em', { ascending: false }),
         supabase.from('pdv_importacoes').select('iniciado_em, status, erro').eq('empresa_id', e).order('iniciado_em', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('pdv_importacao_solicitacoes').select('id').is('atendido_em', null).limit(1).maybeSingle(),
       ]);
       if (!ativo) return;
       const falha = [vendas, vendasAnt, formas, itens, caixas, importacao].find(r => r.error);
       if (falha) { setErro(falha.error.message); return; }
       setDados({ vendas: vendas.data, vendasAnt: vendasAnt.data, formas: formas.data, itens: itens.data, caixas: caixas.data, importacao: importacao.data });
+      setSolicitacaoPendente(!!pendente.data);
     })();
     return () => { ativo = false; };
   }, [empresaAtual, periodo]);
+
+  // Enquanto o pedido não foi atendido, confere de tempos em tempos se o
+  // checador local (cron a cada 15 min) já pegou — quando ele atende, o
+  // status da última importação é atualizado pra refletir o resultado.
+  useEffect(() => {
+    if (!solicitacaoPendente || !empresaAtual) return;
+    let ativo = true;
+    const intervalo = setInterval(async () => {
+      const { data: pendente } = await supabase.from('pdv_importacao_solicitacoes').select('id').is('atendido_em', null).limit(1).maybeSingle();
+      if (!ativo || pendente) return;
+      setSolicitacaoPendente(false);
+      const { data: importacao } = await supabase.from('pdv_importacoes')
+        .select('iniciado_em, status, erro').eq('empresa_id', empresaAtual.id).order('iniciado_em', { ascending: false }).limit(1).maybeSingle();
+      if (ativo) setDados(d => (d ? { ...d, importacao } : d));
+    }, 20000);
+    return () => { ativo = false; clearInterval(intervalo); };
+  }, [solicitacaoPendente, empresaAtual]);
+
+  async function atualizarAgora() {
+    setEnviandoPedido(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resposta = await fetch('/api/pdv/solicitar-importacao', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token || ''}` },
+      });
+      if (resposta.ok) setSolicitacaoPendente(true);
+    } finally {
+      setEnviandoPedido(false);
+    }
+  }
 
   async function abrirCaixa(caixa) {
     if (caixaAberto === caixa.id) { setCaixaAberto(null); return; }
@@ -116,6 +151,9 @@ function Conteudo() {
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
         <label style={{ fontSize: 12 }}>De <input type="date" value={periodo.de} onChange={e => setPeriodo(p => ({ ...p, de: e.target.value }))} /></label>
         <label style={{ fontSize: 12 }}>Até <input type="date" value={periodo.ate} onChange={e => setPeriodo(p => ({ ...p, ate: e.target.value }))} /></label>
+        <button className="btn small secondary" onClick={atualizarAgora} disabled={enviandoPedido || solicitacaoPendente}>
+          {solicitacaoPendente ? 'Atualização pedida…' : 'Atualizar agora'}
+        </button>
         <span className={`tag ${calc.status.alerta ? 'bad' : 'ok'}`}>{calc.status.texto}</span>
         {dados.importacao?.erro && <span className="muted" style={{ fontSize: 11 }}>{dados.importacao.erro}</span>}
       </div>
