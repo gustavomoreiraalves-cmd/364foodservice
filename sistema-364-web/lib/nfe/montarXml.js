@@ -315,6 +315,15 @@ function montarIde({ ide, cUF, cNF, dhEmi, serie, numero: nNF, tpAmb }) {
     + tag('finNFe', '1')
     + tag('indFinal', '0')
     + tag('indPres', '9')
+    // A NT 2020.006 exige o indicador de intermediador sempre que indPres for
+    // 2, 3, 4 ou 9 — e o 9 acima é o nosso caso (venda B2B fechada por
+    // vendedor, nem presencial nem por site). Sem ele a SVRS devolve
+    // "434 — Rejeicao: NF-e sem indicativo do intermediador", que foi o que
+    // derrubou a primeira nota enviada. 0 = operação sem intermediador: a 364
+    // vende direto, não por plataforma de terceiro. Se algum dia entrar venda
+    // por marketplace, este valor passa a 1 e o grupo infIntermed (CNPJ e
+    // identificador do intermediador) vira obrigatório junto.
+    + tag('indIntermed', '0')
     + tag('procEmi', '0')
     + tag('verProc', VERSAO_PROCESSO)
     + '</ide>';

@@ -270,3 +270,27 @@ test('caractere que exige escape XML sai escapado no infAdProd', () => {
   const { xml } = montarXmlNFe(notaComTexto({ base_legal: 'Convênio ICMS 52/91 <art. 1º & 2º>' }), OPCOES);
   assert.match(xml, /<infAdProd>Convênio ICMS 52\/91 &lt;art\. 1º &amp; 2º&gt;<\/infAdProd>/);
 });
+
+// ------------------------------------------------------------ indIntermed
+// Regressão real: a primeira NF-e enviada à SVRS voltou com
+//   434 — Rejeicao: NF-e sem indicativo do intermediador
+// (chave 11260837541736000187550030000000011862210289, série 3, número 1).
+// A NT 2020.006 exige indIntermed sempre que indPres for 2, 3, 4 ou 9 — e
+// este serializador emite indPres 9 (não presencial, outros). O campo não
+// existia no ide.
+
+test('indIntermed acompanha o indPres não presencial — rejeição 434 da SVRS', () => {
+  const { xml } = montarXmlNFe(notaBase(), OPCOES);
+  assert.match(xml, /<indPres>9<\/indPres>/);
+  // 0 = operação sem intermediador. A 364 vende direto, não por marketplace.
+  assert.match(xml, /<indIntermed>0<\/indIntermed>/);
+});
+
+test('indIntermed vem depois de indPres e antes de procEmi, como o schema exige', () => {
+  const { xml } = montarXmlNFe(notaBase(), OPCOES);
+  const ide = xml.slice(xml.indexOf('<ide>'), xml.indexOf('</ide>'));
+  assert.ok(ide.indexOf('<indPres>') < ide.indexOf('<indIntermed>'),
+    'indIntermed não pode vir antes de indPres');
+  assert.ok(ide.indexOf('<indIntermed>') < ide.indexOf('<procEmi>'),
+    'indIntermed tem de vir antes de procEmi');
+});
