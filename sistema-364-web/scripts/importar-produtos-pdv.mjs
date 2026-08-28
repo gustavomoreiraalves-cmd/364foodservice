@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   baixarBackup, garantirDocker, restaurarNoContainer, derrubarContainer,
 } from './importar-pdv-backup.mjs';
@@ -85,20 +86,27 @@ async function garantirGrupos({ sb, empresaId, grupos, dryRun, log }) {
   return mapa;
 }
 
-// Colunas NOT NULL com default no banco que a normalização deixa de fora
-// quando o Consumer não informa (preço e custo ausentes ou zerados). O valor
-// entra só na criação, e entra também no retrato: se a linha nascesse com 0 e
-// o retrato não soubesse disso, a rodada seguinte leria "0 aqui, nada no
-// retrato", concluiria que uma pessoa digitou aquele 0 e nunca mais
-// atualizaria o campo — o produto ficaria sem custo para sempre.
-//
-// vw_produto_custo (atualização 21) já trata custo_unitario = 0 como "não
-// informado" e cai na ficha técnica, que é exatamente a semântica que o
-// Consumer dá ao 0.0000.
-const PADRAO_CRIACAO = {
-  produtos: { custo_unitario: 0, preco_venda: 0 },
-  materias_primas: { custo_unitario: 0 },
-};
+// O PostgREST limita a leitura a 1000 linhas por padrão. Sem paginar, uma
+// tabela com mais de 1000 produtos/insumos já importados trunca em silêncio:
+// o script trataria uma linha existente como nova, tentaria inserir de novo e
+// bateria no índice único — depois de já ter gravado outras linhas do lote.
+const TAMANHO_PAGINA = 1000;
+
+async function lerExistentes({ sb, tabela, empresaId }) {
+  const linhas = [];
+  for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+    const fim = inicio + TAMANHO_PAGINA - 1;
+    const { data, error } = await sb.from(tabela).select('*')
+      .eq('empresa_id', empresaId).not('pdv_codigo_produto', 'is', null)
+      .range(inicio, fim);
+    if (error) throw new Error(`não consegui ler ${tabela}: ${error.message}`);
+    linhas.push(...(data || []));
+    // Bloco menor que o pedido: era a última página. Também cobre a tabela
+    // vazia (data = []), que já sai do laço na primeira volta.
+    if (!data || data.length < TAMANHO_PAGINA) break;
+  }
+  return linhas;
+}
 
 // Grava um lote numa tabela, linha a linha pela regra de merge. Linha a linha
 // de propósito: o upsert em bloco não sabe congelar campo, e são 458 linhas
@@ -110,11 +118,9 @@ async function gravarLote({ sb, tabela, linhas, dryRun, log }) {
   const empresaId = linhas[0].empresa_id;
   // As duas tabelas têm revisado_em — é a coluna que a atualização 36 criou
   // para marcar "uma pessoa conferiu os campos fiscais desta linha".
-  const { data: existentes, error } = await sb.from(tabela).select('*')
-    .eq('empresa_id', empresaId).not('pdv_codigo_produto', 'is', null);
-  if (error) throw new Error(`não consegui ler ${tabela}: ${error.message}`);
+  const existentes = await lerExistentes({ sb, tabela, empresaId });
 
-  const porCodigo = new Map((existentes || []).map(l => [l.pdv_codigo_produto, l]));
+  const porCodigo = new Map(existentes.map(l => [l.pdv_codigo_produto, l]));
 
   for (const novo of linhas) {
     const atual = porCodigo.get(novo.pdv_codigo_produto) || null;
@@ -131,9 +137,12 @@ async function gravarLote({ sb, tabela, linhas, dryRun, log }) {
     if (!atual) {
       resumo.novos += 1;
       if (dryRun) continue;
-      const linha = { ...PADRAO_CRIACAO[tabela], ...valores };
+      // custo_unitario e preco_venda já chegam com 0 no lugar de ausente —
+      // normalizaProdutosFb resolve isso na origem (ver normalizaProdutos.js)
+      // porque as duas colunas são NOT NULL — então `valores` aqui já é
+      // completo, sem precisar de um valor de criação à parte.
       const { error: erroInsert } = await sb.from(tabela)
-        .insert([{ ...linha, pdv_valores: linha, pdv_importado_em: new Date().toISOString() }]);
+        .insert([{ ...valores, pdv_valores: valores, pdv_importado_em: new Date().toISOString() }]);
       if (erroInsert) throw new Error(`não consegui inserir ${novo.pdv_codigo_produto} em ${tabela}: ${erroInsert.message}`);
       continue;
     }
@@ -189,10 +198,15 @@ async function main() {
   garantirDocker(log);
   const porta = Number(process.env.PDV_FB_PORTA || 3050);
 
+  // Uma loja com problema (backup ruim, Firebird que não sobe, erro de rede)
+  // não pode tirar as outras da rodada — irmão de importar-pdv-backup.mjs
+  // isola do mesmo jeito. O catch guarda o nome para o relatório final; quem
+  // decide interromper a rodada inteira continua sendo o que está fora do
+  // laço (garantirDocker, credencial ausente etc.).
+  const lojasComFalha = [];
+
   for (const loja of alvo) {
     console.log(`\n${loja.nome_connect}`);
-    const prefixo = loja.empresas?.prefixo_codigo;
-    if (!prefixo) throw new Error(`a empresa da loja ${loja.nome_connect} está sem prefixo_codigo`);
 
     const diretorio = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-cadastro-'));
     const nomeContainer = `pdv-cadastro-${randomBytes(4).toString('hex')}`;
@@ -200,8 +214,14 @@ async function main() {
     let db = null;
 
     try {
+      const prefixo = loja.empresas?.prefixo_codigo;
+      if (!prefixo) throw new Error(`a empresa da loja ${loja.nome_connect} está sem prefixo_codigo`);
+
       const { caminho } = baixarBackup({ loja, diretorio, agora: new Date(), log });
       await restaurarNoContainer({ nome: nomeContainer, porta, senha, arquivo: caminho, log });
+      // O arquivo já cumpriu o papel: centenas de MB não precisam esperar o
+      // fim da consulta e da gravação para sair do disco.
+      fs.rmSync(caminho, { force: true });
       log("  conectando no Firebird restaurado...");
       db = await abrirFirebird({
         host: '127.0.0.1', port: porta, database: CAMINHO_FDB,
@@ -245,6 +265,9 @@ async function main() {
           console.log(`    produto ${c.codigo} · ${c.campo}: aqui "${c.atual}", no PDV "${c.novo}"`);
         }
       }
+    } catch (e) {
+      console.error(`  ERRO na loja ${loja.nome_connect}: ${e.message}`);
+      lojasComFalha.push(loja.nome_connect);
     } finally {
       if (db) { try { db.detach(); } catch { /* já caiu */ } }
       derrubarContainer(nomeContainer);
@@ -253,6 +276,15 @@ async function main() {
   }
 
   console.log(`\n${dryRun ? 'Dry-run concluído — nada foi gravado.' : 'Importação concluída.'}`);
+  if (lojasComFalha.length) {
+    console.error(`${lojasComFalha.length} loja(s) falharam e não foram importadas: ${lojasComFalha.join(', ')}`);
+  }
+  process.exit(lojasComFalha.length ? 2 : 0);
 }
 
-main().catch(e => { console.error('\nERRO: ' + e.message); process.exit(1); });
+// Só roda quando chamado direto: importar o módulo (num teste, num REPL, por
+// engano) não pode disparar a carga contra a produção. Mesmo guard de
+// importar-pdv-backup.mjs.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(e => { console.error('\nERRO: ' + e.message); process.exit(1); });
+}

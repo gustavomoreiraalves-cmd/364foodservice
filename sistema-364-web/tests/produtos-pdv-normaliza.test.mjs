@@ -149,31 +149,52 @@ test('alíquota de transparência zerada vira null', () => {
 
 // Custo e preço são NOT NULL no banco, com default 0. Um null explícito não
 // cai no default: é violação de NOT NULL e derruba a carga no primeiro
-// insert. Por isso a chave não pode existir quando o Consumer não informa —
-// é o que estes dois testes fixam.
-test('custo não informado não vira null: a chave nem entra', () => {
+// insert. Diferente de aliquota_transparencia, "sem valor" para essas duas
+// colunas já é 0 no modelo do 364 OS — é o que estes testes fixam.
+test('custo não informado cai em 0, nunca em null', () => {
   const { produtos, materiasPrimas } = normaliza({ codigosVendidos: new Set([3, 17]) });
 
   const semCusto = produtos.find(p => p.pdv_codigo_produto === 3);
-  assert.ok(!('custo_unitario' in semCusto), 'custo_unitario não devia estar no objeto');
+  assert.equal(semCusto.custo_unitario, 0);
 
   const insumoSemCusto = materiasPrimas.find(m => m.pdv_codigo_produto === 17);
-  assert.ok(!('custo_unitario' in insumoSemCusto), 'insumo sem custo não devia trazer a chave');
+  assert.equal(insumoSemCusto.custo_unitario, 0);
 
-  // 157 tem custo real: confirma que a ausência acima não é a chave sumindo
-  // para todo mundo.
+  // 157 tem custo real: confirma que o 0 acima não é um bug que também
+  // zeraria um valor real.
   const black = produtos.find(p => p.pdv_codigo_produto === 157);
   assert.equal(black.custo_unitario, 12);
 });
 
-test('preço não informado ou zerado não vira null: a chave nem entra', () => {
+test('preço não informado ou zerado cai em 0, nunca em null', () => {
   const { produtos } = normaliza({ codigosVendidos: new Set([3]) });
 
   const semPreco = produtos.find(p => p.pdv_codigo_produto === 3);
-  assert.ok(!('preco_venda' in semPreco), 'preco_venda não devia estar no objeto');
+  assert.equal(semPreco.preco_venda, 0);
 
   const black = produtos.find(p => p.pdv_codigo_produto === 157);
   assert.equal(black.preco_venda, 37.9);
+});
+
+// Esta é a asserção que trava o bug de volta: nenhum objeto que sai daqui
+// pode ter custo_unitario ou preco_venda nulo ou indefinido, senão o insert
+// estoura a constraint NOT NULL na primeira linha sem valor.
+test('nenhum produto ou matéria-prima devolvido tem custo_unitario ou preco_venda nulo/indefinido', () => {
+  const { produtos, materiasPrimas } = normaliza({ codigosVendidos: new Set([3, 17]) });
+
+  assert.ok(produtos.length > 0, 'precisa ter produto para o teste valer algo');
+  assert.ok(materiasPrimas.length > 0, 'precisa ter matéria-prima para o teste valer algo');
+
+  // typeof === 'number' descarta null (typeof 'object') e undefined
+  // (typeof 'undefined') de uma vez só — notEqual(x, null) não bastaria,
+  // porque a variante strict de assert não trata undefined como igual a null.
+  for (const p of produtos) {
+    assert.equal(typeof p.custo_unitario, 'number', `produto ${p.pdv_codigo_produto} com custo_unitario nulo/indefinido`);
+    assert.equal(typeof p.preco_venda, 'number', `produto ${p.pdv_codigo_produto} com preco_venda nulo/indefinido`);
+  }
+  for (const m of materiasPrimas) {
+    assert.equal(typeof m.custo_unitario, 'number', `matéria-prima ${m.pdv_codigo_produto} com custo_unitario nulo/indefinido`);
+  }
 });
 
 test('CSOSN 500 sem CEST é recusado, não vira produto com ST sem CEST', () => {

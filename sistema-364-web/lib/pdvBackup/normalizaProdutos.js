@@ -21,7 +21,10 @@ const texto = v => {
 };
 
 // 0.0000 no Consumer quer dizer "não informado", não um valor de zero real.
-// Gravar 0 em preço faria a margem do relatório sair 100%.
+// numeroPositivo() devolve null nesse caso — cada chamador decide o que
+// fazer com o null. Para aliquota_transparencia (coluna que aceita nulo) o
+// null fica como está; para custo e preço, mais abaixo, ele cai em 0 — que
+// já é como o modelo do 364 OS representa "sem valor" nessas duas colunas.
 const numeroPositivo = v => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -115,13 +118,13 @@ export function normalizaProdutosFb({ linhas, empresaId, prefixo, codigosVendido
       categoria: texto(l.CATEGORIA),
       ativo: vivo,
     };
-    // custo_unitario e preco_venda são NOT NULL no banco, com default 0.
-    // Mandar null explícito não cai no default — é violação de NOT NULL, e
-    // uma linha assim derruba a carga inteira. Quando o Consumer não informa,
-    // a chave nem entra: quem grava resolve o valor de criação, e a rodada
-    // seguinte não mexe no que já estiver na linha.
-    const custo = numeroPositivo(l.PRECOCUSTO);
-    if (custo !== null) comum.custo_unitario = custo;
+    // custo_unitario é NOT NULL no banco, com default 0. Mandar null
+    // explícito não cai no default — é violação de NOT NULL, e uma linha
+    // assim derruba a carga inteira no insert. Diferente de
+    // aliquota_transparencia, aqui "sem valor" já é 0 no próprio modelo do
+    // 364 OS — é o default da coluna —, então o null de numeroPositivo() cai
+    // nele direto em vez de virar chave ausente.
+    comum.custo_unitario = numeroPositivo(l.PRECOCUSTO) ?? 0;
 
     if (l.CODIGOPRODUTOTIPO === TIPO_INSUMO) {
       materiasPrimas.push(comum);
@@ -150,8 +153,9 @@ export function normalizaProdutosFb({ linhas, empresaId, prefixo, codigosVendido
       ativo_fiscal: false,
       sugerido_automaticamente: true,
     };
-    const preco = numeroPositivo(l.PRECOVENDA);
-    if (preco !== null) produto.preco_venda = preco;
+    // Mesmo raciocínio de custo_unitario: preco_venda também é NOT NULL com
+    // default 0, e "sem valor" também já é 0 no modelo do 364 OS.
+    produto.preco_venda = numeroPositivo(l.PRECOVENDA) ?? 0;
     produtos.push(produto);
   }
 
