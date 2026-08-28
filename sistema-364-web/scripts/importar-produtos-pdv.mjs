@@ -85,6 +85,21 @@ async function garantirGrupos({ sb, empresaId, grupos, dryRun, log }) {
   return mapa;
 }
 
+// Colunas NOT NULL com default no banco que a normalização deixa de fora
+// quando o Consumer não informa (preço e custo ausentes ou zerados). O valor
+// entra só na criação, e entra também no retrato: se a linha nascesse com 0 e
+// o retrato não soubesse disso, a rodada seguinte leria "0 aqui, nada no
+// retrato", concluiria que uma pessoa digitou aquele 0 e nunca mais
+// atualizaria o campo — o produto ficaria sem custo para sempre.
+//
+// vw_produto_custo (atualização 21) já trata custo_unitario = 0 como "não
+// informado" e cai na ficha técnica, que é exatamente a semântica que o
+// Consumer dá ao 0.0000.
+const PADRAO_CRIACAO = {
+  produtos: { custo_unitario: 0, preco_venda: 0 },
+  materias_primas: { custo_unitario: 0 },
+};
+
 // Grava um lote numa tabela, linha a linha pela regra de merge. Linha a linha
 // de propósito: o upsert em bloco não sabe congelar campo, e são 458 linhas
 // uma vez por carga — não vale trocar clareza por microssegundos.
@@ -116,8 +131,9 @@ async function gravarLote({ sb, tabela, linhas, dryRun, log }) {
     if (!atual) {
       resumo.novos += 1;
       if (dryRun) continue;
+      const linha = { ...PADRAO_CRIACAO[tabela], ...valores };
       const { error: erroInsert } = await sb.from(tabela)
-        .insert([{ ...valores, pdv_valores: valores, pdv_importado_em: new Date().toISOString() }]);
+        .insert([{ ...linha, pdv_valores: linha, pdv_importado_em: new Date().toISOString() }]);
       if (erroInsert) throw new Error(`não consegui inserir ${novo.pdv_codigo_produto} em ${tabela}: ${erroInsert.message}`);
       continue;
     }
@@ -186,6 +202,7 @@ async function main() {
     try {
       const { caminho } = baixarBackup({ loja, diretorio, agora: new Date(), log });
       await restaurarNoContainer({ nome: nomeContainer, porta, senha, arquivo: caminho, log });
+      log("  conectando no Firebird restaurado...");
       db = await abrirFirebird({
         host: '127.0.0.1', port: porta, database: CAMINHO_FDB,
         user: 'SYSDBA', password: senha, lowercase_keys: false,
