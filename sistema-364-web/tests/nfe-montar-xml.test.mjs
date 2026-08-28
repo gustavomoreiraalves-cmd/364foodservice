@@ -243,3 +243,30 @@ test('infAdic some do XML quando não há infCpl nenhum', () => {
   const { xml } = montarXmlNFe(notaBase(), OPCOES);
   assert.doesNotMatch(xml, /<infAdic>/);
 });
+
+function notaComTexto(extra) {
+  return resolverNota({
+    pedido: { id: 'ped1' }, cliente: CLIENTE,
+    itens: [{ ...ITEM, regra: { ...ITEM.regra, ...extra } }],
+    emitente: EMITENTE, naturezaOperacao: { id: 'n1', descricao: 'Venda de mercadoria' },
+    ambiente: 'homologacao',
+  });
+}
+
+test('infAdProd é o último filho de det, depois de imposto', () => {
+  // Posição do leiaute 4.00: prod, imposto, [impostoDevol], [infAdProd].
+  // Fora de ordem é Rejeição 215 de schema, tão opaca quanto qualquer outra.
+  const { xml } = montarXmlNFe(notaComTexto({ base_legal: 'RICMS-RO art. 1º' }), OPCOES);
+  assert.match(xml, /<\/imposto><infAdProd>RICMS-RO art\. 1º<\/infAdProd><\/det>/);
+});
+
+test('item sem texto não emite a tag vazia', () => {
+  const { xml } = montarXmlNFe(notaBase(), OPCOES);
+  assert.ok(!xml.includes('<infAdProd>'),
+    'tag vazia é lida pela SEFAZ como valor vazio, não como campo ausente');
+});
+
+test('caractere que exige escape XML sai escapado no infAdProd', () => {
+  const { xml } = montarXmlNFe(notaComTexto({ base_legal: 'Convênio ICMS 52/91 <art. 1º & 2º>' }), OPCOES);
+  assert.match(xml, /<infAdProd>Convênio ICMS 52\/91 &lt;art\. 1º &amp; 2º&gt;<\/infAdProd>/);
+});

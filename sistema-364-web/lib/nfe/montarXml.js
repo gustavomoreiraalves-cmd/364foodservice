@@ -211,7 +211,9 @@ function montarDet(item) {
     + montarCOFINS(item)
     + '</imposto>';
 
-  return `<det nItem="${item.numeroItem}">${prod}${imposto}</det>`;
+  // infAdProd é o último filho opcional de det, depois de imposto e do
+  // impostoDevol que este sistema não emite. tag() omite quando não há texto.
+  return `<det nItem="${item.numeroItem}">${prod}${imposto}${tag('infAdProd', item.infAdProd)}</det>`;
 }
 
 function montarEnderEmit(end) {
