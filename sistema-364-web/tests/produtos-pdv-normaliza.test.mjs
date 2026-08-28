@@ -126,11 +126,10 @@ test('insumo descontinuado com venda entra inativo', () => {
 
 // ------------------------------------------------------------- zeros
 
-test('preço, custo e alíquota de transparência zerados viram null', () => {
-  // 0.0000 no Consumer é "não informado", não um preço de zero real. Gravar 0
-  // faria a margem do relatório sair 100%. Insumo não tem coluna preco_venda
-  // (materias_primas não tem essa coluna, tem preco_alvo_kg), então nem entra
-  // nesse objeto — daí o undefined, não um null explícito.
+test('alíquota de transparência zerada vira null', () => {
+  // 0.0000 no Consumer é "não informado", não um valor de zero real. Insumo
+  // não tem coluna preco_venda (materias_primas tem preco_alvo_kg), então nem
+  // entra nesse objeto — daí o undefined, não um null explícito.
   const { materiasPrimas, produtos } = normaliza({ codigosVendidos: new Set([3]) });
 
   const salsa = materiasPrimas.find(m => m.pdv_codigo_produto === 16);
@@ -146,4 +145,57 @@ test('preço, custo e alíquota de transparência zerados viram null', () => {
   // não é um bug que também zeraria um valor real.
   const black = produtos.find(p => p.pdv_codigo_produto === 157);
   assert.equal(black.aliquota_transparencia, 12);
+});
+
+// Custo e preço são NOT NULL no banco, com default 0. Um null explícito não
+// cai no default: é violação de NOT NULL e derruba a carga no primeiro
+// insert. Por isso a chave não pode existir quando o Consumer não informa —
+// é o que estes dois testes fixam.
+test('custo não informado não vira null: a chave nem entra', () => {
+  const { produtos, materiasPrimas } = normaliza({ codigosVendidos: new Set([3, 17]) });
+
+  const semCusto = produtos.find(p => p.pdv_codigo_produto === 3);
+  assert.ok(!('custo_unitario' in semCusto), 'custo_unitario não devia estar no objeto');
+
+  const insumoSemCusto = materiasPrimas.find(m => m.pdv_codigo_produto === 17);
+  assert.ok(!('custo_unitario' in insumoSemCusto), 'insumo sem custo não devia trazer a chave');
+
+  // 157 tem custo real: confirma que a ausência acima não é a chave sumindo
+  // para todo mundo.
+  const black = produtos.find(p => p.pdv_codigo_produto === 157);
+  assert.equal(black.custo_unitario, 12);
+});
+
+test('preço não informado ou zerado não vira null: a chave nem entra', () => {
+  const { produtos } = normaliza({ codigosVendidos: new Set([3]) });
+
+  const semPreco = produtos.find(p => p.pdv_codigo_produto === 3);
+  assert.ok(!('preco_venda' in semPreco), 'preco_venda não devia estar no objeto');
+
+  const black = produtos.find(p => p.pdv_codigo_produto === 157);
+  assert.equal(black.preco_venda, 37.9);
+});
+
+test('CSOSN 500 sem CEST é recusado, não vira produto com ST sem CEST', () => {
+  // produtos_st_exige_cest é um CHECK do banco: sujeito_st sem CEST não entra.
+  // Recusar aqui é o que impede a linha de matar a carga lá.
+  const linha = {
+    CODIGO: 9100, NOME: 'Picanha ST sem CEST', DESCONTINUADO: 'N', CODIGOPRODUTOTIPO: 1,
+    NCM: '02013000', CEST: null, ALIQUOTATRANSPARENCIA: 0, UNIDADE: 'kg',
+    CATEGORIA: 'Carnes', CFOP: 5405, SITUACAOTRIBUTARIA: '500', ORIGEMMERCADORIA: 0,
+    PRECOVENDA: 99.9, PRECOCUSTO: 60,
+  };
+  const { produtos, recusados } = normaliza({ linhas: [linha] });
+
+  assert.equal(produtos.length, 0);
+  const r = recusados.find(x => x.codigo === 9100);
+  assert.equal(r.campo, 'cest');
+  assert.match(r.motivo, /CSOSN 500/);
+});
+
+test('CSOSN 500 com CEST válido continua passando', () => {
+  const { produtos } = normaliza();
+  const comCest = produtos.find(p => p.pdv_codigo_produto === 165);
+  assert.equal(comCest.sujeito_st, true);
+  assert.equal(comCest.cest, '1707900');
 });

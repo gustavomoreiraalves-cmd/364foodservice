@@ -69,6 +69,17 @@ function validarFiscal(linha, recusados) {
     recusados.push({ codigo: linha.CODIGO, campo: 'cest', valor: cest, motivo: 'CEST não tem 7 dígitos' });
     return null;
   }
+  // O banco tem `produtos_st_exige_cest`: sujeito_st sem CEST é violação de
+  // check, e uma linha assim derrubaria a carga inteira no insert. CSOSN 500
+  // é justamente o que liga sujeito_st, então a recusa mora aqui — com o
+  // código na lista, para alguém completar o CEST no PDV.
+  if (texto(linha.SITUACAOTRIBUTARIA) === '500' && !cest) {
+    recusados.push({
+      codigo: linha.CODIGO, campo: 'cest', valor: '',
+      motivo: 'CSOSN 500 (ST) exige CEST, e a linha veio sem',
+    });
+    return null;
+  }
   const origemBruta = linha.ORIGEMMERCADORIA;
   let origem = null;
   if (origemBruta !== null && origemBruta !== undefined && origemBruta !== '') {
@@ -102,9 +113,15 @@ export function normalizaProdutosFb({ linhas, empresaId, prefixo, codigosVendido
       nome: texto(l.NOME) || `Produto ${l.CODIGO} do PDV`,
       unidade: unidadeDoPdv(l.UNIDADE),
       categoria: texto(l.CATEGORIA),
-      custo_unitario: numeroPositivo(l.PRECOCUSTO),
       ativo: vivo,
     };
+    // custo_unitario e preco_venda são NOT NULL no banco, com default 0.
+    // Mandar null explícito não cai no default — é violação de NOT NULL, e
+    // uma linha assim derruba a carga inteira. Quando o Consumer não informa,
+    // a chave nem entra: quem grava resolve o valor de criação, e a rodada
+    // seguinte não mexe no que já estiver na linha.
+    const custo = numeroPositivo(l.PRECOCUSTO);
+    if (custo !== null) comum.custo_unitario = custo;
 
     if (l.CODIGOPRODUTOTIPO === TIPO_INSUMO) {
       materiasPrimas.push(comum);
@@ -116,10 +133,9 @@ export function normalizaProdutosFb({ linhas, empresaId, prefixo, codigosVendido
     if (!fiscal) continue;
 
     const unidade = comum.unidade;
-    produtos.push({
+    const produto = {
       ...comum,
       codigo: codigoDoProduto(prefixo, l.CODIGO),
-      preco_venda: numeroPositivo(l.PRECOVENDA),
       ncm: fiscal.ncm,
       cest: fiscal.cest,
       origem_mercadoria: fiscal.origem,
@@ -133,7 +149,10 @@ export function normalizaProdutosFb({ linhas, empresaId, prefixo, codigosVendido
       fator_conversao_tributavel: 1,
       ativo_fiscal: false,
       sugerido_automaticamente: true,
-    });
+    };
+    const preco = numeroPositivo(l.PRECOVENDA);
+    if (preco !== null) produto.preco_venda = preco;
+    produtos.push(produto);
   }
 
   return { produtos, materiasPrimas, recusados };

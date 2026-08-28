@@ -64,3 +64,43 @@ begin
     raise notice 'OK 5: unique vale também para materias_primas';
   end;
 end $$;
+
+-- Cenário 6: produto sem custo e sem preço — o que a normalização produz
+-- quando o Consumer não informa — entra e cai no default 0. É esta forma que
+-- lib/pdvBackup/normalizaProdutos.js precisa emitir: chave ausente, não null.
+insert into public.produtos (empresa_id, codigo, nome, unidade, pdv_codigo_produto)
+  values (:'empresa', 'STK-P3', 'Batata c/ Cheddar', 'un', 3);
+do $$
+declare c numeric; v numeric;
+begin
+  select custo_unitario, preco_venda into c, v from public.produtos
+   where empresa_id = '11111111-1111-1111-1111-111111111111' and pdv_codigo_produto = 3;
+  if c <> 0 or v <> 0 then raise exception 'FALHA 6: esperava 0/0, achei %/%', c, v; end if;
+  raise notice 'OK 6: chave ausente cai no default 0';
+end $$;
+
+-- Cenário 7: o mesmo produto com null explícito é recusado. É o motivo de a
+-- normalização não poder mandar null: null não cai no default.
+do $$
+begin
+  begin
+    insert into public.produtos (empresa_id, codigo, nome, unidade, pdv_codigo_produto, custo_unitario)
+      values ('11111111-1111-1111-1111-111111111111', 'STK-P4', 'Sem custo', 'un', 4, null);
+    raise exception 'FALHA 7: custo_unitario nulo foi aceito';
+  exception when not_null_violation then
+    raise notice 'OK 7: null explícito não cai no default, é violação de NOT NULL';
+  end;
+end $$;
+
+-- Cenário 8: sujeito_st sem CEST é recusado pelo check. Por isso a linha com
+-- CSOSN 500 e CEST vazio sai na lista de recusados, e não vira produto.
+do $$
+begin
+  begin
+    insert into public.produtos (empresa_id, codigo, nome, unidade, pdv_codigo_produto, sujeito_st, cest)
+      values ('11111111-1111-1111-1111-111111111111', 'STK-P5', 'ST sem CEST', 'kg', 5, true, null);
+    raise exception 'FALHA 8: sujeito_st sem CEST foi aceito';
+  exception when check_violation then
+    raise notice 'OK 8: produtos_st_exige_cest barra ST sem CEST';
+  end;
+end $$;

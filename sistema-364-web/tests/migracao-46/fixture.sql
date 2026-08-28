@@ -7,6 +7,10 @@ create table if not exists public.empresas (
   prefixo_codigo text
 );
 
+-- custo_unitario, preco_venda e produtos_st_exige_cest são reproduzidos da
+-- produção de propósito: sem eles a fixture aceitaria linha que o banco de
+-- verdade recusa, e o harness certificaria uma carga que quebra no primeiro
+-- insert. Foi exatamente esse buraco que deixou passar o null de custo.
 create table if not exists public.produtos (
   id uuid primary key default gen_random_uuid(),
   empresa_id uuid not null references public.empresas(id),
@@ -14,9 +18,15 @@ create table if not exists public.produtos (
   nome text not null,
   unidade text not null,
   categoria text,
+  custo_unitario numeric(12,2) not null default 0,
+  preco_venda numeric(12,2) not null default 0,
+  ncm text,
+  cest text,
+  sujeito_st boolean not null default false,
   ativo boolean not null default true,
   created_at timestamptz not null default now(),
-  unique (empresa_id, codigo)
+  unique (empresa_id, codigo),
+  constraint produtos_st_exige_cest check (not sujeito_st or cest is not null)
 );
 
 create table if not exists public.materias_primas (
@@ -25,6 +35,7 @@ create table if not exists public.materias_primas (
   nome text not null,
   unidade text not null,
   categoria text,
+  custo_unitario numeric(12,2) not null default 0,
   ativo boolean not null default true,
   created_at timestamptz not null default now()
 );
