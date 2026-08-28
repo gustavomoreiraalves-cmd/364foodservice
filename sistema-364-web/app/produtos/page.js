@@ -6,10 +6,10 @@ import { CONSERVACOES } from '../../lib/producao';
 import AppShell from '../../components/AppShell';
 import Icone from '../../components/Icone';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { camposDoFormulario, mensagemAoAlternarAtivo } from '../../lib/cadastro';
+import { camposDoFormulario, mensagemAoAlternarAtivo, mensagemAoExcluir } from '../../lib/cadastro';
 import ProdutoFiscal from '../../components/ProdutoFiscal';
 import ConfiguracaoFiscalModal from '../../components/ConfiguracaoFiscalModal';
-import { pendenciasFiscaisProduto } from '../../lib/fiscal';
+import { pendenciasFiscaisProduto, fatorConversaoTributavel } from '../../lib/fiscal';
 
 const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false, rastreado: false };
 
@@ -48,7 +48,7 @@ function camposFiscais(form) {
     origem_mercadoria: numeroOuNulo(form.origem_mercadoria),
     sujeito_st: !!form.sujeito_st,
     unidade_tributavel: textoOuNulo(form.unidade_tributavel),
-    fator_conversao_tributavel: numeroOuNulo(form.fator_conversao_tributavel),
+    fator_conversao_tributavel: fatorConversaoTributavel(form),
     peso_liquido_kg: numeroOuNulo(form.peso_liquido_kg),
     peso_bruto_kg: numeroOuNulo(form.peso_bruto_kg),
     gtin: textoOuNulo(form.gtin),
@@ -252,6 +252,9 @@ function Conteudo() {
     const { error } = await supabase.from('produtos')
       .update({
         ativo_fiscal: true,
+        // Produto salvo antes desta derivação existir pode estar sem o fator;
+        // repetimos aqui para que ele não fique travado esperando um resalvar.
+        fator_conversao_tributavel: fatorConversaoTributavel(formProd),
         sugerido_automaticamente: false,
         revisado_em: new Date().toISOString(),
         revisado_por_id: sessao?.user?.id || null,
@@ -272,7 +275,7 @@ function Conteudo() {
   async function excluir(id) {
     if (!confirm('Excluir este produto e sua ficha técnica? Não dá para desfazer.')) return;
     const { error } = await supabase.from('produtos').delete().eq('id', id);
-    if (error) { alert('Não foi possível excluir (pode haver produções ou pedidos vinculados): ' + error.message); return; }
+    if (error) { alert(mensagemAoExcluir(error, 'produto')); return; }
     if (selecionado === id) fechar();
     carregar();
   }

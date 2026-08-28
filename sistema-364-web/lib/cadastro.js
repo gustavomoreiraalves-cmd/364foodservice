@@ -43,6 +43,52 @@ export function mensagemAoAlternarAtivo(erro) {
   return 'Não foi possível mudar a situação: ' + mensagem;
 }
 
+// Todo Excluir de cadastro esbarra, mais cedo ou mais tarde, numa chave
+// estrangeira: o registro já tem movimento e o Postgres recusa apagá-lo. O texto
+// cru ("update or delete on table \"produtos\" violates foreign key constraint
+// \"producoes_internas_produto_id_fkey\" on table \"producoes_internas\"") não diz
+// nem o que travou nem o que fazer. Aqui o nome da tabela que segura vira o nome
+// do movimento em português, e a saída é sempre a mesma: Desativar tira o
+// cadastro das listas sem apagar o histórico, que é o que a contabilidade e a
+// rastreabilidade exigem que continue existindo.
+const MOVIMENTO_POR_TABELA = {
+  producoes_internas: 'produções internas',
+  producoes: 'produções',
+  producao_consumo: 'consumo de produção',
+  pedido_itens: 'itens de pedido',
+  pedidos: 'pedidos',
+  nfe_saida_itens: 'itens de nota fiscal emitida',
+  embalagem_itens: 'itens de embalagem',
+  defumacao_itens: 'itens de defumação',
+  recebimento_itens: 'itens de recebimento',
+  recebimentos: 'recebimentos',
+  contas_a_pagar: 'contas a pagar',
+  stock_movements: 'movimentos de estoque',
+  stock_balances: 'saldos de estoque',
+  conciliacao_padroes: 'regras de conciliação bancária',
+};
+
+// A tabela que bloqueia é a última citada por `on table "..."` — a primeira é a
+// do próprio cadastro que se tentou excluir.
+export function movimentoQueBloqueia(mensagem) {
+  const tabelas = [...String(mensagem ?? '').matchAll(/on table "([^"]+)"/g)].map(m => m[1]);
+  const tabela = tabelas[tabelas.length - 1];
+  return tabela ? (MOVIMENTO_POR_TABELA[tabela] || tabela.replace(/_/g, ' ')) : null;
+}
+
+// `oQue` é o nome do cadastro na tela ("produto", "cliente"), só para a frase
+// sair legível. Erro que não é de FK volta como veio: o texto original é a única
+// pista do que aconteceu, e um palpite errado atrapalharia mais que ajudaria.
+export function mensagemAoExcluir(erro, oQue = 'cadastro') {
+  const mensagem = erro?.message || '';
+  const ehChaveEstrangeira = erro?.code === '23503' || /foreign key constraint/i.test(mensagem);
+  if (!ehChaveEstrangeira) return `Não foi possível excluir: ${mensagem}`;
+  const movimento = movimentoQueBloqueia(mensagem);
+  return `Não foi possível excluir: este ${oQue} já tem ${movimento || 'movimento'} registrado, `
+    + 'e o histórico não pode ser apagado. Use Desativar para tirá-lo das listas sem perder o registro.'
+    + (mensagem ? '\n\nErro original: ' + mensagem : '');
+}
+
 // O PostgREST monta `?columns=` a partir das chaves do objeto enviado ao
 // insert, mesmo quando o valor da chave é `undefined` — ela sobrevive ao
 // JSON.stringify porque a lista de colunas é montada antes da serialização.
@@ -108,11 +154,7 @@ export function useCadastro({ tabela, formVazio, empresaId, aoTerminar, paraGrav
   async function excluir(registro, pergunta) {
     if (!confirm(pergunta)) return;
     const { error } = await supabase.from(tabela).delete().eq('id', registro.id);
-    if (error) {
-      alert('Não foi possível excluir: ' + error.message
-        + '\n\nSe este cadastro já tem movimento, use Desativar em vez de Excluir.');
-      return;
-    }
+    if (error) { alert(mensagemAoExcluir(error)); return; }
     if (editando === registro.id) cancelarEdicao();
     await aoTerminar();
   }

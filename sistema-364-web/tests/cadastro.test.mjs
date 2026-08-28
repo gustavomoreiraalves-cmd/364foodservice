@@ -3,7 +3,7 @@ process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'chave-anon-de-teste';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-const { camposDoFormulario, mensagemAoAlternarAtivo, linhaParaInserir } = await import('../lib/cadastro.js');
+const { camposDoFormulario, mensagemAoAlternarAtivo, linhaParaInserir, mensagemAoExcluir, movimentoQueBloqueia } = await import('../lib/cadastro.js');
 
 const FORM_VAZIO = { nome: '', categoria: 'Carnes', validade_dias: 90, producao_interna: false };
 
@@ -101,4 +101,38 @@ test('linhaParaInserir: empresaId null é gravado como null (não confundido com
   const r = linhaParaInserir({ nome: 'Cliente X' }, null);
   assert.equal(r.empresa_id, null);
   assert.equal('empresa_id' in r, true);
+});
+
+
+// O erro real que a tela devolveu ao tentar excluir um produto de teste.
+const FK_PRODUCAO_INTERNA = {
+  code: '23503',
+  message: 'update or delete on table "produtos" violates foreign key constraint '
+    + '"producoes_internas_produto_id_fkey" on table "producoes_internas"',
+};
+
+test('a tabela que bloqueia é a segunda citada, não a do próprio cadastro', () => {
+  assert.equal(movimentoQueBloqueia(FK_PRODUCAO_INTERNA.message), 'produções internas');
+  assert.equal(movimentoQueBloqueia(
+    'update or delete on table "clientes" violates foreign key constraint '
+    + '"pedidos_cliente_id_fkey" on table "pedidos"'), 'pedidos');
+  assert.equal(movimentoQueBloqueia(''), null);
+});
+
+test('tabela fora do dicionário aparece pelo próprio nome, sem underline', () => {
+  assert.equal(movimentoQueBloqueia(
+    'violates foreign key constraint "x_fkey" on table "tabela_nova_qualquer"'),
+    'tabela nova qualquer');
+});
+
+test('erro de FK vira instrução em português e mantém o texto original', () => {
+  const texto = mensagemAoExcluir(FK_PRODUCAO_INTERNA, 'produto');
+  assert.match(texto, /este produto já tem produções internas registrado/);
+  assert.match(texto, /Use Desativar/);
+  assert.match(texto, /Erro original: update or delete/, 'a pista técnica não pode sumir');
+});
+
+test('erro que não é de FK volta como veio', () => {
+  const texto = mensagemAoExcluir({ code: '42501', message: 'permission denied for table produtos' });
+  assert.equal(texto, 'Não foi possível excluir: permission denied for table produtos');
 });

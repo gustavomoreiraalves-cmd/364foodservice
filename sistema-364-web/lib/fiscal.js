@@ -48,6 +48,22 @@ export function cestsDoNcm(tabelaCest, ncm) {
   });
 }
 
+// Quando a unidade de venda e a tributável são a mesma, o fator só pode ser 1,
+// e por isso o formulário nem mostra o campo. O banco, porém, exige o fator
+// preenchido para ligar ativo_fiscal (constraint produtos_ativo_fiscal_completo),
+// então é aqui que ele é derivado — senão o Liberar quebra com um erro de check
+// que ninguém consegue resolver pela tela.
+export function fatorConversaoTributavel(produto = {}) {
+  const informado = produto.fator_conversao_tributavel;
+  if (informado !== '' && informado !== null && informado !== undefined) {
+    const n = Number(informado);
+    if (Number.isFinite(n)) return n;
+  }
+  const unidade = String(produto.unidade ?? '').trim().toUpperCase();
+  const tributavel = String(produto.unidade_tributavel ?? '').trim().toUpperCase();
+  return tributavel && unidade === tributavel ? 1 : null;
+}
+
 // O que impede este produto de entrar numa nota. Lista vazia = pode faturar.
 export function pendenciasFiscaisProduto(produto = {}) {
   const faltando = [];

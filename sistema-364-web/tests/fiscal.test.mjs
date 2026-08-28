@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   digitoVerificadorGtin, gtinValido, soDigitos,
   cestsDoNcm, pendenciasFiscaisProduto, prontoParaEmissao, SEM_GTIN,
+  fatorConversaoTributavel,
 } from '../lib/fiscal.js';
 
 test('dígito verificador do GTIN acompanha o do banco', () => {
@@ -127,4 +128,31 @@ test('pessoa física identifica-se por CPF', async () => {
     codigo_municipio_ibge: '1100122', municipio: 'Ji-Paraná', uf: 'RO', cep: '76900808',
   };
   assert.deepEqual(pendenciasFiscaisCliente(pf), []);
+});
+
+
+test('fator de conversão vale 1 quando a unidade de venda é a própria tributável', () => {
+  // O caso do 0364-002: vende e tributa em UN, o formulário esconde o campo e a
+  // constraint produtos_ativo_fiscal_completo recusava o Liberar por null.
+  assert.equal(fatorConversaoTributavel({ unidade: 'un', unidade_tributavel: 'UN' }), 1);
+  assert.equal(fatorConversaoTributavel({ unidade: ' KG ', unidade_tributavel: 'kg' }), 1);
+});
+
+test('fator informado pelo usuário prevalece sobre a derivação', () => {
+  assert.equal(fatorConversaoTributavel({
+    unidade: 'un', unidade_tributavel: 'KG', fator_conversao_tributavel: '0.5',
+  }), 0.5);
+  // Mesmo com unidades iguais, um fator digitado é dado humano: não sobrescrever.
+  assert.equal(fatorConversaoTributavel({
+    unidade: 'un', unidade_tributavel: 'un', fator_conversao_tributavel: 2,
+  }), 2);
+});
+
+test('sem unidade tributável, ou com unidades diferentes, o fator continua nulo', () => {
+  assert.equal(fatorConversaoTributavel({ unidade: 'un', unidade_tributavel: '' }), null);
+  assert.equal(fatorConversaoTributavel({ unidade: 'un', unidade_tributavel: 'KG' }), null);
+  assert.equal(fatorConversaoTributavel({}), null);
+  assert.equal(fatorConversaoTributavel({
+    unidade: 'un', unidade_tributavel: 'un', fator_conversao_tributavel: 'abc',
+  }), 1, 'lixo digitado não vira NaN: cai na derivação');
 });
