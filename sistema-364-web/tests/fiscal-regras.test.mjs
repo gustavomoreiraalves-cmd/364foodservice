@@ -4,6 +4,7 @@ import {
   validarRegraTributaria, cfopSugerido, descreverDestinatario, resumoRegra,
   CSOSN_QUE_PERMITE_CREDITO, ST_RESPONSAVEL,
   CST_PIS_COFINS, cstPisCofinsPara, regimeDoEmpregador,
+  LIMITE_INF_AD_PROD, juntarTextoFiscal,
 } from '../lib/fiscalRegras.js';
 
 const BASE = {
@@ -162,4 +163,51 @@ test('CST de entrada não serve para natureza de saída', () => {
 
 test('CST em branco continua aceito — o campo ainda não é obrigatório', () => {
   assert.deepEqual(validarRegraTributaria({ ...BASE, cst_pis: '', cst_cofins: null }), []);
+});
+
+test('juntarTextoFiscal põe a base legal antes da observação, separadas por travessão', () => {
+  assert.equal(
+    juntarTextoFiscal('RICMS-RO Anexo VI, item 84.0', 'ICMS retido por ST'),
+    'RICMS-RO Anexo VI, item 84.0 — ICMS retido por ST',
+  );
+});
+
+test('juntarTextoFiscal omite a parte vazia em vez de deixar o separador solto', () => {
+  assert.equal(juntarTextoFiscal('só a base legal', ''), 'só a base legal');
+  assert.equal(juntarTextoFiscal(null, 'só a observação'), 'só a observação');
+  assert.equal(juntarTextoFiscal('  ', null), undefined,
+    'espaço em branco não é texto: viraria um infAdProd vazio no XML');
+  assert.equal(juntarTextoFiscal(null, null), undefined);
+});
+
+test('alíquota de PIS/COFINS acima de 99,9999 é recusada no formulário, não no banco', () => {
+  // As colunas são numeric(6,4): dois dígitos inteiros, quatro decimais.
+  // Gravar 100 estoura a precisão e volta como erro cru do PostgREST.
+  const erros = validarRegraTributaria({ ...BASE, aliquota_pis: 100 });
+  assert.ok(erros.some(e => /alíquota do PIS/i.test(e)), erros.join(' | '));
+  assert.equal(validarRegraTributaria({ ...BASE, aliquota_pis: 99.9999 }).length, 0);
+});
+
+test('alíquota negativa ou não numérica é recusada', () => {
+  assert.ok(validarRegraTributaria({ ...BASE, aliquota_cofins: -1 })
+    .some(e => /alíquota da COFINS/i.test(e)));
+  assert.ok(validarRegraTributaria({ ...BASE, aliquota_cofins: 'sete' })
+    .some(e => /alíquota da COFINS/i.test(e)));
+});
+
+test('alíquota em branco é permitida — o resolver já trata nulo como zero', () => {
+  assert.equal(validarRegraTributaria({ ...BASE, aliquota_pis: '', aliquota_cofins: null }).length, 0);
+});
+
+test('base legal e observação somadas não passam de 500 caracteres', () => {
+  // A validação vive no cadastro porque falhar na emissão é caro: o operador
+  // já escolheu o pedido e abriu a tela. Falhar aqui é de graça.
+  const erros = validarRegraTributaria({
+    ...BASE, base_legal: 'a'.repeat(300), observacao_fiscal: 'b'.repeat(300),
+  });
+  assert.ok(erros.some(e => e.includes(String(LIMITE_INF_AD_PROD))), erros.join(' | '));
+  assert.equal(
+    validarRegraTributaria({ ...BASE, base_legal: 'a'.repeat(200), observacao_fiscal: 'b'.repeat(200) }).length,
+    0,
+  );
 });

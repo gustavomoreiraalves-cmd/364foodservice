@@ -2,6 +2,7 @@
 import {
   ST_RESPONSAVEL, ST_RESPONSAVEL_OPCOES, CSOSN_OPCOES, MOD_BC_OPCOES, MOD_BC_ST_OPCOES,
   cfopSugerido, validarRegraTributaria, cstPisCofinsPara, regimeDoEmpregador,
+  juntarTextoFiscal, LIMITE_INF_AD_PROD,
 } from '../lib/fiscalRegras.js';
 import { soDigitos } from '../lib/fiscal.js';
 import { usePessoaJuridica } from '../lib/empresa';
@@ -16,6 +17,7 @@ export default function RegraTributariaForm({ form, setForm, naturezas, cfops, p
   const { pessoaJuridica } = usePessoaJuridica();
   const regime = regimeDoEmpregador(pessoaJuridica);
   const gruposCst = cstPisCofinsPara(natureza?.tipo_operacao, regime);
+  const textoDoItem = juntarTextoFiscal(form.base_legal, form.observacao_fiscal) || '';
   const retemSt = form.st_responsavel === ST_RESPONSAVEL.SUBSTITUTO;
   const jaRetido = form.st_responsavel === ST_RESPONSAVEL.SUBSTITUIDO;
 
@@ -210,6 +212,22 @@ export default function RegraTributariaForm({ form, setForm, naturezas, cfops, p
           </p>
         </div>
         <div>
+          <label>Alíquota do PIS (%)</label>
+          <input type="number" step="0.0001" min="0" max="99.9999"
+                 value={form.aliquota_pis ?? ''}
+                 onChange={e => set({ aliquota_pis: e.target.value })} />
+        </div>
+        <div>
+          <label>Alíquota da COFINS (%)</label>
+          <input type="number" step="0.0001" min="0" max="99.9999"
+                 value={form.aliquota_cofins ?? ''}
+                 onChange={e => set({ aliquota_cofins: e.target.value })} />
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            Em branco vale zero. No Simples Nacional o PIS/COFINS sai no DAS e a nota
+            costuma ir com CST 49 e alíquota zerada — preencha só se o contador pedir.
+          </p>
+        </div>
+        <div>
           <label>Vigência (início)</label>
           <input type="date" value={form.vigencia_inicio || ''}
                  onChange={e => set({ vigencia_inicio: e.target.value })} />
@@ -232,6 +250,10 @@ export default function RegraTributariaForm({ form, setForm, naturezas, cfops, p
           <label>Observação impressa no item da nota</label>
           <input value={form.observacao_fiscal || ''}
                  onChange={e => set({ observacao_fiscal: e.target.value })} />
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            {textoDoItem.length}/{LIMITE_INF_AD_PROD} caracteres — base legal e observação saem
+            juntas na informação adicional do item, na nota.
+          </p>
         </div>
       </div>
 

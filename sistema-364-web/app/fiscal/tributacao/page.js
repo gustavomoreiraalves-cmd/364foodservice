@@ -20,6 +20,7 @@ const REGRA_VAZIA = {
   mod_bc: null, reducao_base_percentual: '', mod_bc_st: null,
   reducao_base_st_percentual: '', mva_percentual: '', aliquota_interna_destino: '',
   aliquota_st_retido: '', cst_pis: '', cst_cofins: '',
+  aliquota_pis: '', aliquota_cofins: '',
   permite_credito_simples: false, base_legal: '', observacao_fiscal: '',
   vigencia_inicio: '', vigencia_fim: null,
 };
@@ -388,6 +389,8 @@ function camposRegra(form, empresaId) {
     aliquota_st_retido: numeroOuNulo(form.aliquota_st_retido),
     cst_pis: textoOuNulo(form.cst_pis),
     cst_cofins: textoOuNulo(form.cst_cofins),
+    aliquota_pis: numeroOuNulo(form.aliquota_pis),
+    aliquota_cofins: numeroOuNulo(form.aliquota_cofins),
     st_responsavel: form.st_responsavel || ST_RESPONSAVEL.NAO_APLICAVEL,
     permite_credito_simples: !!form.permite_credito_simples,
     base_legal: textoOuNulo(form.base_legal),

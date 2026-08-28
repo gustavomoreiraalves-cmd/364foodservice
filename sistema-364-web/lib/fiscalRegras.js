@@ -153,6 +153,21 @@ function ehVazio(valor) {
 }
 
 // O que impede esta regra de ser salva. Lista vazia = pode gravar.
+// Limite do infAdProd (informação adicional por item) no leiaute 4.00. Vive
+// aqui porque quem digita o texto é o cadastro de regra, e é lá que o estouro
+// tem conserto barato — na emissão, o operador já perdeu a viagem.
+export const LIMITE_INF_AD_PROD = 500;
+
+// Base legal e observação viram um texto só, nessa ordem: a citação dá o
+// amparo, a observação complementa. Parte vazia é omitida — devolver
+// "texto — " deixaria um separador solto no item da nota.
+export function juntarTextoFiscal(baseLegal, observacao) {
+  const partes = [baseLegal, observacao]
+    .map(p => String(p ?? "").trim())
+    .filter(p => p !== "");
+  return partes.length ? partes.join(" — ") : undefined;
+}
+
 export function validarRegraTributaria(regra = {}) {
   const erros = [];
   const alvos = [regra.produto_id, regra.grupo_tributario_id, regra.ncm_generico]
@@ -192,6 +207,26 @@ export function validarRegraTributaria(regra = {}) {
     } else if (regra.tipo_operacao === 'entrada' && linha.sentido === 'S') {
       erros.push(`${rotulo} ${cst} é de saída, e esta natureza é de entrada`);
     }
+  }
+
+  // numeric(6,4): dois dígitos inteiros e quatro decimais. O teto é 99,9999 —
+  // 100 não cabe na coluna, e o erro do banco não explica isso a ninguém.
+  for (const [campo, rotulo] of [["aliquota_pis", "alíquota do PIS"], ["aliquota_cofins", "alíquota da COFINS"]]) {
+    if (ehVazio(regra[campo])) continue;
+    const valor = Number(regra[campo]);
+    if (!Number.isFinite(valor) || valor < 0 || valor > 99.9999) {
+      erros.push(`${rotulo} precisa ficar entre 0 e 99,9999 (a coluna é numeric(6,4))`);
+    }
+  }
+
+  // Os dois textos saem juntos no infAdProd do item, então é a soma que
+  // precisa caber — validar cada um por si deixaria passar 300 + 300.
+  const textoDoItem = juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal);
+  if (textoDoItem && textoDoItem.length > LIMITE_INF_AD_PROD) {
+    erros.push(
+      `base legal e observação somam ${textoDoItem.length} caracteres; o limite do campo `
+      + `de informação adicional do item é ${LIMITE_INF_AD_PROD}`,
+    );
   }
 
   const uf = String(regra.uf_destino ?? '*').trim();
