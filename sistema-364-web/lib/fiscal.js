@@ -137,6 +137,27 @@ export function camposCopiaFiscal(produtoFonte = {}) {
   return payload;
 }
 
+// O que a cópia muda num destino, campo a campo. Existe para a pessoa ver
+// antes de aplicar — em especial `apaga`, o campo que tinha valor e vai ficar
+// vazio porque a origem está vazia. Copiar é espelhar, e a remoção é a parte
+// que ninguém espera.
+//
+// A comparação é frouxa de propósito: o formulário devolve '' onde o banco tem
+// null, e o <select> devolve '0' onde o banco tem 0. Comparar cru marcaria
+// mudança em todo campo em branco, toda vez que a aba abrisse.
+export function diferencasCopiaFiscal(destino = {}, payload = {}) {
+  const mesmo = (a, b) => String(a ?? '') === String(b ?? '');
+  const vazio = v => v === null || v === undefined || v === '';
+  const mudancas = [];
+  for (const campo of CAMPOS_COPIA_FISCAL) {
+    const atual = destino[campo] ?? null;
+    const novoValor = payload[campo] ?? null;
+    if (mesmo(atual, novoValor)) continue;
+    mudancas.push({ campo, atual, novo: novoValor, apaga: !vazio(atual) && vazio(novoValor) });
+  }
+  return mudancas;
+}
+
 // Quais grupos tributários têm ao menos uma regra ativa.
 //
 // Não é simulação de fn_resolver_regra_tributaria: a resolução real depende de

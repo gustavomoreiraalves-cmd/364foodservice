@@ -5,6 +5,7 @@ import {
 } from '../lib/fiscal.js';
 import { resumoRegra, descreverDestinatario } from '../lib/fiscalRegras.js';
 import Icone from './Icone';
+import CopiarFiscalDeProduto from './CopiarFiscalDeProduto';
 
 // Bloco fiscal do cadastro de produto. Só o que é intrínseco à mercadoria mora
 // aqui: NCM, CEST, origem, unidades, código de barras. A tributação (CFOP,
@@ -14,7 +15,8 @@ import Icone from './Icone';
 const AVISO_SEM_MIGRACAO = 'O cadastro fiscal precisa da atualização 36 aplicada no banco. '
   + 'Enquanto ela não roda, os campos abaixo ficam indisponíveis.';
 
-export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, editando, onLiberar, naturezas = [], regras = [], onAbrirConfiguracao }) {
+export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, editando, onLiberar,
+  naturezas = [], regras = [], onAbrirConfiguracao, produtos = [], produtoAtualId = null }) {
   const set = campos => setForm({ ...form, ...campos });
   const { ncms = [], cests = [], unidades = [], grupos = [] } = tabelas || {};
 
@@ -29,6 +31,9 @@ export default function ProdutoFiscal({ form, setForm, tabelas, disponivel, edit
 
   return (
     <>
+      <CopiarFiscalDeProduto form={form} setForm={setForm} produtos={produtos}
+                             grupos={grupos} produtoAtualId={produtoAtualId} />
+
       <div className={'pendencias' + (pendencias.length ? '' : ' completo')}>
         {pendencias.length ? (
           <>

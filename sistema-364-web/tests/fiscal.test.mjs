@@ -5,6 +5,7 @@ import {
   cestsDoNcm, pendenciasFiscaisProduto, prontoParaEmissao, SEM_GTIN,
   fatorConversaoTributavel,
   CAMPOS_COPIA_FISCAL, camposCopiaFiscal, gruposComRegra, situacaoFiscalProduto,
+  diferencasCopiaFiscal,
 } from '../lib/fiscal.js';
 
 test('dígito verificador do GTIN acompanha o do banco', () => {
@@ -239,4 +240,35 @@ test('produto sem grupo nenhum tem a pendência, não o aviso — são coisas di
   const s = situacaoFiscalProduto({ ...FONTE, grupo_tributario_id: null }, gruposComRegra([]));
   assert.equal(s.grupoSemRegra, false);
   assert.ok(s.pendencias.some(p => /grupo tributário/i.test(p)), s.pendencias.join(' | '));
+});
+
+test('diferencasCopiaFiscal lista só o que muda, com o valor de antes e o de depois', () => {
+  const destino = { ncm: '16025000', cest: null, origem_mercadoria: 0, sujeito_st: false };
+  const mudancas = diferencasCopiaFiscal(destino, camposCopiaFiscal(FONTE));
+  const porCampo = Object.fromEntries(mudancas.map(m => [m.campo, m]));
+  assert.deepEqual(porCampo.ncm, { campo: 'ncm', atual: '16025000', novo: '02102000', apaga: false });
+  assert.equal(porCampo.cest.novo, '1708300');
+  assert.ok(!('origem_mercadoria' in porCampo), 'campo igual não entra na lista');
+});
+
+test('diferencasCopiaFiscal marca a remoção de valor, que é o caso perigoso', () => {
+  // Copiar é espelhar: campo vazio na origem apaga o do destino. Essa é a
+  // mudança que precisa estar visível ANTES de aplicar, não descoberta depois.
+  const mudancas = diferencasCopiaFiscal({ cest: '1708300' }, camposCopiaFiscal({ ...FONTE, cest: null }));
+  const cest = mudancas.find(m => m.campo === 'cest');
+  assert.equal(cest.apaga, true);
+  assert.equal(cest.novo, null);
+});
+
+test('diferencasCopiaFiscal trata nulo e string vazia como o mesmo vazio', () => {
+  // O formulário devolve '' onde o banco tem null; sem isto toda abertura da
+  // aba mostraria mudança falsa em todo campo em branco.
+  const mudancas = diferencasCopiaFiscal({ cest: '' }, camposCopiaFiscal({ ...FONTE, cest: null }));
+  assert.ok(!mudancas.some(m => m.campo === 'cest'));
+});
+
+test('diferencasCopiaFiscal compara número e texto pelo valor, não pelo tipo', () => {
+  // origem_mercadoria volta 0 do banco e '0' do <select> — não é mudança.
+  const mudancas = diferencasCopiaFiscal({ origem_mercadoria: '0' }, camposCopiaFiscal(FONTE));
+  assert.ok(!mudancas.some(m => m.campo === 'origem_mercadoria'));
 });

@@ -543,7 +543,8 @@ function Conteudo() {
                                  disponivel={fiscalDisponivel} editando={!!produtoSelecionado}
                                  onLiberar={liberarParaEmissao}
                                  naturezas={naturezas} regras={regrasTributarias}
-                                 onAbrirConfiguracao={grupoId => setConfigAberta({ grupoId })} />
+                                 onAbrirConfiguracao={grupoId => setConfigAberta({ grupoId })}
+                                 produtos={produtos} produtoAtualId={selecionado} />
                 </div>
                 <div className="modal-foot">
                   <button className="btn" type="submit" disabled={salvando || !fiscalDisponivel}>
