@@ -380,6 +380,35 @@ tbody tr:hover td{background:var(--sunken);}
 }
 .registro.inativo{opacity:.5;}
 
+/* Alça de arraste na borda direita de um cabeçalho: a faixa de 10px é a área
+   de clique (fácil de acertar), mas só a linha fina no meio fica visível —
+   sem ela ninguém percebe que a coluna é redimensionável antes de passar o
+   mouse. Mais forte no hover, onde vira o cursor de arraste. */
+.col-resize-handle{position:absolute; top:0; right:-5px; width:10px; height:100%; cursor:col-resize; z-index:2;}
+.col-resize-handle::after{
+  content:''; position:absolute; top:15%; bottom:15%; left:50%; width:1px;
+  background:var(--seam-strong); transform:translateX(-50%);
+}
+.col-resize-handle:hover::after{background:var(--ink-2); width:2px;}
+/* min-width:0 em cada nível é o que permite o texto encolher e truncar em vez
+   de estourar a largura da coluna e brigar com a alça de redimensionar. */
+.col-cel{display:flex; align-items:center; min-width:0; gap:2px;}
+.col-titulo{display:flex; align-items:center; gap:2px; min-width:0; flex:1 1 auto; cursor:pointer; user-select:none;}
+.col-titulo:hover{color:var(--ink);}
+.col-titulo-texto{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
+.col-ordenacao{opacity:.35; font-size:9px; flex:none;}
+.col-ordenacao.ativo{opacity:1; color:var(--green-deep);}
+
+.colunas-menu{
+  position:absolute; right:0; top:calc(100% + 6px); background:var(--panel);
+  border:1px solid var(--seam); border-radius:var(--radius);
+  box-shadow:0 12px 32px -8px rgba(17,22,28,.22); padding:8px 12px; z-index:30; min-width:200px;
+}
+.colunas-menu label{display:flex; align-items:center; gap:8px; font-size:12.5px; padding:5px 0; margin:0; cursor:pointer; font-weight:400; color:var(--ink);}
+
+.paginacao{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; flex-wrap:wrap; font-size:12.5px;}
+.paginacao select{width:auto; padding:5px 8px; font-size:12.5px;}
+
 .items-list{border:1px solid var(--seam); border-radius:var(--radius); padding:10px; margin-top:8px; background:var(--sunken);}
 .item-line{display:flex; gap:8px; align-items:center; padding:5px 0; font-size:12.5px; border-bottom:1px solid var(--seam);}
 .item-line:last-child{border-bottom:0;}

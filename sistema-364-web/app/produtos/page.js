@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, proximoCodigoProduto, parseCustoUnitario } from '../../lib/format';
 import { CONSERVACOES } from '../../lib/producao';
@@ -24,6 +24,34 @@ const PROD_FISCAL_VAZIO = {
 };
 
 const CUSTO_INVALIDO = 'Custo inválido. Informe um número igual ou maior que zero (ex.: 45,50), sem separador de milhar. Deixe em branco para usar o custo da ficha técnica.';
+
+// Colunas da lista que podem ser escondidas ou redimensionadas. Código e nome
+// ficam sempre visíveis — sem nome a linha vira uma sequência de números sem
+// referência para clicar. `ordenavel` habilita o clique no título para
+// ordenar; fiscal e status são rótulo de estado, não valor, então não ordenam.
+const COLUNAS_PRODUTOS = [
+  { id: 'codigo', titulo: 'Código', escondivel: false, ordenavel: true },
+  { id: 'nome', titulo: 'Produto', escondivel: false, ordenavel: true },
+  { id: 'categoria', titulo: 'Categoria', escondivel: true, ordenavel: true },
+  { id: 'ncm', titulo: 'NCM', escondivel: true, ordenavel: true },
+  { id: 'custo', titulo: 'Custo', escondivel: true, ordenavel: true },
+  { id: 'venda', titulo: 'Venda', escondivel: true, ordenavel: true },
+  { id: 'margem', titulo: 'Margem', escondivel: true, ordenavel: true },
+  { id: 'fiscal', titulo: 'Situação fiscal', escondivel: true, ordenavel: false },
+  { id: 'status', titulo: 'Status (ativo/inativo)', escondivel: true, ordenavel: false },
+];
+const LARGURAS_PADRAO_COLUNAS = {
+  codigo: 58, categoria: 86, ncm: 84, custo: 62, venda: 62, margem: 56, fiscal: 78, status: 70,
+};
+const LIMITES_LARGURA_COLUNAS = {
+  codigo: [40, 160], categoria: [40, 320], ncm: [40, 220],
+  custo: [50, 160], venda: [50, 160], margem: [44, 140],
+  fiscal: [54, 180], status: [54, 160],
+};
+const TAMANHOS_PAGINA = [25, 50, 100, 200];
+const LS_LARGURAS_COLUNAS = 'produtos:colunas:largura';
+const LS_COLUNAS_VISIVEIS = 'produtos:colunas:visiveis';
+const LS_TAMANHO_PAGINA = 'produtos:paginacao:tamanho';
 
 function numeroOuNulo(valor) {
   if (valor === '' || valor === null || valor === undefined) return null;
@@ -83,7 +111,17 @@ function Conteudo() {
   const [formProd, setFormProd] = useState({ ...PROD_VAZIO, ...PROD_FISCAL_VAZIO });
   const [aba, setAba] = useState('geral');
   const [busca, setBusca] = useState('');
-  const [mostrarInativos, setMostrarInativos] = useState(false);
+  const [statusFiltro, setStatusFiltro] = useState('ativos'); // 'ativos' | 'inativos' | 'todos'
+  const [largurasColunas, setLargurasColunas] = useState({});
+  const [colunasVisiveis, setColunasVisiveis] = useState({});
+  const [menuColunasAberto, setMenuColunasAberto] = useState(false);
+  const [ordenacao, setOrdenacao] = useState({ campo: null, direcao: 'asc' });
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(50);
+  // Guarda contra sobrescrever o localStorage com os valores padrão antes de
+  // termos lido o que já estava salvo — sem isto o primeiro render some com a
+  // preferência da visita anterior.
+  const hidratadoRef = useRef(false);
   const [itemFicha, setItemFicha] = useState({});
   const [regraForm, setRegraForm] = useState({});
   const [tabelasFiscais, setTabelasFiscais] = useState({ ncms: [], cests: [], unidades: [], grupos: [] });
@@ -155,16 +193,50 @@ function Conteudo() {
     return () => window.removeEventListener('keydown', aoTeclar);
   }, [configAberta]);
 
+  // Lê preferências salvas na visita anterior. Roda só uma vez, depois do
+  // primeiro render, porque no servidor não existe localStorage.
+  useEffect(() => {
+    try {
+      const l = window.localStorage.getItem(LS_LARGURAS_COLUNAS);
+      if (l) setLargurasColunas(JSON.parse(l));
+      const v = window.localStorage.getItem(LS_COLUNAS_VISIVEIS);
+      if (v) setColunasVisiveis(JSON.parse(v));
+      const t = window.localStorage.getItem(LS_TAMANHO_PAGINA);
+      if (t !== null) setTamanhoPagina(Number(t));
+    } catch {}
+    hidratadoRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!hidratadoRef.current) return;
+    try { window.localStorage.setItem(LS_LARGURAS_COLUNAS, JSON.stringify(largurasColunas)); } catch {}
+  }, [largurasColunas]);
+
+  useEffect(() => {
+    if (!hidratadoRef.current) return;
+    try { window.localStorage.setItem(LS_COLUNAS_VISIVEIS, JSON.stringify(colunasVisiveis)); } catch {}
+  }, [colunasVisiveis]);
+
+  useEffect(() => {
+    if (!hidratadoRef.current) return;
+    try { window.localStorage.setItem(LS_TAMANHO_PAGINA, String(tamanhoPagina)); } catch {}
+  }, [tamanhoPagina]);
+
+  // Busca, filtro ou tamanho de página novos invalidam a página atual — senão
+  // a pessoa pode ficar numa página 4 que não existe mais para o filtro novo.
+  useEffect(() => { setPagina(1); }, [busca, statusFiltro, tamanhoPagina]);
+
   const visiveis = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return produtos
-      .filter(p => mostrarInativos || p.ativo !== false)
+      .filter(p => statusFiltro === 'todos'
+        || (statusFiltro === 'inativos' ? p.ativo === false : p.ativo !== false))
       .filter(p => !termo
         || p.nome.toLowerCase().includes(termo)
         || (p.codigo || '').toLowerCase().includes(termo)
         || (p.categoria || '').toLowerCase().includes(termo)
         || (p.ncm || '').includes(termo));
-  }, [produtos, busca, mostrarInativos]);
+  }, [produtos, busca, statusFiltro]);
 
   function custoTeorico(produtoId) {
     return fichas
@@ -173,6 +245,112 @@ function Conteudo() {
         const mp = mps.find(m => m.id === f.materia_prima_id);
         return s + (mp ? Number(f.quantidade) * Number(mp.custo_unitario) : 0);
       }, 0);
+  }
+
+  // Custo e margem dependem da ficha técnica, então são calculados uma vez
+  // aqui — ordenação e paginação reaproveitam o valor em vez de recalcular
+  // por linha a cada render.
+  const linhas = useMemo(() => visiveis.map(p => {
+    const custoT = custoTeorico(p.id);
+    const custoEfetivo = Number(p.custo_unitario) > 0 ? Number(p.custo_unitario) : custoT;
+    const margem = Number(p.preco_venda)
+      ? ((Number(p.preco_venda) - custoEfetivo) / Number(p.preco_venda) * 100) : 0;
+    return { produto: p, custoEfetivo, margem };
+  }), [visiveis, fichas, mps]);
+
+  const VALOR_ORDENACAO = {
+    codigo: l => l.produto.codigo || '',
+    nome: l => l.produto.nome || '',
+    categoria: l => l.produto.categoria || '',
+    ncm: l => l.produto.ncm || '',
+    custo: l => l.custoEfetivo,
+    venda: l => Number(l.produto.preco_venda) || 0,
+    margem: l => l.margem,
+  };
+
+  const linhasOrdenadas = useMemo(() => {
+    if (!ordenacao.campo) return linhas;
+    const extrair = VALOR_ORDENACAO[ordenacao.campo];
+    const dir = ordenacao.direcao === 'asc' ? 1 : -1;
+    return [...linhas].sort((a, b) => {
+      const va = extrair(a), vb = extrair(b);
+      if (typeof va === 'string') return va.localeCompare(vb, 'pt-BR') * dir;
+      return (va - vb) * dir;
+    });
+  }, [linhas, ordenacao]);
+
+  function alternarOrdenacao(campo) {
+    setOrdenacao(o => o.campo === campo
+      ? { campo, direcao: o.direcao === 'asc' ? 'desc' : 'asc' }
+      : { campo, direcao: 'asc' });
+  }
+
+  // Sem o ⇅ nas colunas que ainda não foram ordenadas, nada no cabeçalho
+  // avisa que o título é clicável — a seta só aparece depois do primeiro clique.
+  function indicadorOrdenacao(campo) {
+    const ativo = ordenacao.campo === campo;
+    const simbolo = ativo ? (ordenacao.direcao === 'asc' ? '▲' : '▼') : '⇅';
+    return <span className={'col-ordenacao' + (ativo ? ' ativo' : '')}> {simbolo}</span>;
+  }
+
+  function colunaVisivel(id) {
+    const coluna = COLUNAS_PRODUTOS.find(c => c.id === id);
+    if (!coluna || !coluna.escondivel) return true;
+    return colunasVisiveis[id] !== false;
+  }
+
+  function alternarColuna(id) {
+    setColunasVisiveis(v => ({ ...v, [id]: v[id] === false ? true : false }));
+  }
+
+  // Arraste na alça da coluna: largura inicial + delta do ponteiro, sem
+  // ultrapassar os limites — coluna grande demais empurra as outras pra fora
+  // da tela, pequena demais corta o conteúdo sem aviso.
+  function iniciarRedimensionar(e, id) {
+    e.preventDefault();
+    e.stopPropagation();
+    const [minimo, maximo] = LIMITES_LARGURA_COLUNAS[id];
+    const larguraInicial = largurasColunas[id] ?? LARGURAS_PADRAO_COLUNAS[id];
+    const xInicial = e.clientX;
+    function mover(ev) {
+      const nova = Math.min(maximo, Math.max(minimo, larguraInicial + (ev.clientX - xInicial)));
+      setLargurasColunas(l => ({ ...l, [id]: nova }));
+    }
+    function soltar() {
+      window.removeEventListener('pointermove', mover);
+      window.removeEventListener('pointerup', soltar);
+    }
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+  }
+
+  // Célula de cabeçalho reaproveitada pelas colunas redimensionáveis — sem
+  // isto as ~8 colunas repetiam o mesmo bloco de título + alça de arraste.
+  // O título fica num flex separado da alça (col-cel) e o texto num span à
+  // parte (col-titulo-texto): sem essa separação, coluna estreita quebra o
+  // texto em duas linhas por cima da própria alça em vez de truncar.
+  function celulaCabecalho(id, titulo, { ordenavel, redimensionavel, className, alinharFim } = {}) {
+    const estilo = redimensionavel
+      ? {
+        width: largurasColunas[id] ?? LARGURAS_PADRAO_COLUNAS[id], position: 'relative',
+        ...(alinharFim ? { justifyContent: 'flex-end' } : {}),
+      }
+      : undefined;
+    return (
+      <span key={id} className={['col-cel', className].filter(Boolean).join(' ')} style={estilo}>
+        {ordenavel
+          ? (
+            <span className="col-titulo" onClick={() => alternarOrdenacao(id)}>
+              <span className="col-titulo-texto">{titulo}</span>
+              {indicadorOrdenacao(id)}
+            </span>
+          )
+          : titulo}
+        {redimensionavel && (
+          <span className="col-resize-handle" onPointerDown={e => iniciarRedimensionar(e, id)} />
+        )}
+      </span>
+    );
   }
 
   function abrir(p) {
@@ -347,6 +525,16 @@ function Conteudo() {
   const fichaAberta = criando || !!produtoSelecionado;
   const pendencias = fiscalDisponivel ? pendenciasFiscaisProduto(formProd) : [];
 
+  // tamanhoPagina 0 = "Todos": uma página só, do tamanho do total filtrado.
+  const totalPaginas = tamanhoPagina ? Math.max(1, Math.ceil(linhas.length / tamanhoPagina)) : 1;
+  const paginaAtual = Math.min(pagina, totalPaginas);
+  const linhasPagina = tamanhoPagina
+    ? linhasOrdenadas.slice((paginaAtual - 1) * tamanhoPagina, paginaAtual * tamanhoPagina)
+    : linhasOrdenadas;
+  const inicioIntervalo = linhas.length ? (tamanhoPagina ? (paginaAtual - 1) * tamanhoPagina + 1 : 1) : 0;
+  const fimIntervalo = tamanhoPagina ? Math.min(paginaAtual * tamanhoPagina, linhas.length) : linhas.length;
+  const custoVendaMargemVisivel = colunaVisivel('custo') || colunaVisivel('venda') || colunaVisivel('margem');
+
   return (
     <>
       <section className="panel">
@@ -361,55 +549,99 @@ function Conteudo() {
           </button>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 11.5 }}>
-            {visiveis.length} de {produtos.length} produto{produtos.length === 1 ? '' : 's'}
+            {inicioIntervalo}–{fimIntervalo} de {visiveis.length} produto{visiveis.length === 1 ? '' : 's'}
+            {visiveis.length !== produtos.length ? ` (${produtos.length} no total)` : ''}
           </span>
-          <label className="check-line" style={{ fontSize: 12 }}>
-            <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} />
-            Mostrar inativos
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, fontSize: 12 }}>
+              Status
+              <select value={statusFiltro} onChange={e => setStatusFiltro(e.target.value)}
+                      style={{ width: 'auto', padding: '5px 8px', fontSize: 12 }}>
+                <option value="ativos">Ativos</option>
+                <option value="inativos">Inativos</option>
+                <option value="todos">Todos</option>
+              </select>
+            </label>
+            <div style={{ position: 'relative' }}>
+              <button type="button" className="btn secondary small" onClick={() => setMenuColunasAberto(a => !a)}>
+                Colunas
+              </button>
+              {menuColunasAberto && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 29 }} onClick={() => setMenuColunasAberto(false)} />
+                  <div className="colunas-menu">
+                    {COLUNAS_PRODUTOS.filter(c => c.escondivel).map(c => (
+                      <label key={c.id}>
+                        <input type="checkbox" checked={colunaVisivel(c.id)} onChange={() => alternarColuna(c.id)} />
+                        {c.titulo}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
+        {/* Sem o teto de largura, "Produto" (única coluna flexível) engole toda
+            a sobra de uma tela larga e empurra as colunas fixas pra bem longe
+            dele — a lista fica com um vão enorme no meio em vez de colunas
+            organizadas lado a lado. */}
         {visiveis.length ? (
-          <div className="registro-lista" role="listbox" aria-label="Produtos">
+          <div className="registro-lista" role="listbox" aria-label="Produtos" style={{ maxWidth: 1180 }}>
             <div className="registro-cabecalho" aria-hidden="true">
-              <span className="codigo">Código</span>
-              <span className="nome">Produto</span>
-              <span className="tag-espaco">Categoria</span>
-              <span className="ncm">NCM</span>
-              <span className="valores">
-                <span>Custo</span><span>Venda</span><span>Margem</span>
-              </span>
-              <span className="tag-espaco situacao">Fiscal</span>
+              {celulaCabecalho('codigo', 'Código', { ordenavel: true, redimensionavel: true, className: 'codigo' })}
+              {celulaCabecalho('nome', 'Produto', { ordenavel: true, className: 'nome' })}
+              {colunaVisivel('categoria') && celulaCabecalho('categoria', 'Categoria', { ordenavel: true, redimensionavel: true, className: 'tag-espaco' })}
+              {colunaVisivel('ncm') && celulaCabecalho('ncm', 'NCM', { ordenavel: true, redimensionavel: true, className: 'ncm' })}
+              {custoVendaMargemVisivel && (
+                <span className="valores">
+                  {colunaVisivel('custo') && celulaCabecalho('custo', 'Custo', { ordenavel: true, redimensionavel: true, alinharFim: true })}
+                  {colunaVisivel('venda') && celulaCabecalho('venda', 'Venda', { ordenavel: true, redimensionavel: true, alinharFim: true })}
+                  {colunaVisivel('margem') && celulaCabecalho('margem', 'Margem', { ordenavel: true, redimensionavel: true, alinharFim: true })}
+                </span>
+              )}
+              {colunaVisivel('fiscal') && celulaCabecalho('fiscal', 'Fiscal', { redimensionavel: true, className: 'tag-espaco situacao' })}
+              {colunaVisivel('status') && celulaCabecalho('status', 'Status', { redimensionavel: true, className: 'tag-espaco situacao' })}
             </div>
-            {visiveis.map(p => {
-              const custoT = custoTeorico(p.id);
-              const custoEfetivo = Number(p.custo_unitario) > 0 ? Number(p.custo_unitario) : custoT;
-              const margem = Number(p.preco_venda)
-                ? ((Number(p.preco_venda) - custoEfetivo) / Number(p.preco_venda) * 100) : 0;
+            {linhasPagina.map(l => {
+              const p = l.produto;
               return (
                 <button type="button" key={p.id} role="option"
                         aria-selected={selecionado === p.id}
                         className={'registro' + (p.ativo === false ? ' inativo' : '')}
                         onClick={() => abrir(p)}>
-                  <span className="codigo">{p.codigo}</span>
+                  <span className="codigo" style={{ width: largurasColunas.codigo ?? LARGURAS_PADRAO_COLUNAS.codigo }}>{p.codigo}</span>
                   <span className="nome" title={p.nome}>{p.nome}</span>
-                  {p.categoria
-                    ? <span className="tag categoria" title={p.categoria}>{p.categoria}</span>
-                    : <span className="tag-espaco" aria-hidden="true" />}
-                  <span className="ncm" title={p.ncm ? 'NCM ' + p.ncm : 'sem NCM'}>
-                    {p.ncm || <span className="muted">—</span>}
-                  </span>
-                  <span className="valores">
-                    <span title="Custo">{fmtMoney(custoEfetivo)}</span>
-                    <span title="Preço de venda">{fmtMoney(p.preco_venda)}</span>
-                    <span title="Margem" className={margem < 0 ? 'erro' : ''}>{margem.toFixed(0)}%</span>
-                  </span>
-                  {fiscalDisponivel && (p.ativo_fiscal
-                    ? <span className="tag ok">fiscal ok</span>
-                    : <span className="tag warn">fiscal</span>)}
-                  {p.ativo === false && <span className="tag neutro">inativo</span>}
+                  {colunaVisivel('categoria') && (p.categoria
+                    ? <span className="tag categoria" title={p.categoria} style={{ width: largurasColunas.categoria ?? LARGURAS_PADRAO_COLUNAS.categoria }}>{p.categoria}</span>
+                    : <span className="tag-espaco" aria-hidden="true" style={{ width: largurasColunas.categoria ?? LARGURAS_PADRAO_COLUNAS.categoria }} />)}
+                  {colunaVisivel('ncm') && (
+                    <span className="ncm" title={p.ncm ? 'NCM ' + p.ncm : 'sem NCM'} style={{ width: largurasColunas.ncm ?? LARGURAS_PADRAO_COLUNAS.ncm }}>
+                      {p.ncm || <span className="muted">—</span>}
+                    </span>
+                  )}
+                  {custoVendaMargemVisivel && (
+                    <span className="valores">
+                      {colunaVisivel('custo') && (
+                        <span title="Custo" style={{ width: largurasColunas.custo ?? LARGURAS_PADRAO_COLUNAS.custo }}>{fmtMoney(l.custoEfetivo)}</span>
+                      )}
+                      {colunaVisivel('venda') && (
+                        <span title="Preço de venda" style={{ width: largurasColunas.venda ?? LARGURAS_PADRAO_COLUNAS.venda }}>{fmtMoney(p.preco_venda)}</span>
+                      )}
+                      {colunaVisivel('margem') && (
+                        <span title="Margem" className={l.margem < 0 ? 'erro' : ''} style={{ width: largurasColunas.margem ?? LARGURAS_PADRAO_COLUNAS.margem }}>{l.margem.toFixed(0)}%</span>
+                      )}
+                    </span>
+                  )}
+                  {colunaVisivel('fiscal') && fiscalDisponivel && (p.ativo_fiscal
+                    ? <span className="tag ok" style={{ width: largurasColunas.fiscal ?? LARGURAS_PADRAO_COLUNAS.fiscal }}>fiscal ok</span>
+                    : <span className="tag warn" style={{ width: largurasColunas.fiscal ?? LARGURAS_PADRAO_COLUNAS.fiscal }}>fiscal</span>)}
+                  {colunaVisivel('status') && (p.ativo === false
+                    ? <span className="tag neutro" style={{ width: largurasColunas.status ?? LARGURAS_PADRAO_COLUNAS.status }}>inativo</span>
+                    : <span className="tag-espaco" aria-hidden="true" style={{ width: largurasColunas.status ?? LARGURAS_PADRAO_COLUNAS.status }} />)}
                 </button>
               );
             })}
@@ -418,6 +650,25 @@ function Conteudo() {
           <p className="muted" style={{ padding: '18px 0' }}>
             {busca ? 'Nenhum produto encontrado para essa busca.' : 'Nenhum produto cadastrado ainda.'}
           </p>
+        )}
+
+        {visiveis.length > 0 && (
+          <div className="paginacao">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button type="button" className="btn secondary small" disabled={paginaAtual <= 1}
+                      onClick={() => setPagina(p => Math.max(1, p - 1))}>Anterior</button>
+              <span className="muted">Página {paginaAtual} de {totalPaginas}</span>
+              <button type="button" className="btn secondary small" disabled={paginaAtual >= totalPaginas}
+                      onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}>Próxima</button>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+              Por página
+              <select value={tamanhoPagina} onChange={e => setTamanhoPagina(Number(e.target.value))}>
+                {TAMANHOS_PAGINA.map(n => <option key={n} value={n}>{n}</option>)}
+                <option value={0}>Todos</option>
+              </select>
+            </label>
+          </div>
         )}
       </section>
 
