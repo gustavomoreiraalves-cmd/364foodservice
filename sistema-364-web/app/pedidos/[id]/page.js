@@ -10,6 +10,11 @@ import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../../lib/pedidos';
+import { SITUACAO_NOTA, STATUS_NOTA_INDETERMINADO } from '../../../lib/emissaoFiscal';
+import { arquivosDaNota, faltaArquivoDeNotaAutorizada } from '../../../lib/nfe/arquivos';
+import { signedUrlRecebimento } from '../../../lib/storage';
+import DanfePrint, { imprimirDanfe } from '../../../components/DanfePrint';
+import { modeloDanfe } from '../../../lib/nfe/danfe';
 
 // Mesmo padrão de app/fiscal/emissor/page.js e app/empresas/page.js: o token
 // da sessão pode ter girado desde o mount, então pega sempre na hora da
@@ -19,25 +24,6 @@ async function cabecalhoAuth() {
   return { Authorization: `Bearer ${session?.access_token || ''}`, 'Content-Type': 'application/json' };
 }
 
-// Rótulo e cor de tag para cada status de nfe_saida_documentos (atualização
-// 43). 'enviado' e 'erro_comunicacao' são os dois estados "indeterminados" de
-// lib/nfe/emitir.js (STATUS_INDETERMINADO): a nota foi transmitida, mas o que
-// a SEFAZ decidiu não ficou confirmado neste sistema — visualmente e
-// textualmente isto precisa ficar diferente de uma rejeição comum, porque o
-// que resolve não é clicar de novo, é conferir na SEFAZ.
-const SITUACAO_NOTA = {
-  rascunho: { rotulo: 'Rascunho', classe: 'neutro' },
-  numero_reservado: { rotulo: 'Número reservado', classe: 'neutro' },
-  assinado: { rotulo: 'Assinada — não transmitida', classe: 'neutro' },
-  enviado: { rotulo: 'Enviada — resultado não confirmado', classe: 'warn' },
-  erro_comunicacao: { rotulo: 'Falha de comunicação — resultado não confirmado', classe: 'warn' },
-  autorizado: { rotulo: 'Autorizada', classe: 'ok' },
-  rejeitado: { rotulo: 'Rejeitada pela SEFAZ', classe: 'bad' },
-  contingencia: { rotulo: 'Contingência', classe: 'warn' },
-  cancelado: { rotulo: 'Cancelada', classe: 'neutro' },
-};
-const STATUS_INDETERMINADO_UI = ['enviado', 'erro_comunicacao'];
-
 // Rótulo do botão de ação: propositalmente diferente para o caso
 // indeterminado ("Emitir mesmo assim", não "Tentar novamente") — a palavra
 // "tentar de novo" sugere um clique despreocupado, e é exatamente o que não
@@ -45,25 +31,27 @@ const STATUS_INDETERMINADO_UI = ['enviado', 'erro_comunicacao'];
 function rotuloBotaoEmitir(notaFiscal) {
   if (!notaFiscal) return 'Emitir NF-e';
   if (notaFiscal.status === 'rejeitado') return 'Tentar novamente';
-  if (STATUS_INDETERMINADO_UI.includes(notaFiscal.status)) return 'Emitir mesmo assim';
+  if (STATUS_NOTA_INDETERMINADO.includes(notaFiscal.status)) return 'Emitir mesmo assim';
   return 'Continuar emissão'; // rascunho/numero_reservado/assinado: retomar uma tentativa interrompida antes do envio é seguro.
 }
 
 export default function PedidoPage() {
   const [ficha, setFicha] = useState(null);
+  const [danfe, setDanfe] = useState(null);
   return (
     <>
       <AppShell modulo="pedidos" titulo="Pedido de Venda" desc="Detalhe, edição e cancelamento do pedido">
-        <Conteudo setFicha={setFicha} />
+        <Conteudo setFicha={setFicha} setDanfe={setDanfe} />
       </AppShell>
       <FichaPrint ficha={ficha} />
+      <DanfePrint danfe={danfe} />
     </>
   );
 }
 
 const CABECALHO_VAZIO = { data: '', cliente_id: '', responsavel_id: '', observacoes: '' };
 
-function Conteudo({ setFicha }) {
+function Conteudo({ setFicha, setDanfe }) {
   const { id } = useParams();
   const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
@@ -121,7 +109,7 @@ function Conteudo({ setFicha }) {
       // do tempo (mesmo critério de lib/nfe/emitir.js) — só a última importa
       // para a tela.
       supabase.from('nfe_saida_documentos')
-        .select('status, chave, numero, protocolo_autorizacao, motivo_rejeicao')
+        .select('status, chave, numero, protocolo_autorizacao, motivo_rejeicao, xml_path, nfeproc_path')
         .eq('pedido_id', pedidoAtual.id).eq('empresa_id', eid)
         .order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('naturezas_operacao')
@@ -376,6 +364,40 @@ function Conteudo({ setFicha }) {
     carregar();
   }
 
+  // Abre o XML da nota. O bucket é privado; a policy recebimentos_storage_select
+  // libera pelo primeiro segmento do caminho, que é o empresa_id — então o
+  // próprio cliente assina, sem precisar de rota. Mesmo padrão de verAnexo em
+  // app/recebimentos/page.js.
+  async function baixarXml(path) {
+    if (!path) return;
+    try {
+      const url = await signedUrlRecebimento(path);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      alert('Não foi possível abrir o XML: ' + err.message);
+    }
+  }
+
+  // Monta e imprime o DANFE. O XML só é baixado no clique: a maioria das
+  // visitas ao pedido não quer imprimir, e buscar o arquivo de toda nota
+  // aberta seria tráfego à toa.
+  async function abrirDanfe() {
+    const path = notaFiscal?.nfeproc_path;
+    if (!path) {
+      alert('Esta nota não tem o XML autorizado guardado aqui — a gravação no Storage falhou. '
+        + 'A autorização vale do mesmo jeito; consulte a chave no portal da SEFAZ para obter o arquivo.');
+      return;
+    }
+    try {
+      const url = await signedUrlRecebimento(path);
+      const resposta = await fetch(url);
+      if (!resposta.ok) throw new Error(`não consegui baixar o XML (HTTP ${resposta.status})`);
+      imprimirDanfe(setDanfe, modeloDanfe(await resposta.text()));
+    } catch (err) {
+      alert('Não foi possível montar o DANFE: ' + err.message);
+    }
+  }
+
   // Emite a NF-e para este pedido (POST /api/fiscal/emitir-nfe, Task 6).
   // Corpo e retorno conferidos lendo app/api/fiscal/emitir-nfe/route.js e
   // lib/nfe/emitir.js: { pedidoId, naturezaOperacaoId } →
@@ -596,6 +618,27 @@ function Conteudo({ setFicha }) {
                     {notaFiscal.protocolo_autorizacao && (
                       <div style={{ marginTop: 4 }}><b>Protocolo de autorização:</b> {notaFiscal.protocolo_autorizacao}</div>
                     )}
+                    {arquivosDaNota(notaFiscal).map(a => (
+                      <div key={a.path} style={{ marginTop: 6 }}>
+                        <button type="button" className="btn secondary small"
+                                onClick={() => baixarXml(a.path)}>
+                          {a.rotulo}
+                        </button>
+                        <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>{a.descricao}</span>
+                      </div>
+                    ))}
+                    {notaFiscal.status === 'autorizado' && notaFiscal.nfeproc_path && (
+                      <div style={{ marginTop: 8 }}>
+                        <button type="button" className="btn small" onClick={abrirDanfe}>Imprimir DANFE</button>
+                      </div>
+                    )}
+                    {faltaArquivoDeNotaAutorizada(notaFiscal) && (
+                      <div className="muted" style={{ marginTop: 6, fontSize: 11.5 }}>
+                        A nota está autorizada na SEFAZ, mas o XML não ficou guardado aqui — a gravação no
+                        Storage é melhor-esforço e falhou. A autorização vale do mesmo jeito; para obter o
+                        arquivo, consulte a chave no portal da SEFAZ.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -611,7 +654,7 @@ function Conteudo({ setFicha }) {
                 {/* Resultado indeterminado (nota transmitida, veredito não confirmado
                     aqui) — visual e texto de propósito diferentes de uma rejeição: o
                     que resolve é conferir a chave na SEFAZ, não clicar de novo. */}
-                {notaFiscal && STATUS_INDETERMINADO_UI.includes(notaFiscal.status) && (
+                {notaFiscal && STATUS_NOTA_INDETERMINADO.includes(notaFiscal.status) && (
                   <div className="banner bad">
                     <b>Situação desconhecida.</b> Esta nota foi transmitida à SEFAZ, mas o resultado não
                     ficou confirmado neste sistema. Antes de tentar de novo, confira a chave{' '}
