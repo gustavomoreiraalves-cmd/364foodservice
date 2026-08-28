@@ -45,6 +45,7 @@ export const MENU = [
   {
     tipo: 'grupo', id: 'fiscal', label: 'Fiscal', ic: 'fiscal', itens: [
       { label: 'Tributação', href: '/fiscal/tributacao', modulo: 'fiscal' },
+      { label: 'Produtos — situação fiscal', href: '/fiscal/produtos', modulo: 'fiscal' },
       { label: 'Emissor (NF-e/NFC-e)', href: '/fiscal/emissor', modulo: 'fiscal' },
     ],
   },
