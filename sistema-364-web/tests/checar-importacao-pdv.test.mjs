@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backupMaisNovo, decidirRodada } from '../scripts/checar-importacao-pdv.mjs';
+import { backupMaisNovo, decidirRodada, importacaoBloqueia } from '../scripts/checar-importacao-pdv.mjs';
 
 // ------------------------------------------------------ backupMaisNovo
 
@@ -46,4 +46,34 @@ test('decidirRodada: nada pendente e nada novo não dispara', () => {
   const r = decidirRodada({ importacaoEmAndamento: false, pedidoManualPendente: false, backupMaisNovo: false });
   assert.equal(r.rodar, false);
   assert.equal(r.motivo, null);
+});
+
+// ------------------------------------------------ importacaoBloqueia
+// Este é o ponto exato do bug: o checador perguntava só se existia linha
+// aberta, sem olhar a idade. Uma rodada que morreu sem fechar o log bloqueava
+// o cron para sempre.
+
+test('importacaoBloqueia: sem linha aberta, não bloqueia', () => {
+  assert.equal(importacaoBloqueia(null), false);
+});
+
+test('importacaoBloqueia: rodada viva bloqueia — é o caso que a guarda existe para cobrir', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  assert.equal(importacaoBloqueia({ iniciado_em: '2026-08-28T11:50:00Z', terminado_em: null }, agora), true);
+});
+
+test('importacaoBloqueia: rodada morta NÃO bloqueia', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  assert.equal(importacaoBloqueia({ iniciado_em: '2026-08-24T03:01:48Z', terminado_em: null }, agora), false);
+});
+
+test('importacaoBloqueia + decidirRodada: pedido manual passa por cima de rodada morta', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  const morta = { iniciado_em: '2026-08-24T03:01:48Z', terminado_em: null };
+  const decisao = decidirRodada({
+    importacaoEmAndamento: importacaoBloqueia(morta, agora),
+    pedidoManualPendente: true,
+    backupMaisNovo: false,
+  });
+  assert.equal(decisao.rodar, true);
 });

@@ -21,6 +21,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { urlDownload, dataDoCabecalhoGbak, arquivoDoDia } from '../lib/pdvBackup/drive.js';
+import { importacaoTravada, HORAS_IMPORTACAO_TRAVADA } from '../lib/pdvVendas.js';
 
 // Cópia do mesmo helper de scripts/importar-pdv-backup.mjs — dez linhas sem
 // estado, não vale um módulo compartilhado (mesma decisão de lá).
@@ -43,6 +44,16 @@ export function backupMaisNovo(dataBackup, dataConhecida) {
   if (!dataBackup) return false;
   if (!dataConhecida) return true;
   return dataBackup.getTime() > new Date(dataConhecida).getTime();
+}
+
+// Uma linha aberta em pdv_importacoes só bloqueia enquanto a rodada estiver
+// viva. Sem a checagem de idade, uma rodada que morreu sem fechar o log
+// bloqueia este checador para sempre — foi o que aconteceu: a linha de
+// 2026-08-24 03:01 segurou o cron por quatro dias, e nem o backup novo nem o
+// pedido manual da tela conseguiam passar. A regra de "morta" é a mesma da
+// tela, importada de lib/pdvVendas.js.
+export function importacaoBloqueia(aberta, agora = new Date()) {
+  return !!aberta && !importacaoTravada(aberta, agora);
 }
 
 export function decidirRodada({ importacaoEmAndamento, pedidoManualPendente, backupMaisNovo }) {
@@ -91,7 +102,16 @@ async function main() {
   const sb = createClient(url, chave, { auth: { persistSession: false } });
   const log = m => console.log(m);
 
-  const { data: emAndamento } = await sb.from('pdv_importacoes').select('id').is('terminado_em', null).limit(1).maybeSingle();
+  // A mais recente das abertas: se houver uma rodada morta antiga e uma viva
+  // agora, quem manda é a viva. Sem o order, o Postgres devolveria qualquer
+  // uma das duas e a decisão viraria sorteio.
+  const { data: aberta } = await sb.from('pdv_importacoes')
+    .select('id, iniciado_em, terminado_em').is('terminado_em', null)
+    .order('iniciado_em', { ascending: false }).limit(1).maybeSingle();
+  const emAndamento = importacaoBloqueia(aberta, new Date());
+  if (aberta && !emAndamento) {
+    log(`Ignorando rodada travada desde ${aberta.iniciado_em} (aberta há mais de ${HORAS_IMPORTACAO_TRAVADA} h).`);
+  }
   const { data: pendentes } = await sb.from('pdv_importacao_solicitacoes').select('id').is('atendido_em', null);
   const pedidoManualPendente = (pendentes || []).length > 0;
 
@@ -105,7 +125,7 @@ async function main() {
     temBackupNovo = await algumBackupNovo({ sb, lojas: lojas || [], agora: new Date(), log });
   }
 
-  const decisao = decidirRodada({ importacaoEmAndamento: !!emAndamento, pedidoManualPendente, backupMaisNovo: temBackupNovo });
+  const decisao = decidirRodada({ importacaoEmAndamento: emAndamento, pedidoManualPendente, backupMaisNovo: temBackupNovo });
   if (!decisao.rodar) { log(`Nada a fazer (${decisao.motivo || 'sem novidade'}).`); return; }
 
   log(`Disparando importação (${decisao.motivo})...`);

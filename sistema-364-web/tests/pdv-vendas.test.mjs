@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   periodoPadrao, periodoAnterior, kpis, variacao, porDia, porOrigem, porForma,
-  itensPeriodo, statusImportacao, ROTULOS_FORMA,
+  itensPeriodo, statusImportacao, importacaoTravada, HORAS_IMPORTACAO_TRAVADA, ROTULOS_FORMA,
 } from '../lib/pdvVendas.js';
 
 const V = [
@@ -95,4 +95,36 @@ test('statusImportacao', () => {
   // 'executando' há horas é rodada travada (processo morto sem fechar o log)
   assert.equal(statusImportacao({ iniciado_em: '2026-08-23T11:45:00Z', status: 'executando' }, agora).alerta, false);
   assert.equal(statusImportacao({ iniciado_em: '2026-08-23T10:00:00Z', status: 'executando' }, agora).alerta, true);
+});
+
+// ---------------------------------------------- importacaoTravada
+// Regressão real: uma linha aberta em 24/08 que nunca fechou segurou o cron da
+// importação por quatro dias, e as vendas do PDV ficaram congeladas em 22/08.
+// A tela já tinha a regra de 1 h embutida; o checador não. Agora é uma só.
+
+test('importacaoTravada: linha ausente não trava nada', () => {
+  assert.equal(importacaoTravada(null), false);
+  assert.equal(importacaoTravada(undefined), false);
+});
+
+test('importacaoTravada: rodada que terminou nunca está travada', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  assert.equal(importacaoTravada({ iniciado_em: '2026-08-24T03:00:00Z', terminado_em: '2026-08-24T04:00:00Z' }, agora), false);
+});
+
+test('importacaoTravada: rodada aberta recente está viva', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  assert.equal(importacaoTravada({ iniciado_em: '2026-08-28T11:50:00Z', terminado_em: null }, agora), false);
+});
+
+test('importacaoTravada: o limite é MAIS de uma hora, não exatamente uma', () => {
+  const agora = new Date('2026-08-28T12:00:00Z');
+  assert.equal(HORAS_IMPORTACAO_TRAVADA, 1);
+  assert.equal(importacaoTravada({ iniciado_em: '2026-08-28T11:00:00Z', terminado_em: null }, agora), false);
+  assert.equal(importacaoTravada({ iniciado_em: '2026-08-28T10:59:00Z', terminado_em: null }, agora), true);
+});
+
+test('importacaoTravada: a linha real que travou o cron por quatro dias', () => {
+  const agora = new Date('2026-08-28T14:00:00Z');
+  assert.equal(importacaoTravada({ iniciado_em: '2026-08-24T03:01:48Z', terminado_em: null }, agora), true);
 });

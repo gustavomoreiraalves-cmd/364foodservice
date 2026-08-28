@@ -103,6 +103,20 @@ export function itensPeriodo(linhas) {
   });
 }
 
+// Uma rodada que abre e não fecha em 1 h é rodada morta: o processo caiu sem
+// atualizar o log. A regra mora aqui, num lugar só, porque ela tem dois
+// consumidores com consequências bem diferentes — a tela, que mostraria "em
+// andamento" para sempre, e o checador do cron, que deixaria de importar para
+// sempre. O checador nasceu sem ela e uma linha aberta em 24/08 segurou a
+// importação por quatro dias, congelando as vendas do PDV em 22/08.
+export const HORAS_IMPORTACAO_TRAVADA = 1;
+
+export function importacaoTravada(linha, agora = new Date()) {
+  if (!linha || linha.terminado_em) return false;
+  const horas = (agora - new Date(linha.iniciado_em)) / 36e5;
+  return horas > HORAS_IMPORTACAO_TRAVADA;
+}
+
 export function statusImportacao(ultima, agora = new Date()) {
   if (!ultima) return { texto: 'Nenhuma importação registrada', alerta: true };
   const quando = new Date(ultima.iniciado_em);
@@ -113,8 +127,6 @@ export function statusImportacao(ultima, agora = new Date()) {
   const hh = String(local.getUTCHours()).padStart(2, '0');
   const mi = String(local.getUTCMinutes()).padStart(2, '0');
   const texto = `Última importação: ${dd}/${mm}/${local.getUTCFullYear()} ${hh}:${mi} · ${ultima.status}`;
-  // 'executando' que não fecha em 1 h é rodada travada: o processo morreu sem
-  // atualizar o log e a tela mostraria "em andamento" para sempre.
-  const travada = ultima.status === 'executando' && horas > 1;
+  const travada = ultima.status === 'executando' && importacaoTravada(ultima, agora);
   return { texto, alerta: ultima.status === 'erro' || travada || horas > 36 };
 }
