@@ -64,14 +64,17 @@ Diferente dos demais arquivos, é cadastro, não movimento numa janela: veio de
 `lib/pdvBackup/consultasProdutos.js` (`SQL_PRODUTOS`), rodada em 26/08/2026 no
 mesmo container `fb364` (backup do Steakhouse restaurado).
 
-Cinco linhas são reais, filtradas por `codigo in (16, 339, 431, 3, 17)`:
+Cinco linhas são reais, filtradas por `codigo in (16, 157, 165, 3, 17)`:
 
 - **16** (Salsa) — insumo (`CODIGOPRODUTOTIPO` 2) vivo, com `PRECOCUSTO`
   positivo (17,50) e `PRECOVENDA` zerado.
-- **339** (Costela Bovina) — insumo vivo com config em `CONFIGICMS`
-  (`ORIGEMMERCADORIA` 0, `CFOP` 5101).
-- **431** (Costela Defumada) — insumo vivo com config em `CONFIGICMS`, igual ao
-  339.
+- **157** (Black) — produto (`CODIGOPRODUTOTIPO` 1) vivo, com `NCM`
+  (`16025000`) e `CEST` (`1707900`) preenchidos, `SITUACAOTRIBUTARIA` "102"
+  (CSOSN, sem ST retida) e `CFOP` 5102.
+- **165** (Assado de Tira) — produto vivo com `NCM`/`CEST` iguais ao 157, mas
+  `SITUACAOTRIBUTARIA` "500" (ST retida) e `CFOP` 5405 — o par 157/165 cobre
+  "produto vivo sem ST" vs. "produto vivo com ST retida", ambos com NCM e
+  CEST.
 - **3** (`* Excluído * Batata c/ Cheddar e Bacon`) — produto (`CODIGOPRODUTOTIPO`
   1) descontinuado, com config e com `NCM` preenchido (`21069090`).
 - **17** (`* Excluído * Hambúrguer de Picanha`) — insumo descontinuado sem
@@ -80,12 +83,12 @@ Cinco linhas são reais, filtradas por `codigo in (16, 339, 431, 3, 17)`:
 As linhas **9001** e **9002** são sintéticas, escritas à mão para os casos de
 recusa de NCM curto e CEST fora do padrão — não existem no banco real.
 
-**Divergência em relação ao que a Task 2 esperava encontrar:** a descrição
-original tratava 339 como "produto vivo" e 431 como "produto vivo com CSOSN e
-NCM". Os dados reais mostram os dois como `CODIGOPRODUTOTIPO` 2 (insumo, não
-produto) e com `NCM` nulo — não há NCM preenchido em nenhum dos dois. As
-asserções específicas que a Task 3 precisa (16 = insumo com custo positivo e
-venda zerada; 339 = `ORIGEMMERCADORIA` 0 vindo de `CONFIGICMS`; 17 = insumo
-descontinuado sem config; 3 = produto descontinuado com config) continuam
-batendo com os dados reais — só a caracterização de 339/431 como "produto" e
-a menção a NCM em 431 não se confirmaram.
+**Correção em relação à primeira extração (26/08/2026):** a fixture original
+trazia 339 (Costela Bovina) e 431 (Costela Defumada) como os casos "produto
+vivo com config" e "produto vivo com CSOSN e NCM". Na prática os dois eram
+`CODIGOPRODUTOTIPO` 2 (insumo) e sem `NCM` preenchido — o plano tinha
+escolhido os códigos errados. Trocados em 27/08/2026 por **157** e **165**,
+que são de fato `CODIGOPRODUTOTIPO` 1 (produto) e têm `NCM`/`CEST`
+preenchidos, cobrindo os casos "produto vivo sem ST" (157) e "produto vivo
+com ST retida, NCM e CEST" (165). Os demais três códigos (16, 3, 17) não
+mudaram.
