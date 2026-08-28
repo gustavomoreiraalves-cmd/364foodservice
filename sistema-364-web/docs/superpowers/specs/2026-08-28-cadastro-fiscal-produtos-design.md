@@ -1,7 +1,42 @@
 # Cadastro fiscal de produtos: alíquotas, informação adicional por item e cópia de configuração
 
 Data: 2026-08-28
-Status: aprovado para plano de implementação
+Status: **implementado** em 28/08/2026, commits `4fc7f70` a `4bb825d`, mais
+`fe5c9be` (cópia a partir do cadastro do produto). Este documento vale como
+registro de decisão, não como trabalho pendente.
+
+## Correções ao que este spec afirmava
+
+Três afirmações do texto abaixo estavam erradas quando foi escrito. Ficam
+registradas em vez de apagadas, porque a origem de cada uma é o tipo de erro
+que se repete.
+
+1. **"`base_legal` e `observacao_fiscal` nunca foram renderizados no
+   formulário" é falso.** `components/RegraTributariaForm.js` já renderizava os
+   dois, com placeholder de Rondônia. A conclusão veio de grepar
+   `app/fiscal/tributacao/page.js`, que delega o formulário ao componente —
+   **seguir o `import` antes de concluir que um campo não existe.**
+2. **A seção "Componente 1" aponta para o arquivo errado.** Os campos
+   pertencem a `RegraTributariaForm.js`, compartilhado por
+   `/fiscal/tributacao` e pelo `ConfiguracaoFiscalModal` aberto de dentro do
+   produto. Mexer na página teria posto os campos em uma tela só. A
+   implementação foi no componente.
+3. **A acusação de que o "Componente 3" duplicava `/produtos` estava
+   parcialmente errada.** `/produtos` de fato já tinha `liberarParaEmissao()`,
+   tag de situação fiscal e aba fiscal. Mas as duas telas de cópia acabaram
+   sendo construídas de propósito, com papéis complementares:
+   `/fiscal/produtos` escolhe uma origem e marca vários destinos e **grava**;
+   `CopiarFiscalDeProduto`, dentro do cadastro, parte do destino, busca a
+   origem e apenas **preenche o formulário aberto** — quem salva é o botão que
+   já existia. Um segundo caminho de escrita para os mesmos campos seria um
+   lugar a mais para divergir.
+
+O que o spec acertou e foi construído como descrito: `aliquota_pis` e
+`aliquota_cofins` no formulário de regra; o limite de 500 caracteres
+(`LIMITE_INF_AD_PROD` em `lib/fiscalRegras.js`); o `infAdProd` montado no
+resolver e posicionado como último filho de `det` no serializador; a rota
+`/api/fiscal/copiar-tributacao`; o aviso de grupo tributário sem regra; e a
+decisão de não copiar `ativo_fiscal`.
 
 ## Contexto
 
