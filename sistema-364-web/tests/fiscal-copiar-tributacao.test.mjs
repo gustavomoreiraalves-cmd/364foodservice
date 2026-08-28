@@ -16,6 +16,7 @@ const FONTE_COMPLETA = {
   ncm: '02102000', ex_tipi: null, cest: '1708300', origem_mercadoria: 0,
   unidade_tributavel: 'KG', fator_conversao_tributavel: 1,
   grupo_tributario_id: 'g1', ind_escala: 'S', cnpj_fabricante: null, cst_ibs_cbs: null,
+  sujeito_st: true,
 };
 
 const DESTINO = {
@@ -87,4 +88,13 @@ test('o payload gravado espelha a fonte, inclusive o vazio', () => {
   const r = avaliar({ cest: null }, { liberar: false });
   assert.ok('cest' in r.gravar);
   assert.equal(r.gravar.cest, null, 'copiar é substituir, não mesclar');
+});
+
+test('origem sem ST limpa a marca do destino junto com o CEST', () => {
+  // Antes de sujeito_st entrar na cópia, o destino ficava marcado como sujeito
+  // a ST e sem CEST — cadastro incoerente que só aparecia na hora de emitir.
+  const r = avaliar({ sujeito_st: false, cest: null }, { liberar: false });
+  assert.equal(r.gravar.sujeito_st, false);
+  assert.equal(r.gravar.cest, null);
+  assert.deepEqual(r.pendencias, [], 'sem ST, a ausência de CEST não é pendência');
 });

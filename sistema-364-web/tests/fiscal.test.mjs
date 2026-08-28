@@ -168,12 +168,16 @@ const FONTE = {
   peso_liquido_kg: 0.5, peso_bruto_kg: 0.55, sujeito_st: true,
 };
 
-test('o payload da cópia leva os dez campos fiscais previstos', () => {
+test('o payload da cópia leva os onze campos fiscais previstos', () => {
   const payload = camposCopiaFiscal(FONTE);
   assert.deepEqual(Object.keys(payload).sort(), [...CAMPOS_COPIA_FISCAL].sort());
-  assert.equal(CAMPOS_COPIA_FISCAL.length, 10);
+  assert.equal(CAMPOS_COPIA_FISCAL.length, 11);
   assert.equal(payload.ncm, '02102000');
   assert.equal(payload.grupo_tributario_id, 'g1');
+  // sujeito_st anda junto com o CEST: quem decide se o item tem ST é a mesma
+  // classificação que decide o CEST, e separar os dois deixa o destino
+  // marcado como ST sem o CEST que a ST exige.
+  assert.equal(payload.sujeito_st, true);
 });
 
 test('o payload não leva identidade do produto nem declaração de conferência', () => {

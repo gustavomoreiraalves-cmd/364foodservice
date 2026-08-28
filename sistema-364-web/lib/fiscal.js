@@ -114,10 +114,15 @@ export function pendenciasFiscaisProduto(produto = {}) {
 // por produto), unidade (é a unidade de venda, não dado fiscal), peso líquido
 // e bruto (atributo físico do item) e ativo_fiscal — que não é dado, é a
 // declaração de que alguém conferiu a classificação.
+//
+// sujeito_st anda junto com o CEST de propósito: é a mesma classificação que
+// decide os dois. Copiar um sem o outro deixa o destino marcado como sujeito a
+// substituição tributária e sem o CEST que a ST exige — cadastro incoerente
+// que só apareceria na hora de emitir.
 export const CAMPOS_COPIA_FISCAL = [
-  "ncm", "ex_tipi", "cest", "origem_mercadoria",
-  "unidade_tributavel", "fator_conversao_tributavel",
-  "grupo_tributario_id", "ind_escala", "cnpj_fabricante", "cst_ibs_cbs",
+  'ncm', 'ex_tipi', 'cest', 'origem_mercadoria', 'sujeito_st',
+  'unidade_tributavel', 'fator_conversao_tributavel',
+  'grupo_tributario_id', 'ind_escala', 'cnpj_fabricante', 'cst_ibs_cbs',
 ];
 
 // Copiar é espelhar, inclusive o vazio: se a fonte está sem CEST, o destino

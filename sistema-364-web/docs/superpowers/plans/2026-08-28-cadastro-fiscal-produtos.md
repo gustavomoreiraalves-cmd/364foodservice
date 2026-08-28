@@ -15,7 +15,7 @@
 - Todo comentário, mensagem de erro, rótulo de tela, nome de variável e texto de commit em **português**, como o resto do repositório.
 - Commits seguem `tipo(escopo): descrição` — `feat`, `fix`, `docs`, `test`.
 - `npm test` roda `node --test tests/*.test.mjs` e precisa ficar verde em toda tarefa. Hoje são **704 testes**.
-- **Nenhuma migração nesta entrega.** `aliquota_pis`, `aliquota_cofins`, `base_legal`, `observacao_fiscal` já existem em `regras_tributarias`; os dez campos copiáveis já existem em `produtos`. Confirmado contra a produção em 28/08/2026.
+- **Nenhuma migração nesta entrega.** `aliquota_pis`, `aliquota_cofins`, `base_legal`, `observacao_fiscal` já existem em `regras_tributarias`; os onze campos copiáveis já existem em `produtos`. Confirmado contra a produção em 28/08/2026.
 - Nada roda contra a produção sem autorização explícita do usuário.
 - `infAdProd` tem limite de **500 caracteres** no leiaute 4.00. Esse número aparece em três lugares (validação do cadastro, resolver, teste) e deve vir da constante exportada, nunca digitado solto.
 - `aliquota_pis` e `aliquota_cofins` são `numeric(6,4)`: o teto é **99,9999**, não 100. Gravar 100 estoura a precisão e vira erro de banco.
@@ -446,8 +446,8 @@ git commit -m "feat(fiscal): infAdProd por item no XML da NF-e"
 
 **Interfaces:**
 - Produces, de `lib/fiscal.js`:
-  - `CAMPOS_COPIA_FISCAL: string[]` — os dez nomes de coluna, em ordem;
-  - `camposCopiaFiscal(produtoFonte) -> object` com exatamente essas dez chaves;
+  - `CAMPOS_COPIA_FISCAL: string[]` — os onze nomes de coluna, em ordem;
+  - `camposCopiaFiscal(produtoFonte) -> object` com exatamente essas onze chaves;
   - `gruposComRegra(regras) -> Set<string>` a partir de linhas `{ grupo_tributario_id, ativo }`;
   - `situacaoFiscalProduto(produto, gruposComRegraSet) -> { pendencias, grupoSemRegra, liberado }`.
 - Consumido pela Task 5 (rota) e pela Task 6 (tela).
@@ -1181,6 +1181,6 @@ Depois da Task 6, **parar e falar com o usuário**. Nada roda contra a produçã
 
 ## Pendências que este plano não resolve
 
-- **`sujeito_st` não está entre os campos copiados** e a spec não o inclui. Isso permite um destino com `sujeito_st = true` receber `cest = null` de uma origem não sujeita a ST — o `avaliarDestino` barra a liberação (o teste "produto sujeito a ST sem CEST na fonte não é liberado" cobre exatamente isso), então não gera nota errada, mas gera confusão de cadastro. Levar ao usuário antes de decidir incluir.
+- ~~`sujeito_st` fora dos campos copiados~~ — **resolvido em 28/08/2026**: o usuário decidiu incluí-lo, e a lista passou a ter 11 campos. É a mesma classificação que decide `sujeito_st` e `cest`; copiar um sem o outro deixava o destino marcado como sujeito a ST e sem o CEST que a ST exige. A liberação já era barrada nesse caso, mas o cadastro ficava incoerente.
 - **`ICMSSN500` sai com `orig` e `CSOSN` apenas**, sem `vBCSTRet`/`pST`/`vICMSSubstituto`/`vICMSSTRet`. Válido no schema, suficiente para homologação; para produção, confirmar com o contador se o cliente precisa desses valores para se creditar.
 - **Gerenciador de notas fiscais e eventos de SEFAZ** são as specs 2 e 3 da série, fora deste plano.
