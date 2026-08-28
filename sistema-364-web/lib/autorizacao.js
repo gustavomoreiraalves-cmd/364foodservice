@@ -99,3 +99,18 @@ export async function garantirPedido(sb, user, isAdmin, pedidoId, campos = 'id, 
     naoEncontrado: 'Pedido não encontrado.',
   });
 }
+
+// Mesmo par "carregar a linha, então autorizar" dos irmãos acima. Vale a pena
+// lembrar por que ele existe: autorizarModulo confere a permissão de módulo e
+// só isso — foi a ausência deste segundo passo que produziu o IDOR real da
+// revisão de 24/08, em rotas que já tinham passado por revisão individual.
+export async function garantirProduto(sb, user, isAdmin, produtoId,
+  campos = 'id, nome, codigo, empresa_id') {
+  return garantirLinhaDaEmpresa(sb, user, isAdmin, {
+    tabela: 'produtos',
+    id: produtoId,
+    campos,
+    rotulo: { artigo: 'o', nome: 'produto', titulo: 'Produto' },
+    naoEncontrado: 'Produto não encontrado.',
+  });
+}
