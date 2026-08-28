@@ -128,8 +128,12 @@ async function resolverRegraDoItem(sb, { empresaId, produto, naturezaOperacaoId,
 
 // nfe_saida_itens congela o que o motor de regras decidiu nesta emissão — ver
 // o comentário da atualização 43. Colunas conferidas contra
-// supabase/atualizacao_43_nfe_saida.sql.
-function linhaItem(documentoId, empresaId, item) {
+// supabase/atualizacao_43_nfe_saida.sql e a 48 (ICMS-ST).
+//
+// Exportada para teste: é o único ponto onde o item resolvido vira linha de
+// banco, e um campo esquecido aqui só apareceria muito depois, num relatório
+// que soma zero sem motivo.
+export function linhaItem(documentoId, empresaId, item) {
   return {
     nfe_saida_documento_id: documentoId,
     empresa_id: empresaId,
@@ -152,6 +156,14 @@ function linhaItem(documentoId, empresaId, item) {
     base_calculo_icms: item.vBC,
     aliquota_icms: item.pICMS,
     valor_icms: item.vICMS,
+    // ST: margem e redução preservam a diferença entre "não informado" (null,
+    // omitido no XML) e "informado como zero" — ver a atualização 48.
+    modalidade_bc_st: item.modBCST ?? null,
+    mva_percentual: item.pMVAST ?? null,
+    reducao_base_st_percentual: item.pRedBCST ?? null,
+    base_calculo_icms_st: item.vBCST ?? 0,
+    aliquota_icms_st: item.pICMSST ?? 0,
+    valor_icms_st: item.vICMSST ?? 0,
     cst_pis: item.cstPis,
     aliquota_pis: item.pPIS,
     valor_pis: item.vPIS,

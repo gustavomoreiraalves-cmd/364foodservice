@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { resolverNota } from '../lib/nfe/resolverNota.js';
 import { montarXmlNFe } from '../lib/nfe/montarXml.js';
 import { dadosEmitente } from '../lib/nfe/emitente.js';
+import { linhaItem } from '../lib/nfe/emitir.js';
 
 const EMITENTE = dadosEmitente({
   cnpj: '37541736000187', razao_social: '364 STEAKHOUSE COMERCIO DE ALIMENTOS LTDA',
@@ -180,4 +181,31 @@ test('201 e 203 continuam recusados — compartilham o grupo mas não os campos'
     const regra = { ...REGRA_SUBSTITUTO, csosn };
     assert.throws(() => montarXmlNFe(nota({ regra }), OPCOES), new RegExp(csosn));
   }
+});
+
+// ------------------------------------------------------ congelamento no banco
+
+test('a linha de nfe_saida_itens leva os valores de ST', () => {
+  // A nota nº 2 (autorizada em 28/08/2026) saiu antes destas colunas existirem
+  // e ficou com ST só dentro do XML. Sem este mapeamento, qualquer relatório de
+  // ICMS-ST recolhido somaria zero sem motivo aparente.
+  const linha = linhaItem('doc1', 'emp1', nota().itens[0]);
+  assert.equal(linha.modalidade_bc_st, '4');
+  assert.equal(linha.mva_percentual, 30);
+  assert.equal(linha.reducao_base_st_percentual, 0);
+  assert.equal(linha.base_calculo_icms_st, 4095);
+  assert.equal(linha.aliquota_icms_st, 4.5);
+  assert.equal(linha.valor_icms_st, 184.28);
+});
+
+test('item sem ST grava zero nos valores e null na margem', () => {
+  // Zero nos valores é informação ("não houve ST"); null na margem é ausência
+  // ("a regra não informou"), a mesma distinção que o XML faz ao omitir pMVAST.
+  const regra = { ...REGRA_SUBSTITUTO, csosn: '500', st_responsavel: 'substituido' };
+  const linha = linhaItem('doc1', 'emp1', nota({ regra }).itens[0]);
+  assert.equal(linha.base_calculo_icms_st, 0);
+  assert.equal(linha.valor_icms_st, 0);
+  assert.equal(linha.mva_percentual, null);
+  assert.equal(linha.reducao_base_st_percentual, null);
+  assert.equal(linha.modalidade_bc_st, null);
 });
