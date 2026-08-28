@@ -29,6 +29,7 @@ import {
 import { SQL_PRODUTOS } from '../lib/pdvBackup/consultasProdutos.js';
 import { normalizaProdutosFb, gruposDoLote } from '../lib/pdvBackup/normalizaProdutos.js';
 import { mesclar } from '../lib/pdvBackup/mergeProdutos.js';
+import { lerPaginado } from '../lib/pdvBackup/paginacao.js';
 
 const CAMINHO_FDB = '/var/lib/firebird/data/consumer.fdb';
 
@@ -90,22 +91,32 @@ async function garantirGrupos({ sb, empresaId, grupos, dryRun, log }) {
 // tabela com mais de 1000 produtos/insumos já importados trunca em silêncio:
 // o script trataria uma linha existente como nova, tentaria inserir de novo e
 // bateria no índice único — depois de já ter gravado outras linhas do lote.
-const TAMANHO_PAGINA = 1000;
-
 async function lerExistentes({ sb, tabela, empresaId }) {
-  const linhas = [];
-  for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-    const fim = inicio + TAMANHO_PAGINA - 1;
+  return lerPaginado(async (de, ate) => {
     const { data, error } = await sb.from(tabela).select('*')
       .eq('empresa_id', empresaId).not('pdv_codigo_produto', 'is', null)
-      .range(inicio, fim);
+      .range(de, ate);
     if (error) throw new Error(`não consegui ler ${tabela}: ${error.message}`);
-    linhas.push(...(data || []));
-    // Bloco menor que o pedido: era a última página. Também cobre a tabela
-    // vazia (data = []), que já sai do laço na primeira volta.
-    if (!data || data.length < TAMANHO_PAGINA) break;
-  }
-  return linhas;
+    return data || [];
+  });
+}
+
+// Mesmo teto de 1000 linhas, e aqui ele morde muito mais cedo: são 96 mil
+// linhas de venda por dia acumuladas desde 2022, para 402 códigos distintos.
+// Sem paginar, o conjunto sairia com os códigos das primeiras mil linhas
+// apenas, e todo produto descontinuado cujo código não estivesse nesse
+// recorte seria descartado da carga — justamente o que o filtro de
+// descontinuados existe para evitar, e justamente nos anos antigos.
+async function lerCodigosVendidos({ sb, empresaId }) {
+  const linhas = await lerPaginado(async (de, ate) => {
+    const { data, error } = await sb.from('pdv_vendas_itens_dia')
+      .select('codigo_produto').eq('empresa_id', empresaId)
+      .not('codigo_produto', 'is', null)
+      .range(de, ate);
+    if (error) throw new Error('não consegui ler os produtos vendidos: ' + error.message);
+    return data || [];
+  });
+  return new Set(linhas.map(v => v.codigo_produto));
 }
 
 // Grava um lote numa tabela, linha a linha pela regra de merge. Linha a linha
@@ -231,10 +242,8 @@ async function main() {
       const linhas = await consultar(db, SQL_PRODUTOS);
       log(`  ${linhas.length} linha(s) de cadastro lidas`);
 
-      const { data: vendidos, error: erroVendidos } = await sb.from('pdv_vendas_itens_dia')
-        .select('codigo_produto').eq('empresa_id', loja.empresa_id).not('codigo_produto', 'is', null);
-      if (erroVendidos) throw new Error('não consegui ler os produtos vendidos: ' + erroVendidos.message);
-      const codigosVendidos = new Set((vendidos || []).map(v => v.codigo_produto));
+      const codigosVendidos = await lerCodigosVendidos({ sb, empresaId: loja.empresa_id });
+      log(`  ${codigosVendidos.size} código(s) com venda no histórico`);
 
       const grupos = gruposDoLote(linhas);
       const mapaGrupos = await garantirGrupos({ sb, empresaId: loja.empresa_id, grupos, dryRun, log });
