@@ -15,6 +15,7 @@
     "verify": "npm run test && npm run build",
     "backup": "bash scripts/backup-364.sh",
     "importar-pdv-backup": "node scripts/importar-pdv-backup.mjs",
+    "importar-produtos-pdv": "node scripts/importar-produtos-pdv.mjs",
     "importar-pdv": "node scripts/importar-pdv-consumer.mjs"
   },
   "dependencies": {

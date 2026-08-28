@@ -299,7 +299,7 @@ function baixar(url, destino) {
 
 // Baixa o backup do dia (e, se ele não estiver fresco, o de ontem). Devolve
 // `{caminho, dia, data}` do primeiro que servir.
-function baixarBackup({ loja, diretorio, agora, log }) {
+export function baixarBackup({ loja, diretorio, agora, log }) {
   const tentativas = [];
   for (const diasAtras of [0, 1]) {
     const { dia, fileId } = arquivoDoDia(loja.drive_arquivos, agora, diasAtras);
@@ -345,7 +345,7 @@ function existe(programa) {
 }
 
 // O docker deste Mac roda dentro do colima; se a VM estiver parada, sobe.
-function garantirDocker(log) {
+export function garantirDocker(log) {
   if (existe('colima')) {
     try {
       execFileSync('colima', ['status'], { stdio: 'ignore' });

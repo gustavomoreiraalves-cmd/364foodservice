@@ -161,6 +161,78 @@ apagados e regravados, e o que vier do backup não tem `percentual_taxa`.
 
 ---
 
+# Cadastro de produtos
+
+O mesmo backup também traz o **cadastro**: nome, unidade, categoria, custo,
+preço de venda e o que o Consumer tem de fiscal (NCM, CEST, origem da
+mercadoria, CFOP/CSOSN). Isso é carga separada, com script próprio:
+
+```bash
+npm run importar-produtos-pdv -- --dry-run   # obrigatório na primeira vez
+npm run importar-produtos-pdv                # a carga de verdade
+npm run importar-produtos-pdv -- --loja -2147478159
+```
+
+Duas diferenças em relação à importação de vendas:
+
+- **Não entra no cron.** Cadastro não muda todo dia, e a primeira carga precisa
+  de olho humano no relatório. Roda sob demanda, quando alguém mexeu no cadastro
+  do PDV e quer trazer a mudança.
+- **Não há janela de datas.** Lê o cadastro inteiro toda vez.
+
+Produto do tipo Produto vai para `produtos`, tipo Insumo vai para
+`materias_primas`. Descontinuado no PDV só é importado se já tiver venda no
+histórico — e entra como `ativo = false`, para o join com as vendas antigas não
+ficar furado.
+
+## Ler o relatório
+
+Cada tabela sai numa linha assim:
+
+```
+  produtos: 12 novo(s), 3 atualizado(s), 440 sem mudança, 2 conflito(s), 1 campo(s) congelado(s) por revisão
+```
+
+- **novo** — não existia aqui, foi criado.
+- **atualizado** — o PDV mudou algum campo e a mudança foi gravada.
+- **sem mudança** — o PDV mandou exatamente o que já estava aqui.
+- **conflito** — o PDV mudou um campo que **alguém editou à mão** no 364 OS. A
+  importação passou longe e não gravou nada nesse campo. **Não é erro**: é a
+  regra funcionando. O relatório lista produto, campo, o valor daqui e o do PDV
+  para a pessoa decidir. Se o valor do PDV for o certo, edite à mão aqui.
+- **congelado por revisão** — a linha tem `revisado_em` preenchido (alguém
+  conferiu os campos fiscais dela), então os campos fiscais não são mais
+  tocados pela importação.
+
+Linhas recusadas por formato (NCM sem 8 dígitos, CEST sem 7, origem fora de
+0–8) aparecem listadas e **não são importadas** — dado fiscal torto não entra.
+
+## Grupos tributários
+
+A importação cria um `grupos_tributarios` por combinação CFOP/CSOSN encontrada
+no PDV, com código `PDV <cfop>/<csosn>`. São poucos grupos para centenas de
+produtos: a regra tributária é criada uma vez por grupo, à mão, não uma por
+produto. O CFOP/CSOSN do PDV **não** vira `regras_tributarias` sozinho — regra
+se resolve por natureza de operação e UF, que o Consumer não tem.
+
+## Nada nasce liberado para emitir
+
+Todo produto importado entra com `ativo_fiscal = false` e
+`sugerido_automaticamente = true`. `unidade_tributavel` e
+`fator_conversao_tributavel` são preenchidos por palpite (a unidade do próprio
+produto, fator 1) porque o Consumer não tem esses campos. Antes de emitir NF-e
+em cima de um produto importado, uma pessoa precisa conferir os campos fiscais
+e ligar o `ativo_fiscal`.
+
+## Rodar de novo é seguro
+
+A chave é `pdv_codigo_produto` (o código do produto no Consumer), com `unique`
+por empresa. Rodar duas vezes não duplica. E a importação guarda em
+`pdv_valores` o retrato do que ela mesma gravou: na rodada seguinte, campo que
+está diferente do retrato foi mexido por gente, e não é sobrescrito.
+
+---
+
 # Plano B — painel Consumer Connect (scraping)
 
 Continua funcionando para lojas com `pdv_lojas.origem = 'painel'` (hoje
