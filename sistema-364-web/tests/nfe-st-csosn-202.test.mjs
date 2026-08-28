@@ -33,10 +33,13 @@ const PRODUTO = {
 };
 
 // A regra da nota modelo: substituta, MVA 30%, sem redução, alíquota 4,5%.
+// A alíquota vem de `aliquota_interna_destino`, que é o campo que o formulário
+// mostra quando o papel é substituto — não de `aliquota_st_retido`, que é do
+// bloco de substituído e fica escondido aqui.
 const REGRA_SUBSTITUTO = {
   id: 'r1', cfop: '5401', csosn: '202', st_responsavel: 'substituto',
   mod_bc_st: '4', mva_percentual: 30, reducao_base_st_percentual: 0,
-  aliquota_st_retido: 4.5, aliquota_interna_destino: 0,
+  aliquota_interna_destino: 4.5,
   cst_pis: '49', aliquota_pis: 0, cst_cofins: '49', aliquota_cofins: 0,
 };
 
@@ -112,17 +115,17 @@ test('substituído com CSOSN 500 continua sem ST — não regride', () => {
 test('substituto sem MVA e sem alíquota de ST é recusado antes de reservar número', () => {
   const regra = {
     ...REGRA_SUBSTITUTO, mva_percentual: null,
-    reducao_base_st_percentual: null, aliquota_st_retido: null,
+    reducao_base_st_percentual: null, aliquota_interna_destino: null,
   };
-  assert.throws(() => nota({ regra }), /sem alíquota de ST e sem MVA/);
+  assert.throws(() => nota({ regra }), /sem alíquota interna do destino e sem MVA/);
 });
 
 test('MVA preenchido mas alíquota de ST vazia também é recusado', () => {
   // Estado real do cadastro da 364 em 28/08/2026: DEFUMADO_BOVINO_ST tinha
   // MVA 4,50 e alíquota em branco. Sem esta guarda a nota sairia com CSOSN 202
   // e vICMSST 0,00 — declarando uma retenção que não houve.
-  const regra = { ...REGRA_SUBSTITUTO, mva_percentual: 4.5, aliquota_st_retido: null };
-  assert.throws(() => nota({ regra }), /sem alíquota de ST\./);
+  const regra = { ...REGRA_SUBSTITUTO, mva_percentual: 4.5, aliquota_interna_destino: null };
+  assert.throws(() => nota({ regra }), /sem alíquota interna do destino\./);
 });
 
 test('substituto com CSOSN de substituído é contradição e para a emissão', () => {

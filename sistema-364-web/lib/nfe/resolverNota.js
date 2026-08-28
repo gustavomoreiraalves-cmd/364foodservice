@@ -69,7 +69,13 @@ function resolverSt(regra, nome, vProd) {
 
   const mva = percentualCadastrado(regra.mva_percentual);
   const reducaoST = percentualCadastrado(regra.reducao_base_st_percentual);
-  const aliquotaST = percentualCadastrado(regra.aliquota_st_retido);
+  // A alíquota que incide sobre a base de ST é a INTERNA DO DESTINO — é o que
+  // o formulário mostra no bloco de substituto ("Alíquota interna do
+  // destino"). `aliquota_st_retido` é outro campo, do bloco de substituído
+  // ("Alíquota já suportada", o pST que acompanha vBCSTRet), e nem aparece na
+  // tela quando o papel é substituto. Ler o campo errado fazia a emissão
+  // recusar uma regra corretamente preenchida.
+  const aliquotaST = percentualCadastrado(regra.aliquota_interna_destino);
 
   // Sem alíquota o ICMS-ST calcula zero, e a nota sai dizendo que reteve
   // imposto sem reter nada — pior do que não sair, porque parece recolhido.
@@ -78,7 +84,7 @@ function resolverSt(regra, nome, vProd) {
   // preenchido e a alíquota em branco.
   if (!(aliquotaST > 0)) {
     throw new Error(
-      `A regra tributária de "${nome}" é de substituição tributária, mas está sem alíquota de ST`
+      `A regra tributária de "${nome}" é de substituição tributária, mas está sem alíquota interna do destino`
       + (mva === undefined ? ' e sem MVA' : '')
       + '. Sem a alíquota o imposto retido calcula zero, e a nota sairia declarando uma retenção que '
       + 'não aconteceu. Preencha em /fiscal/tributacao antes de emitir.',
