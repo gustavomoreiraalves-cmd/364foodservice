@@ -16,8 +16,96 @@ import { juntarTextoFiscal, LIMITE_INF_AD_PROD } from '../fiscalRegras.js';
 // num XML de teste é rejeição 999 / "NF-e de teste em ambiente de produção".
 const RAZAO_SOCIAL_HOMOLOGACAO = 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL';
 
+import { calcularIcmsST } from './calculoST.js';
+
 // CSOSN em que o Simples não destaca ICMS: a nota informa a situação, sem valor.
-const CSOSN_SEM_DESTAQUE = ['101', '102', '103', '300', '400', '500'];
+// O 202 está aqui porque o grupo ICMSSN202 do leiaute NÃO tem campo para vBC,
+// pICMS nem vICMS — só para os valores de ST. Calcular ICMS próprio para ele
+// faria o ICMSTot declarar um imposto que item nenhum destaca, e total sem
+// item correspondente é rejeição. O DANFE modelo do contador confirma:
+// base de cálculo do ICMS 0,00, valor do ICMS 0,00.
+const CSOSN_SEM_DESTAQUE = ['101', '102', '103', '202', '300', '400', '500'];
+
+// CSOSN em que o emitente do Simples COBRA o ICMS-ST (é o substituto).
+const CSOSN_COM_ST = ['201', '202', '203'];
+
+// Percentual que veio do cadastro: 0 é um valor, ausente não é. A diferença
+// importa porque pMVAST e pRedBCST são opcionais no leiaute — omitir é dizer
+// "não se aplica", mandar zero é declarar uma margem ou redução de 0%.
+function percentualCadastrado(valor) {
+  if (valor === null || valor === undefined || valor === '') return undefined;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// Resolve o ICMS-ST de um item. Devolve null quando a operação não tem ST.
+//
+// Quem decide se há ST é `st_responsavel`, não o CSOSN: o papel é o fato, o
+// CSOSN é como ele se escreve. Por isso as duas combinações incoerentes param
+// aqui, nomeando os dois campos — durante o cadastro do 364 elas apareceram de
+// verdade, com `substituto` e CSOSN 500 na mesma regra.
+function resolverSt(regra, nome, vProd) {
+  const papel = String(regra.st_responsavel || 'nao_aplicavel');
+  const csosn = String(regra.csosn || '');
+  const csosnDeSubstituto = CSOSN_COM_ST.includes(csosn);
+
+  if (papel === 'substituto' && !csosnDeSubstituto) {
+    throw new Error(
+      `A regra tributária de "${nome}" diz que a 364 é substituta (recolhe o ICMS-ST), mas o CSOSN `
+      + `é "${csosn || '(vazio)'}", que é de quem já foi substituído. Um dos dois está errado: `
+      + `ou o papel na ST, ou o CSOSN (o de substituto é 201, 202 ou 203). Corrija em /fiscal/tributacao.`,
+    );
+  }
+  // Só o 202 entra aqui. Para 201 e 203 quem recusa é o serializador, com a
+  // mensagem de "esta fase não cobre" — que é a informação certa. Reclamar do
+  // papel na ST mandaria a pessoa corrigir um campo que não é o problema.
+  if (papel !== 'substituto' && csosn === '202') {
+    throw new Error(
+      `A regra tributária de "${nome}" usa CSOSN ${csosn}, que é de quem cobra o ICMS-ST, mas o papel `
+      + `na substituição está como "${papel}". Um dos dois está errado. Corrija em /fiscal/tributacao.`,
+    );
+  }
+  if (papel !== 'substituto') return null;
+
+  const mva = percentualCadastrado(regra.mva_percentual);
+  const reducaoST = percentualCadastrado(regra.reducao_base_st_percentual);
+  const aliquotaST = percentualCadastrado(regra.aliquota_st_retido);
+
+  // Sem alíquota o ICMS-ST calcula zero, e a nota sai dizendo que reteve
+  // imposto sem reter nada — pior do que não sair, porque parece recolhido.
+  // A margem sozinha não basta: ela só define a base sobre a qual nada seria
+  // aplicado. Isto pegou o cadastro real da 364 em 28/08/2026, que tinha MVA
+  // preenchido e a alíquota em branco.
+  if (!(aliquotaST > 0)) {
+    throw new Error(
+      `A regra tributária de "${nome}" é de substituição tributária, mas está sem alíquota de ST`
+      + (mva === undefined ? ' e sem MVA' : '')
+      + '. Sem a alíquota o imposto retido calcula zero, e a nota sairia declarando uma retenção que '
+      + 'não aconteceu. Preencha em /fiscal/tributacao antes de emitir.',
+    );
+  }
+
+  const calculo = calcularIcmsST({
+    valorProduto: vProd,
+    mva: mva ?? 0,
+    reducaoBaseST: reducaoST ?? 0,
+    aliquotaST: aliquotaST ?? 0,
+    // Simples Nacional: não há ICMS próprio destacado para abater da ST.
+    aliquota: 0,
+    reducaoBase: 0,
+    creditaOperacaoPropria: false,
+  });
+
+  return {
+    // 4 = margem de valor agregado, que é o caso do cadastro quando há MVA.
+    modBCST: String(regra.mod_bc_st ?? (mva === undefined ? '' : '4')) || '4',
+    pMVAST: mva,
+    pRedBCST: reducaoST,
+    vBCST: calculo.vBCST,
+    pICMSST: aliquotaST ?? 0,
+    vICMSST: calculo.vICMSST,
+  };
+}
 
 const duasCasas = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const digitos = v => String(v ?? '').replace(/\D/g, '');
@@ -101,6 +189,8 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     vICMS = duasCasas(vBC * pICMS / 100);
   }
 
+  const st = resolverSt(regra, nome, vProd);
+
   const pPIS = Number(regra.aliquota_pis || 0);
   const pCOFINS = Number(regra.aliquota_cofins || 0);
 
@@ -122,6 +212,12 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     csosn: regra.csosn || undefined,
     cstIcms: regra.cst_icms || undefined,
     vBC, pICMS, vICMS,
+    modBCST: st?.modBCST,
+    pMVAST: st?.pMVAST,
+    pRedBCST: st?.pRedBCST,
+    vBCST: st?.vBCST ?? 0,
+    pICMSST: st?.pICMSST,
+    vICMSST: st?.vICMSST ?? 0,
     cstPis: regra.cst_pis || '49',
     pPIS, vPIS: duasCasas(vProd * pPIS / 100),
     cstCofins: regra.cst_cofins || '49',
@@ -244,7 +340,13 @@ export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperaca
     itens: resolvidos,
     total: {
       vProd,
-      vNF: vProd,
+      vBCST: duasCasas(resolvidos.reduce((s, i) => s + (i.vBCST || 0), 0)),
+      vST: duasCasas(resolvidos.reduce((s, i) => s + (i.vICMSST || 0), 0)),
+      // O ICMS-ST entra no valor do documento: o destinatário paga produto
+      // mais imposto retido. O DANFE modelo do contador fecha assim
+      // (3.150,00 + 184,27 = 3.334,27), e o vPag do bloco de pagamento segue
+      // o vNF — divergir entre os dois é rejeição.
+      vNF: duasCasas(vProd + duasCasas(resolvidos.reduce((s, i) => s + (i.vICMSST || 0), 0))),
       vBC: duasCasas(resolvidos.reduce((s, i) => s + i.vBC, 0)),
       vICMS: duasCasas(resolvidos.reduce((s, i) => s + i.vICMS, 0)),
       vPIS: duasCasas(resolvidos.reduce((s, i) => s + i.vPIS, 0)),

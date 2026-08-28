@@ -41,7 +41,7 @@ const CSOSN_ICMSSN102 = ['102', '103', '300', '400'];
 // Todo CSOSN que este arquivo sabe montar. Uma nota com CSOSN fora desta
 // lista (ou sem CSOSN nenhum) é recusada explicitamente — nunca cai no
 // catch-all antigo que inventava CSOSN 900 (ver validarCsosnItem).
-const CSOSN_SUPORTADOS = ['102', '103', '300', '400', '500', '900'];
+const CSOSN_SUPORTADOS = ['102', '103', '202', '300', '400', '500', '900'];
 
 // Mensagem única para a recusa de CSOSN 101 — usada tanto aqui (serializador)
 // quanto no pré-check de lib/nfe/emitir.js (mesmo texto, uma fonte só).
@@ -63,7 +63,7 @@ const MENSAGEM_CSOSN_101 =
 export function validarCsosnItem(item) {
   const csosn = String(item.csosn || '');
   if (csosn === '101') throw new Error(MENSAGEM_CSOSN_101);
-  if (csosn === '500' || CSOSN_ICMSSN102.includes(csosn) || csosn === '900') return;
+  if (csosn === '500' || csosn === '202' || CSOSN_ICMSSN102.includes(csosn) || csosn === '900') return;
   if (!csosn && item.cstIcms) {
     throw new Error(
       `O item "${item.xProd || item.cProd}" tem CST de ICMS ("${item.cstIcms}") em vez de CSOSN — isso `
@@ -136,6 +136,22 @@ function montarICMS(item) {
   const csosn = String(item.csosn || '');
   if (csosn === '500') {
     return `<ICMS><ICMSSN500>${tag('orig', item.origem)}${tag('CSOSN', csosn)}</ICMSSN500></ICMS>`;
+  }
+  // 202: o emitente do Simples cobra o ICMS-ST (é o substituto). O grupo não
+  // tem campo para ICMS próprio — só para os valores da substituição. pMVAST e
+  // pRedBCST são opcionais e saem omitidos quando a regra não os cadastrou:
+  // mandar zero declararia margem ou redução de 0%, que é outra coisa.
+  if (csosn === '202') {
+    return '<ICMS><ICMSSN202>'
+      + tag('orig', item.origem)
+      + tag('CSOSN', csosn)
+      + tag('modBCST', item.modBCST)
+      + tag('pMVAST', item.pMVAST === undefined || item.pMVAST === null ? undefined : numero(item.pMVAST, 4))
+      + tag('pRedBCST', item.pRedBCST === undefined || item.pRedBCST === null ? undefined : numero(item.pRedBCST, 4))
+      + tag('vBCST', numero(item.vBCST, 2))
+      + tag('pICMSST', numero(item.pICMSST, 4))
+      + tag('vICMSST', numero(item.vICMSST, 2))
+      + '</ICMSSN202></ICMS>';
   }
   if (CSOSN_ICMSSN102.includes(csosn)) {
     return `<ICMS><ICMSSN102>${tag('orig', item.origem)}${tag('CSOSN', csosn)}</ICMSSN102></ICMS>`;
@@ -277,8 +293,8 @@ function montarTotal(total) {
     + tag('vICMS', numero(total.vICMS, 2))
     + tag('vICMSDeson', numero(0, 2))
     + tag('vFCP', numero(0, 2))
-    + tag('vBCST', numero(0, 2))
-    + tag('vST', numero(0, 2))
+    + tag('vBCST', numero(total.vBCST || 0, 2))
+    + tag('vST', numero(total.vST || 0, 2))
     + tag('vFCPST', numero(0, 2))
     + tag('vFCPSTRet', numero(0, 2))
     + tag('vProd', numero(total.vProd, 2))
