@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validarConfiguracaoEmissao, serieConflita, podeAjustarNumero,
+  bucketNota, montarRelatorioNotas,
 } from '../lib/emissaoFiscal.js';
 
 const BASE = { modelo: '55', ativo: true, ambiente: 'homologacao', serie: 1, cscId: null, cscToken: null, certificadoValido: true };
@@ -77,4 +78,48 @@ test('ajuste de numeração: nunca reduz depois de existir', () => {
   assert.equal(podeAjustarNumero(847, 910), true);
   assert.equal(podeAjustarNumero(847, 847), false);
   assert.equal(podeAjustarNumero(847, 800), false);
+});
+
+test('bucketNota: autorizado e cancelado caem em emitida', () => {
+  assert.equal(bucketNota('autorizado'), 'emitida');
+  assert.equal(bucketNota('cancelado'), 'emitida');
+});
+
+test('bucketNota: rejeitado, denegado e erro_comunicacao caem em erro', () => {
+  assert.equal(bucketNota('rejeitado'), 'erro');
+  assert.equal(bucketNota('denegado'), 'erro');
+  assert.equal(bucketNota('erro_comunicacao'), 'erro');
+});
+
+test('bucketNota: estados em trânsito e status desconhecido caem em pendente', () => {
+  for (const s of ['rascunho', 'numero_reservado', 'assinado', 'enviado', 'contingencia', 'algo_novo']) {
+    assert.equal(bucketNota(s), 'pendente');
+  }
+});
+
+test('montarRelatorioNotas: pedido sem nenhuma nota cai em pendente sem nota', () => {
+  const linhas = montarRelatorioNotas([{ id: 'p1' }], []);
+  assert.equal(linhas.length, 1);
+  assert.equal(linhas[0].nota, null);
+  assert.equal(linhas[0].bucket, 'pendente');
+});
+
+test('montarRelatorioNotas: usa a nota mais recente do pedido (primeira da lista, já ordenada desc)', () => {
+  const notas = [
+    { pedido_id: 'p1', status: 'autorizado', created_at: '2026-08-20' },
+    { pedido_id: 'p1', status: 'rejeitado', created_at: '2026-08-19' },
+  ];
+  const linhas = montarRelatorioNotas([{ id: 'p1' }], notas);
+  assert.equal(linhas[0].nota.status, 'autorizado');
+  assert.equal(linhas[0].bucket, 'emitida');
+});
+
+test('montarRelatorioNotas: cada pedido recebe só a sua própria nota', () => {
+  const notas = [
+    { pedido_id: 'p1', status: 'rejeitado', created_at: '2026-08-20' },
+    { pedido_id: 'p2', status: 'autorizado', created_at: '2026-08-20' },
+  ];
+  const linhas = montarRelatorioNotas([{ id: 'p1' }, { id: 'p2' }], notas);
+  assert.equal(linhas.find(l => l.pedido.id === 'p1').bucket, 'erro');
+  assert.equal(linhas.find(l => l.pedido.id === 'p2').bucket, 'emitida');
 });

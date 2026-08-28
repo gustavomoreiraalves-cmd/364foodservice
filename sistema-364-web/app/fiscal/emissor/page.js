@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
+import { useEmpresaAtual } from '../../../lib/empresa';
 
 // Uma seção por (modelo, ambiente) — não por modelo. O schema guarda
 // homologação e produção como linhas independentes (unique index em
@@ -26,15 +27,14 @@ async function cabecalhoAuth() {
 
 export default function EmissorFiscalPage() {
   return (
-    <AppShell modulo="fiscal" titulo="Emissão fiscal" desc="Ambiente, série, numeração e CSC por marca">
+    <AppShell modulo="fiscal" titulo="Emissão fiscal" desc="Ambiente, série, numeração e CSC da empresa selecionada">
       <Conteudo />
     </AppShell>
   );
 }
 
 function Conteudo() {
-  const [marcas, setMarcas] = useState([]);
-  const [selecionada, setSelecionada] = useState('');
+  const { empresaAtual } = useEmpresaAtual();
   const [dados, setDados] = useState(null);
   const [form, setForm] = useState({});
   const [mensagem, setMensagem] = useState('');
@@ -42,23 +42,18 @@ function Conteudo() {
   const [conexao, setConexao] = useState({}); // { homologacao: {...}, producao: {...} }
   const [testando, setTestando] = useState('');
   // Identifica a "sessão de carregamento" atual. Incrementado a cada chamada
-  // de carregar() — inclusive ao voltar para a mesma marca — para que um
+  // de carregar() — inclusive ao voltar para a mesma empresa — para que um
   // teste de conexão em voo possa ser comparado contra a sessão vigente no
-  // momento em que a resposta chega, e não contra o id da marca (que pode
+  // momento em que a resposta chega, e não contra o id da empresa (que pode
   // coincidir de novo se o usuário sair e voltar). Ref porque o closure
   // async de testarConexao precisa ler o valor corrente, não o capturado.
   const geracaoRef = useRef(0);
 
-  useEffect(() => {
-    supabase.from('empresas').select('id, nome, empregador_id').order('nome')
-      .then(({ data }) => { setMarcas(data || []); if (data?.[0]) setSelecionada(data[0].id); });
-  }, []);
-
   async function carregar(empresaId) {
     geracaoRef.current += 1;
     setMensagem('');
-    // Resultado de teste de conexão é por marca — nunca deve sobreviver a uma
-    // troca de marca, senão a tag verde de uma marca fica exibida (e parece
+    // Resultado de teste de conexão é por empresa — nunca deve sobreviver a uma
+    // troca de empresa, senão a tag verde de uma empresa fica exibida (e parece
     // válida) para outra que nunca foi testada. Idem para `testando`, senão
     // uma troca no meio de uma requisição in-flight deixa o botão travado
     // desabilitado.
@@ -83,7 +78,7 @@ function Conteudo() {
     setForm({ combos, informacoesComplementaresPadrao: json.empresa.informacoesComplementaresPadrao });
   }
 
-  useEffect(() => { if (selecionada) carregar(selecionada); }, [selecionada]);
+  useEffect(() => { if (empresaAtual?.id) carregar(empresaAtual.id); }, [empresaAtual?.id]);
 
   async function salvar(e) {
     e.preventDefault();
@@ -92,8 +87,8 @@ function Conteudo() {
       // Só entra no PUT quem já existia no servidor ou foi ativado agora — uma
       // combinação nunca tocada e inativa não é enviada. Sem isso, salvar
       // qualquer coisa reenviaria os 4 combos com série 1 de default, e a
-      // marca B de um CNPJ compartilhado nunca conseguiria salvar nada (série 1
-      // já em uso pela marca A). Ver Finding 8 da revisão final.
+      // empresa B de um CNPJ compartilhado nunca conseguiria salvar nada (série 1
+      // já em uso pela empresa A). Ver Finding 8 da revisão final.
       const configuracoes = SECOES
         .filter(([m, amb]) => form.combos[chave(m, amb)].jaExistia || form.combos[chave(m, amb)].ativo)
         .map(([m, amb]) => ({
@@ -105,13 +100,13 @@ function Conteudo() {
           cscToken: form.combos[chave(m, amb)].cscToken || undefined,
         }));
       const corpo = { configuracoes, informacoesComplementaresPadrao: form.informacoesComplementaresPadrao };
-      const r = await fetch(`/api/empresas/${selecionada}/emissao-fiscal`, {
+      const r = await fetch(`/api/empresas/${empresaAtual.id}/emissao-fiscal`, {
         method: 'PUT', headers: await cabecalhoAuth(), body: JSON.stringify(corpo),
       });
       const json = await r.json();
       if (!r.ok) { setMensagem(json.error || 'Falha ao salvar.'); return; }
       setMensagem('Configuração salva.');
-      await carregar(selecionada);
+      await carregar(empresaAtual.id);
     } finally {
       setSalvando(false);
     }
@@ -124,22 +119,22 @@ function Conteudo() {
     if (novo === null) return;
     const motivo = prompt('Motivo do ajuste:');
     if (!motivo) { alert('Motivo é obrigatório.'); return; }
-    const r = await fetch(`/api/empresas/${selecionada}/emissao-fiscal/ajustar-numeracao`, {
+    const r = await fetch(`/api/empresas/${empresaAtual.id}/emissao-fiscal/ajustar-numeracao`, {
       method: 'POST', headers: await cabecalhoAuth(),
       body: JSON.stringify({ modelo, ambiente, novoNumero: Number(novo), motivo }),
     });
     const json = await r.json();
     if (!r.ok) { alert(json.error || 'Falha ao ajustar.'); return; }
-    await carregar(selecionada);
+    await carregar(empresaAtual.id);
   }
 
   async function testarConexao(ambiente) {
     // Captura a sessão de carregamento vigente no momento do clique. Se o
-    // usuário trocar de marca (mesmo para depois voltar à mesma) antes da
+    // usuário trocar de empresa (mesmo para depois voltar à mesma) antes da
     // resposta chegar, geracaoRef.current já terá avançado, e a resposta é
-    // descartada — ela pertence à marca antiga, não à selecionada agora.
+    // descartada — ela pertence à empresa antiga, não à selecionada agora.
     const minhaGeracao = geracaoRef.current;
-    const empresaAlvo = selecionada;
+    const empresaAlvo = empresaAtual.id;
     setTestando(ambiente);
     setConexao(c => ({ ...c, [ambiente]: null }));
     try {
@@ -169,21 +164,12 @@ function Conteudo() {
     setForm(f => ({ ...f, combos: { ...f.combos, [k]: { ...f.combos[k], [campo]: valor } } }));
   }
 
-  if (!marcas.length) return <p className="muted">Carregando marcas…</p>;
+  if (!empresaAtual) return <p className="muted">Carregando empresa…</p>;
 
   return (
     <div className="panel">
-      <div className="form-grid">
-        <div>
-          <label>Marca</label>
-          <select value={selecionada} onChange={e => setSelecionada(e.target.value)}>
-            {marcas.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {marcas.find(m => m.id === selecionada && !m.empregador_id) && (
-        <p className="muted">Esta marca não tem pessoa jurídica (CNPJ) vinculada — vincule em /empresas antes.</p>
+      {!empresaAtual.empregador_id && (
+        <p className="muted">Esta empresa não tem pessoa jurídica (CNPJ) vinculada — vincule em /empresas antes.</p>
       )}
 
       {form.combos && (
@@ -236,7 +222,7 @@ function Conteudo() {
               </div>
             ))}
             <p className="muted" style={{ gridColumn: '1 / -1' }}>
-              Consulta o status do serviço de NF-e (modelo 55) da SEFAZ com o certificado desta marca. Não emite nota nem consome numeração. NFC-e (modelo 65) autoriza por um host diferente, ainda não configurado — este teste não prova a conexão de NFC-e.
+              Consulta o status do serviço de NF-e (modelo 55) da SEFAZ com o certificado desta empresa. Não emite nota nem consome numeração. NFC-e (modelo 65) autoriza por um host diferente, ainda não configurado — este teste não prova a conexão de NFC-e.
             </p>
           </fieldset>
 
