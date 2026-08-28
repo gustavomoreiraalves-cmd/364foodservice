@@ -4,6 +4,7 @@ import {
   digitoVerificadorGtin, gtinValido, soDigitos,
   cestsDoNcm, pendenciasFiscaisProduto, prontoParaEmissao, SEM_GTIN,
   fatorConversaoTributavel,
+  CAMPOS_COPIA_FISCAL, camposCopiaFiscal, gruposComRegra, situacaoFiscalProduto,
 } from '../lib/fiscal.js';
 
 test('dígito verificador do GTIN acompanha o do banco', () => {
@@ -155,4 +156,83 @@ test('sem unidade tributável, ou com unidades diferentes, o fator continua nulo
   assert.equal(fatorConversaoTributavel({
     unidade: 'un', unidade_tributavel: 'un', fator_conversao_tributavel: 'abc',
   }), 1, 'lixo digitado não vira NaN: cai na derivação');
+});
+
+const FONTE = {
+  id: 'p1', codigo: '0364-001', nome: 'Costela Defumada 500g', unidade: 'KG',
+  ncm: '02102000', ex_tipi: null, cest: '1708300', origem_mercadoria: 0,
+  unidade_tributavel: 'KG', fator_conversao_tributavel: 1,
+  grupo_tributario_id: 'g1', ind_escala: 'S', cnpj_fabricante: null,
+  cst_ibs_cbs: null, ativo_fiscal: true,
+  gtin: '7891234567895', gtin_tributavel: '7891234567895',
+  peso_liquido_kg: 0.5, peso_bruto_kg: 0.55, sujeito_st: true,
+};
+
+test('o payload da cópia leva os dez campos fiscais previstos', () => {
+  const payload = camposCopiaFiscal(FONTE);
+  assert.deepEqual(Object.keys(payload).sort(), [...CAMPOS_COPIA_FISCAL].sort());
+  assert.equal(CAMPOS_COPIA_FISCAL.length, 10);
+  assert.equal(payload.ncm, '02102000');
+  assert.equal(payload.grupo_tributario_id, 'g1');
+});
+
+test('o payload não leva identidade do produto nem declaração de conferência', () => {
+  const payload = camposCopiaFiscal(FONTE);
+  // Código de barras é único por produto; peso e unidade de venda são do item,
+  // não da classificação; ativo_fiscal é assinatura de quem conferiu.
+  for (const proibido of ['gtin', 'gtin_tributavel', 'unidade', 'peso_liquido_kg',
+    'peso_bruto_kg', 'ativo_fiscal', 'id', 'codigo', 'nome']) {
+    assert.ok(!(proibido in payload), `${proibido} não pode ser copiado`);
+  }
+});
+
+test('campo nulo na fonte é copiado como nulo, não omitido', () => {
+  // Copiar é espelhar, inclusive o vazio. Mesclar produziria um produto que
+  // não é igual a nenhum dos dois e que ninguém conferiu.
+  const payload = camposCopiaFiscal({ ...FONTE, cest: null });
+  assert.ok('cest' in payload);
+  assert.equal(payload.cest, null);
+});
+
+test('campo ausente na fonte também vira nulo explícito', () => {
+  const payload = camposCopiaFiscal({ ncm: '02102000' });
+  assert.equal(payload.cest, null);
+  assert.equal(payload.grupo_tributario_id, null);
+});
+
+test('gruposComRegra conta só as regras ativas', () => {
+  const grupos = gruposComRegra([
+    { grupo_tributario_id: 'g1', ativo: true },
+    { grupo_tributario_id: 'g2', ativo: false },
+    { grupo_tributario_id: null, ativo: true },
+  ]);
+  assert.ok(grupos.has('g1'));
+  assert.ok(!grupos.has('g2'), 'regra desativada não habilita o grupo');
+  assert.equal(grupos.size, 1, 'regra por produto ou por NCM não tem grupo e não entra');
+});
+
+test('regra sem a coluna ativo conta como ativa', () => {
+  // O select da tela pode não trazer a coluna; ausência não é desativação.
+  assert.ok(gruposComRegra([{ grupo_tributario_id: 'g1' }]).has('g1'));
+});
+
+test('produto cujo grupo não tem regra ativa recebe o aviso', () => {
+  const s = situacaoFiscalProduto({ ...FONTE, grupo_tributario_id: 'g9' }, gruposComRegra([]));
+  assert.equal(s.grupoSemRegra, true);
+});
+
+test('produto cujo grupo tem regra ativa não recebe o aviso', () => {
+  const s = situacaoFiscalProduto(FONTE, gruposComRegra([{ grupo_tributario_id: 'g1', ativo: true }]));
+  assert.equal(s.grupoSemRegra, false);
+  assert.deepEqual(s.pendencias, []);
+  assert.equal(s.liberado, true);
+});
+
+test('produto sem grupo nenhum tem a pendência, não o aviso — são coisas diferentes', () => {
+  // "sem grupo" é cadastro incompleto e aparece em pendenciasFiscaisProduto.
+  // "grupo sem regra" é cadastro completo que ainda assim vai ser recusado na
+  // emissão. Misturar os dois esconde um dos dois problemas.
+  const s = situacaoFiscalProduto({ ...FONTE, grupo_tributario_id: null }, gruposComRegra([]));
+  assert.equal(s.grupoSemRegra, false);
+  assert.ok(s.pendencias.some(p => /grupo tributário/i.test(p)), s.pendencias.join(' | '));
 });

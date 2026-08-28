@@ -106,6 +106,61 @@ export function pendenciasFiscaisProduto(produto = {}) {
   return faltando;
 }
 
+// Os campos que uma cópia de configuração fiscal leva de um produto a outro.
+// Lista única, lida pela tela e pela rota — duas listas divergiriam no primeiro
+// campo novo que alguém acrescentasse ao cadastro.
+//
+// Fora daqui, de propósito: gtin e gtin_tributavel (código de barras é único
+// por produto), unidade (é a unidade de venda, não dado fiscal), peso líquido
+// e bruto (atributo físico do item) e ativo_fiscal — que não é dado, é a
+// declaração de que alguém conferiu a classificação.
+export const CAMPOS_COPIA_FISCAL = [
+  "ncm", "ex_tipi", "cest", "origem_mercadoria",
+  "unidade_tributavel", "fator_conversao_tributavel",
+  "grupo_tributario_id", "ind_escala", "cnpj_fabricante", "cst_ibs_cbs",
+];
+
+// Copiar é espelhar, inclusive o vazio: se a fonte está sem CEST, o destino
+// fica sem CEST. Por isso campo ausente vira `null` explícito e não some do
+// payload — sumir seria mesclar, e mesclar produz um produto que não é igual a
+// nenhum dos dois e que ninguém conferiu.
+export function camposCopiaFiscal(produtoFonte = {}) {
+  const payload = {};
+  for (const campo of CAMPOS_COPIA_FISCAL) {
+    payload[campo] = produtoFonte[campo] ?? null;
+  }
+  return payload;
+}
+
+// Quais grupos tributários têm ao menos uma regra ativa.
+//
+// Não é simulação de fn_resolver_regra_tributaria: a resolução real depende de
+// natureza da operação, UF de destino e perfil do destinatário, que só existem
+// na hora de emitir. "Zero regras" é certeza de falha na emissão; "tem regra"
+// não é garantia de sucesso — e a tela precisa dizer isso nesses termos.
+export function gruposComRegra(regras = []) {
+  const comRegra = new Set();
+  for (const regra of regras) {
+    if (regra?.ativo === false) continue;
+    if (regra?.grupo_tributario_id) comRegra.add(regra.grupo_tributario_id);
+  }
+  return comRegra;
+}
+
+// A linha da tela de situação fiscal, derivada fora da tela para ser testável.
+//
+// `grupoSemRegra` só existe para produto QUE TEM grupo: produto sem grupo já
+// aparece na lista de pendências, e marcar os dois avisos esconderia um deles.
+export function situacaoFiscalProduto(produto = {}, gruposComRegraSet = new Set()) {
+  const pendencias = pendenciasFiscaisProduto(produto);
+  return {
+    pendencias,
+    grupoSemRegra: Boolean(produto.grupo_tributario_id)
+      && !gruposComRegraSet.has(produto.grupo_tributario_id),
+    liberado: pendencias.length === 0,
+  };
+}
+
 // O que impede este cliente de receber uma nota. Espelha a constraint
 // clientes_ativo_fiscal_completo da atualização 36 — aqui para explicar em
 // português, lá para garantir.
