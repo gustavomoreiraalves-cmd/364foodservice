@@ -209,3 +209,48 @@ test('infCpl maior que 5000 caracteres é recusado', () => {
     /infCpl.*5000|5000.*caracteres/i,
   );
 });
+
+function comRegra(extra) {
+  return { ...ENTRADA, itens: [{ ...ITEM, regra: { ...ITEM.regra, ...extra } }] };
+}
+
+function comRegraResolvida(extra) {
+  return resolverNota(comRegra(extra)).itens[0].infAdProd;
+}
+
+test('infAdProd junta base legal e observação, nessa ordem', () => {
+  const nota = resolverNota(comRegra({
+    base_legal: 'RICMS-RO Anexo VI, Tabela XVII, item 84.0',
+    observacao_fiscal: 'ICMS retido por substituição tributária',
+  }));
+  assert.equal(
+    nota.itens[0].infAdProd,
+    'RICMS-RO Anexo VI, Tabela XVII, item 84.0 — ICMS retido por substituição tributária',
+  );
+});
+
+test('infAdProd sai com só uma das duas, sem separador solto', () => {
+  assert.equal(comRegraResolvida({ base_legal: 'RICMS-RO art. 1º' }), 'RICMS-RO art. 1º');
+  assert.equal(comRegraResolvida({ observacao_fiscal: 'Mercadoria de produção própria' }),
+    'Mercadoria de produção própria');
+});
+
+test('regra sem base legal e sem observação não produz infAdProd', () => {
+  assert.equal(resolverNota(ENTRADA).itens[0].infAdProd, undefined,
+    'undefined é o que faz montarXml omitir a tag; string vazia viraria <infAdProd></infAdProd>');
+});
+
+test('quebra de linha crua vinda da tela é normalizada antes de virar XML', () => {
+  const nota = resolverNota(comRegra({ base_legal: 'RICMS-RO\nart. 1º   §2º' }));
+  assert.equal(nota.itens[0].infAdProd, 'RICMS-RO art. 1º §2º');
+});
+
+test('texto acima de 500 caracteres para a emissão no resolver, antes de queimar número', () => {
+  // resolverNota roda em lib/nfe/emitir.js:339; reservar_numero_fiscal só em
+  // :429. Falhar aqui é falhar antes de gastar numeração — que é o motivo de
+  // toda a normalização de texto viver no resolver e não no serializador.
+  assert.throws(
+    () => resolverNota(comRegra({ base_legal: 'a'.repeat(501) })),
+    /500 caracteres/,
+  );
+});

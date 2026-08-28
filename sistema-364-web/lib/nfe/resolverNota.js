@@ -10,6 +10,8 @@
 // Toda validação aqui roda ANTES de reservar número fiscal. Falhar aqui é de
 // graça; falhar depois queima numeração.
 
+import { juntarTextoFiscal, LIMITE_INF_AD_PROD } from '../fiscalRegras.js';
+
 // A SEFAZ exige esta razão social em homologação. Mandar o nome real do cliente
 // num XML de teste é rejeição 999 / "NF-e de teste em ambiente de produção".
 const RAZAO_SOCIAL_HOMOLOGACAO = 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL';
@@ -125,6 +127,14 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     cstCofins: regra.cst_cofins || '49',
     pCOFINS, vCOFINS: duasCasas(vProd * pCOFINS / 100),
     regraTributariaId: regra.id,
+    // Informação adicional POR ITEM. Nota com ST retido que não diz no item de
+    // onde vem a retenção gera questionamento fiscal e cliente sem como se
+    // creditar. O rodapé (infCpl) é da nota inteira e não serve para isso.
+    infAdProd: normalizarTexto(
+      juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal),
+      LIMITE_INF_AD_PROD,
+      `informação adicional do item "${nome}" (infAdProd)`,
+    ),
   };
 }
 
