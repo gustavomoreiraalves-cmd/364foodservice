@@ -31,7 +31,7 @@ export async function POST(request) {
 
   // valida colaborador de novo no servidor (não confia no quiosque)
   const { data: colab } = await sb.from('colaboradores')
-    .select('id, nome, email, empresa_id, empregador_id, status, registra_ponto, biometria_status, metodos_permitidos')
+    .select('id, nome, email, empresa_id, empregador_id, unidade_principal_id, status, registra_ponto, biometria_status, metodos_permitidos')
     .eq('id', colaboradorId).maybeSingle();
   if (!colab || colab.status !== 'ativo' || !colab.registra_ponto) {
     await registrarTentativa(sb, disp, 'colaborador_bloqueado', { colaborador_proximo_id: colaboradorId });
@@ -46,18 +46,15 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Método de registro não permitido para este colaborador.' }, { status: 403 });
   }
 
-  // vínculo vigente com a unidade do dispositivo
-  const hoje = new Date().toISOString().slice(0, 10);
-  const { data: vinculo } = await sb.from('colaborador_unidades')
-    .select('id')
-    .eq('colaborador_id', colaboradorId)
-    .eq('unidade_id', disp.unidade_id)
-    .lte('data_inicio', hoje)
-    .or('data_fim.is.null,data_fim.gte.' + hoje)
-    .limit(1).maybeSingle();
-  if (!vinculo) {
+  // o dispositivo reconhece qualquer colaborador da empresa (não só os da sua
+  // unidade física) e credita a marcação na unidade principal do colaborador
+  if (colab.empresa_id !== disp.empresa_id) {
     await registrarTentativa(sb, disp, 'fora_da_unidade', { colaborador_proximo_id: colaboradorId });
-    return NextResponse.json({ error: 'Colaborador não autorizado nesta unidade.' }, { status: 403 });
+    return NextResponse.json({ error: 'Colaborador não pertence a esta empresa.' }, { status: 403 });
+  }
+  if (!colab.unidade_principal_id) {
+    await registrarTentativa(sb, disp, 'fora_da_unidade', { colaborador_proximo_id: colaboradorId });
+    return NextResponse.json({ error: 'Colaborador sem unidade principal cadastrada — ajuste em Colaboradores.' }, { status: 403 });
   }
 
   if (metodo === 'facial' && livenessOk === false) {
@@ -65,7 +62,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Prova de vida não aprovada.' }, { status: 403 });
   }
 
-  const { data: unidade } = await sb.from('unidades').select('fuso').eq('id', disp.unidade_id).single();
+  const { data: unidade } = await sb.from('unidades').select('fuso, nome').eq('id', colab.unidade_principal_id).single();
 
   let descritorCifrado = null;
   if (Array.isArray(descritorCapturado) && descritorCapturado.length === 128) {
@@ -76,7 +73,7 @@ export async function POST(request) {
     p_idempotencia: idempotencia,
     p_empregador_id: colab.empregador_id,
     p_empresa_id: colab.empresa_id,
-    p_unidade_id: disp.unidade_id,
+    p_unidade_id: colab.unidade_principal_id,
     p_colaborador_id: colab.id,
     p_dispositivo_id: disp.id,
     p_tipo: tipo,
@@ -101,6 +98,7 @@ export async function POST(request) {
       tipo: m.tipo,
       dataHoraLocal: m.data_hora_local,
       hashPrefixo: (m.record_hash || '').slice(0, 12),
+      unidade: unidade?.nome || null,
       primeiroNome: colab.nome.split(' ')[0],
       colaboradorId: colab.id,
       temEmail: !!colab.email,

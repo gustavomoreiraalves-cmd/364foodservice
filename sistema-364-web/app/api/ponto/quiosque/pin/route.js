@@ -8,8 +8,12 @@ import { autenticarDispositivo, sha256Hex, auditar } from '../../../../../lib/po
 //
 // Autoatendimento: se o colaborador ainda não tem PIN cadastrado, o PIN
 // digitado agora vira o PIN dele (não existe passo prévio de RH pra isso —
-// só precisa já estar com matrícula cadastrada e vínculo com a unidade).
+// só precisa já estar com matrícula cadastrada e unidade principal definida).
 // Se já existe PIN, precisa bater com o cadastrado, como antes.
+//
+// O dispositivo reconhece qualquer colaborador da mesma empresa (não só os
+// da sua unidade física) — a marcação em si é creditada na unidade
+// principal do colaborador (ver /quiosque/marcar).
 export async function POST(request) {
   const { sb, disp, erro } = await autenticarDispositivo(request);
   if (erro) return erro;
@@ -18,22 +22,14 @@ export async function POST(request) {
   if (!matricula || !pin) return NextResponse.json({ error: 'Informe matrícula e PIN.' }, { status: 400 });
   if (!/^\d{4,6}$/.test(String(pin))) return NextResponse.json({ error: 'O PIN deve ter de 4 a 6 dígitos.' }, { status: 400 });
 
-  const hoje = new Date().toISOString().slice(0, 10);
   const { data: colabs } = await sb.from('colaboradores')
-    .select('id, nome, matricula, status, registra_ponto, metodos_permitidos, biometria_status')
+    .select('id, nome, matricula, status, registra_ponto, metodos_permitidos, biometria_status, empresa_id, unidade_principal_id')
     .eq('matricula', String(matricula).trim())
     .eq('status', 'ativo')
     .eq('registra_ponto', true);
 
   for (const colab of (colabs || [])) {
-    const { data: vinculo } = await sb.from('colaborador_unidades')
-      .select('id')
-      .eq('colaborador_id', colab.id)
-      .eq('unidade_id', disp.unidade_id)
-      .lte('data_inicio', hoje)
-      .or('data_fim.is.null,data_fim.gte.' + hoje)
-      .limit(1).maybeSingle();
-    if (!vinculo) continue;
+    if (colab.empresa_id !== disp.empresa_id || !colab.unidade_principal_id) continue;
 
     const { data: reg } = await sb.from('ponto_pins').select('pin_hash, salt').eq('colaborador_id', colab.id).maybeSingle();
 

@@ -443,6 +443,7 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
           <div style={{ fontSize: 26, fontFamily: 'Georgia, serif', marginTop: 6 }}>
             {new Date(comprovante.dataHoraLocal).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </div>
+          {comprovante.unidade && <div style={{ fontSize: 13 }}>{comprovante.unidade}</div>}
           <div className="det">NSR {comprovante.nsr} · {comprovante.hashPrefixo}</div>
 
           {emailDecidido === null && (

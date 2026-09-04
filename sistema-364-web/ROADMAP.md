@@ -298,6 +298,27 @@ Fora desta entrega (fases seguintes, não implementadas):
 - Painel de divergências (saídas conciliadas fora do vencimento, fornecedor com
   padrão instável).
 
+### Quiosque reconhece a empresa toda, credita na unidade do colaborador (04/set/2026)
+
+Um dispositivo deixou de ficar preso a bater ponto só de colaboradores da
+sua própria `unidade_id`: agora ele reconhece (sync facial, PIN) qualquer
+colaborador **da mesma empresa**, e cada marcação é gravada na
+`unidade_principal_id` do colaborador — não mais na unidade do tablet.
+Útil pra empresas com várias unidades (ex.: 364 Food Service tem Matriz/CD/
+Afya/...) que quiseram compartilhar um único tablet. `colaborador_unidades`
+deixou de ser usada como trava de autorização nas rotas de quiosque (ainda
+existe e é exibida em Colaboradores, só não bloqueia mais a marcação);
+colaborador sem `unidade_principal_id` cadastrada não bate ponto em lugar
+nenhum. Alterado em `app/api/ponto/quiosque/{sync,pin,marcar}/route.js`;
+comprovante na tela passou a mostrar em qual unidade a marcação caiu.
+
+Corrigido também: acesso por PIN nunca funcionava pra ninguém real — a
+rota exigia `metodos_permitidos` já conter `'pin'`, mas isso só era setado
+quando o RH clicava um botão específico, o que nunca tinha acontecido pra
+nenhum colaborador. Agora é autoatendimento: primeira vez que a matrícula +
+PIN bate (colaborador da empresa certa, com unidade principal), esse PIN
+vira o PIN dele — sem passo prévio do RH.
+
 ## Próximos passos
 
 O dono do negócio está passando melhorias módulo a módulo (começou por Recebimento,
