@@ -162,7 +162,36 @@ function sanitizarEmit(emitente) {
   };
 }
 
-function resolverItem({ pedidoItem, produto, regra }, indice) {
+// Crédito de ICMS do Simples Nacional (CSOSN 101, grupo ICMSSN101 no XML).
+// pCredSN muda todo mês com o RBT12 (art. 60 da Resolução CGSN 140/2018) — o
+// cadastro do produto/regra nunca fixa esse número, ele vem de
+// parametros_simples_nacional na competência da nota (ver /fiscal/tributacao
+// e emitir.js, que busca a linha da competência antes de chamar
+// resolverNota). vCredICMSSN é o valor do crédito sobre o produto: o grupo
+// ICMSSN101 não tem vBC próprio, a base é o vProd do item.
+function resolverCreditoSimples(regra, nome, vProd, parametroSimples) {
+  if (String(regra.csosn || '') !== '101') return undefined;
+  if (!parametroSimples) {
+    throw new Error(
+      `O item "${nome}" usa CSOSN 101 (crédito de ICMS do Simples Nacional), mas não há parâmetros do `
+      + 'Simples Nacional cadastrados para a competência desta nota. Informe o RBT12 do mês em '
+      + '/fiscal/tributacao antes de emitir.',
+    );
+  }
+  const aliquotaCredito = Number(parametroSimples.aliquota_credito_icms);
+  if (!(aliquotaCredito > 0)) {
+    throw new Error(
+      `O parâmetro do Simples Nacional de ${parametroSimples.competencia} está sem alíquota de crédito de `
+      + 'ICMS calculada (falta a distribuição de ICMS na faixa). Complete o cadastro em /fiscal/tributacao '
+      + 'antes de emitir.',
+    );
+  }
+  const pCredSN = aliquotaCredito * 100;
+  const vCredICMSSN = duasCasas(vProd * aliquotaCredito);
+  return { pCredSN, vCredICMSSN };
+}
+
+function resolverItem({ pedidoItem, produto, regra }, indice, { parametroSimples } = {}) {
   const nome = produto?.nome || produto?.codigo || `item ${indice + 1}`;
 
   if (!regra) {
@@ -196,9 +225,20 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
   }
 
   const st = resolverSt(regra, nome, vProd);
+  const credito = resolverCreditoSimples(regra, nome, vProd, parametroSimples);
 
   const pPIS = Number(regra.aliquota_pis || 0);
   const pCOFINS = Number(regra.aliquota_cofins || 0);
+
+  // Frase do art. 23 da LC 123/2006 por item (não no rodapé da nota): cada
+  // item com CSOSN 101 tem seu próprio pCredSN/vCredICMSSN, e uma nota pode
+  // ter itens com e sem direito ao crédito — texto no rodapé sozinho não diz
+  // qual item ele descreve. Mesmo padrão já usado para ST (comentário abaixo,
+  // no infAdProd).
+  const textoCredito = credito
+    ? `Permite aproveitamento de crédito de ICMS no valor de R$ ${credito.vCredICMSSN.toFixed(2)} `
+      + `(${credito.pCredSN.toFixed(4)}%), nos termos do art. 23 da LC 123/2006.`
+    : undefined;
 
   return {
     numeroItem: indice + 1,
@@ -218,6 +258,8 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     csosn: regra.csosn || undefined,
     cstIcms: regra.cst_icms || undefined,
     vBC, pICMS, vICMS,
+    pCredSN: credito?.pCredSN,
+    vCredICMSSN: credito?.vCredICMSSN ?? 0,
     modBCST: st?.modBCST,
     pMVAST: st?.pMVAST,
     pRedBCST: st?.pRedBCST,
@@ -233,7 +275,9 @@ function resolverItem({ pedidoItem, produto, regra }, indice) {
     // onde vem a retenção gera questionamento fiscal e cliente sem como se
     // creditar. O rodapé (infCpl) é da nota inteira e não serve para isso.
     infAdProd: normalizarTexto(
-      juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal),
+      [juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal), textoCredito]
+        .filter(v => v !== undefined && v !== null && v !== '')
+        .join(' — ') || undefined,
       LIMITE_INF_AD_PROD,
       `informação adicional do item "${nome}" (infAdProd)`,
     ),
@@ -310,12 +354,12 @@ function resolverDestinatario(cliente, ambiente) {
   };
 }
 
-export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperacao, ambiente }) {
+export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperacao, ambiente, parametroSimples }) {
   if (!Array.isArray(itens) || itens.length === 0) {
     throw new Error('O pedido não tem nenhum item para emitir.');
   }
   const dest = resolverDestinatario(cliente, ambiente);
-  const resolvidos = itens.map(resolverItem);
+  const resolvidos = itens.map((it, indice) => resolverItem(it, indice, { parametroSimples }));
   const vProd = duasCasas(resolvidos.reduce((s, i) => s + i.vProd, 0));
 
   // infCpl junta o texto padrão do emitente (informacoesComplementaresPadrao,

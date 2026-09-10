@@ -33,7 +33,20 @@ const ITEM = {
   },
 };
 
-const ENTRADA = { pedido: PEDIDO, cliente: CLIENTE, itens: [ITEM], emitente: EMITENTE, naturezaOperacao: NATUREZA, ambiente: 'homologacao' };
+// Percentual de crédito do CSOSN 101 (pCredSN) muda todo mês com o RBT12 —
+// ITEM usa csosn '101' por padrão neste arquivo (é o caso mais comum da
+// 364), então toda nota do fixture precisa de um parâmetro da competência,
+// senão a emissão para explicando a falta de cadastro (ver os dois testes
+// dedicados a isso, abaixo).
+const PARAMETRO_SIMPLES = {
+  competencia: '2026-08-01', anexo: 'I', rbt12: 1800000, aliquota_nominal: 0.095,
+  parcela_deduzir: 13500, percentual_distribuicao_icms: 0.335, aliquota_credito_icms: 0.0146,
+};
+
+const ENTRADA = {
+  pedido: PEDIDO, cliente: CLIENTE, itens: [ITEM], emitente: EMITENTE, naturezaOperacao: NATUREZA,
+  ambiente: 'homologacao', parametroSimples: PARAMETRO_SIMPLES,
+};
 
 test('calcula o valor do item e o total da nota', () => {
   const nota = resolverNota(ENTRADA);
@@ -210,8 +223,11 @@ test('infCpl maior que 5000 caracteres é recusado', () => {
   );
 });
 
+// csosn '102' por padrão: estes testes são sobre a composição do texto de
+// infAdProd (base legal + observação), não sobre o crédito do CSOSN 101 —
+// que tem seus próprios testes, abaixo, e escreveria uma frase a mais aqui.
 function comRegra(extra) {
-  return { ...ENTRADA, itens: [{ ...ITEM, regra: { ...ITEM.regra, ...extra } }] };
+  return { ...ENTRADA, itens: [{ ...ITEM, regra: { ...ITEM.regra, csosn: '102', ...extra } }] };
 }
 
 function comRegraResolvida(extra) {
@@ -236,7 +252,7 @@ test('infAdProd sai com só uma das duas, sem separador solto', () => {
 });
 
 test('regra sem base legal e sem observação não produz infAdProd', () => {
-  assert.equal(resolverNota(ENTRADA).itens[0].infAdProd, undefined,
+  assert.equal(resolverNota(comRegra({})).itens[0].infAdProd, undefined,
     'undefined é o que faz montarXml omitir a tag; string vazia viraria <infAdProd></infAdProd>');
 });
 
@@ -252,5 +268,35 @@ test('texto acima de 500 caracteres para a emissão no resolver, antes de queima
   assert.throws(
     () => resolverNota(comRegra({ base_legal: 'a'.repeat(501) })),
     /500 caracteres/,
+  );
+});
+
+// CSOSN 101 (crédito de ICMS do Simples Nacional) — art. 60 da Resolução
+// CGSN 140/2018. O percentual nunca vem do cadastro do produto/regra: vem de
+// parametros_simples_nacional na competência da nota (ver /fiscal/tributacao).
+
+test('CSOSN 101 calcula pCredSN e vCredICMSSN a partir do parâmetro da competência', () => {
+  const nota = resolverNota(ENTRADA);
+  assert.equal(nota.itens[0].pCredSN, 1.46); // aliquota_credito_icms 0.0146 -> 1.46%
+  assert.equal(nota.itens[0].vCredICMSSN, 3.72); // 255.00 * 1.46%
+});
+
+test('CSOSN 101 escreve a frase do art. 23 da LC 123/2006 no infAdProd do item', () => {
+  const infAdProd = resolverNota(ENTRADA).itens[0].infAdProd;
+  assert.match(infAdProd, /cr[ée]dito de ICMS.*R\$ 3\.72.*1\.4600%.*art\. 23 da LC 123\/2006/is);
+});
+
+test('CSOSN 101 sem parâmetro do Simples cadastrado para a competência aborta antes de reservar número', () => {
+  const { parametroSimples, ...semParametro } = ENTRADA;
+  assert.throws(
+    () => resolverNota(semParametro),
+    /Costela Defumada.*(CSOSN 101|par[âa]metros do Simples)/is,
+  );
+});
+
+test('CSOSN 101 com parâmetro sem alíquota de crédito calculada aborta', () => {
+  assert.throws(
+    () => resolverNota({ ...ENTRADA, parametroSimples: { ...PARAMETRO_SIMPLES, aliquota_credito_icms: null } }),
+    /alíquota de crédito/i,
   );
 });

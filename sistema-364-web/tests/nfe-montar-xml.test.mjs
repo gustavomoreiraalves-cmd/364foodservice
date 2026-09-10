@@ -129,16 +129,40 @@ test('regime normal é recusado nesta fase', () => {
 // sabe montar.
 // ---------------------------------------------------------------------------
 
-function notaComRegra(regraExtra) {
+function notaComRegra(regraExtra, extra = {}) {
   const item = { ...ITEM, regra: { ...ITEM.regra, ...regraExtra } };
   return resolverNota({
     pedido: { id: 'ped1' }, cliente: CLIENTE, itens: [item], emitente: EMITENTE,
     naturezaOperacao: { id: 'n1', descricao: 'Venda de mercadoria' }, ambiente: 'homologacao',
+    ...extra,
   });
 }
 
-test('CSOSN 101 é recusado no serializador — falta pCredSN/vCredICMSSN, nunca vira ICMSSN102', () => {
-  const nota = notaComRegra({ csosn: '101' });
+// CSOSN 101 = ICMSSN101, com pCredSN e vCredICMSSN — nem vBC/pICMS/vICMS
+// (esses são do ICMSSN900) nem só a situação (ICMSSN102). O percentual vem de
+// parametros_simples_nacional; resolverNota já calculou pCredSN/vCredICMSSN
+// antes deste teste rodar (ver tests/nfe-resolver.test.mjs para esse cálculo).
+const PARAMETRO_SIMPLES = {
+  competencia: '2026-08-01', anexo: 'I', rbt12: 1800000, aliquota_nominal: 0.095,
+  parcela_deduzir: 13500, percentual_distribuicao_icms: 0.335, aliquota_credito_icms: 0.0146,
+};
+
+test('CSOSN 101 monta ICMSSN101 com pCredSN e vCredICMSSN, nunca ICMSSN102', () => {
+  const nota = notaComRegra({ csosn: '101' }, { parametroSimples: PARAMETRO_SIMPLES });
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<ICMSSN101>/);
+  assert.doesNotMatch(xml, /<ICMSSN102>/);
+  assert.match(xml, /<pCredSN>1\.4600<\/pCredSN>/);
+  assert.match(xml, /<vCredICMSSN>3\.72<\/vCredICMSSN>/); // 255.00 * 1.46%
+});
+
+test('CSOSN 101 sem pCredSN resolvido é recusado no serializador, nunca vira ICMSSN102', () => {
+  // Checagem de defesa do serializador (validarCsosnItem) — resolverNota já
+  // barra isso antes (sem parâmetro do Simples cadastrado para a
+  // competência), mas montarXml.js não pode confiar que quem o chama validou.
+  const nota = notaComRegra({ csosn: '101' }, { parametroSimples: PARAMETRO_SIMPLES });
+  nota.itens[0].pCredSN = undefined;
+  nota.itens[0].vCredICMSSN = undefined;
   assert.throws(() => montarXmlNFe(nota, OPCOES), /pCredSN/i);
 });
 

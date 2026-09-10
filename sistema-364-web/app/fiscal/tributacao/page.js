@@ -25,6 +25,11 @@ const REGRA_VAZIA = {
   vigencia_inicio: '', vigencia_fim: null,
 };
 
+const PARAM_VAZIO = {
+  competencia: '', anexo: 'I', rbt12: '', aliquota_nominal_pct: '',
+  parcela_deduzir: '0', percentual_distribuicao_icms_pct: '',
+};
+
 export default function TributacaoPage() {
   return (
     <AppShell modulo="fiscal" titulo="Tributação" desc="Grupos e regras que definem CFOP, CSOSN e ST de cada operação">
@@ -47,6 +52,10 @@ function Conteudo() {
   const [formRegra, setFormRegra] = useState(null);
   const [editandoRegra, setEditandoRegra] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [paramsSimples, setParamsSimples] = useState([]);
+  const [formParam, setFormParam] = useState(null);
+  const [editandoParam, setEditandoParam] = useState(null);
+  const [salvandoParam, setSalvandoParam] = useState(false);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -67,6 +76,13 @@ function Conteudo() {
     setNaturezas(n.data || []);
     setCfops(c.data || []);
     setProdutos(p.data || []);
+    if (empresaAtual.empregador_id) {
+      const { data } = await supabase.from('parametros_simples_nacional').select('*')
+        .eq('empregador_id', empresaAtual.empregador_id).order('competencia', { ascending: false });
+      setParamsSimples(data || []);
+    } else {
+      setParamsSimples([]);
+    }
     setLoading(false);
   }
 
@@ -129,6 +145,67 @@ function Conteudo() {
   async function excluirRegra(id) {
     if (!confirm('Excluir esta regra? As notas já emitidas não mudam.')) return;
     const { error } = await supabase.from('regras_tributarias').delete().eq('id', id);
+    if (error) { alert('Não foi possível excluir: ' + error.message); return; }
+    carregar();
+  }
+
+  function novoParam() {
+    setFormParam({ ...PARAM_VAZIO, competencia: mesAtual() });
+    setEditandoParam(null);
+  }
+
+  function editarParam(p) {
+    setFormParam({
+      competencia: (p.competencia || '').slice(0, 7),
+      anexo: p.anexo,
+      rbt12: String(p.rbt12 ?? ''),
+      aliquota_nominal_pct: fracaoParaPercentual(p.aliquota_nominal),
+      parcela_deduzir: String(p.parcela_deduzir ?? '0'),
+      percentual_distribuicao_icms_pct: fracaoParaPercentual(p.percentual_distribuicao_icms),
+    });
+    setEditandoParam(p.id);
+  }
+
+  async function salvarParam(e) {
+    e.preventDefault();
+    const rbt12 = Number(formParam.rbt12);
+    const aliquotaNominal = Number(formParam.aliquota_nominal_pct) / 100;
+    const parcelaDeduzir = Number(formParam.parcela_deduzir) || 0;
+    const percentualDistribuicao = formParam.percentual_distribuicao_icms_pct === ''
+      ? null : Number(formParam.percentual_distribuicao_icms_pct) / 100;
+    if (!formParam.competencia || !rbt12 || !Number.isFinite(aliquotaNominal)) return;
+    const aliquotaCredito = percentualDistribuicao == null ? null
+      : ((rbt12 * aliquotaNominal - parcelaDeduzir) / rbt12) * percentualDistribuicao;
+
+    setSalvandoParam(true);
+    try {
+      const { data: sessao } = await supabase.auth.getUser();
+      const campos = {
+        empregador_id: empresaAtual.empregador_id,
+        competencia: `${formParam.competencia}-01`,
+        anexo: formParam.anexo,
+        rbt12,
+        aliquota_nominal: aliquotaNominal,
+        parcela_deduzir: parcelaDeduzir,
+        percentual_distribuicao_icms: percentualDistribuicao,
+        aliquota_credito_icms: aliquotaCredito,
+        informado_por_id: sessao?.user?.id || null,
+      };
+      const { error } = editandoParam
+        ? await supabase.from('parametros_simples_nacional').update(campos).eq('id', editandoParam)
+        : await supabase.from('parametros_simples_nacional').insert([campos]);
+      if (error) { alert('Não foi possível salvar: ' + error.message); return; }
+      setFormParam(null);
+      setEditandoParam(null);
+      await carregar();
+    } finally {
+      setSalvandoParam(false);
+    }
+  }
+
+  async function excluirParam(id) {
+    if (!confirm('Excluir este parâmetro? Notas já emitidas nesta competência não mudam.')) return;
+    const { error } = await supabase.from('parametros_simples_nacional').delete().eq('id', id);
     if (error) { alert('Não foi possível excluir: ' + error.message); return; }
     carregar();
   }
@@ -237,6 +314,20 @@ function Conteudo() {
         })}
       </div>
 
+      <ParametrosSimplesNacional
+        empregadorId={empresaAtual?.empregador_id}
+        params={paramsSimples}
+        form={formParam}
+        setForm={setFormParam}
+        editando={editandoParam}
+        salvando={salvandoParam}
+        onNovo={novoParam}
+        onEditar={editarParam}
+        onSalvar={salvarParam}
+        onExcluir={excluirParam}
+        onCancelar={() => { setFormParam(null); setEditandoParam(null); }}
+      />
+
       {formRegra && (
         <div className="panel">
           <h3>{editandoRegra ? 'Editar regra' : 'Nova regra'}</h3>
@@ -251,6 +342,103 @@ function Conteudo() {
 
       <Simulador empresaId={empresaAtual?.id} produtos={produtos} naturezas={naturezas} />
     </>
+  );
+}
+
+// A alíquota do Simples muda todo mês com o RBT12 (art. 60 da Resolução CGSN
+// 140/2018) — não dá pra fixar um percentual no cadastro do produto ou da
+// regra. Aqui se registra, mês a mês, o que o contador informou; a emissão lê
+// o valor da competência da nota, não o mais recente.
+function ParametrosSimplesNacional({
+  empregadorId, params, form, setForm, editando, salvando,
+  onNovo, onEditar, onSalvar, onExcluir, onCancelar,
+}) {
+  if (!empregadorId) {
+    return (
+      <div className="panel">
+        <h3>Parâmetros do Simples Nacional</h3>
+        <p className="muted" style={{ fontSize: 12 }}>
+          Esta empresa não tem pessoa jurídica (CNPJ) vinculada — vincule em /empresas antes de informar o RBT12
+          mensal.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel">
+      <h3>Parâmetros do Simples Nacional</h3>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        O crédito de ICMS que a nota concede ao cliente (CFOP 5101, CSOSN 101) depende do RBT12 do mês da operação —
+        o contador informa isso todo mês, aqui, e a emissão usa o valor da competência da nota, nunca um percentual
+        fixo no cadastro.
+      </p>
+
+      {!form && (
+        <button className="btn secondary small" onClick={onNovo}>Informar competência</button>
+      )}
+
+      {form && (
+        <form className="form-grid" onSubmit={onSalvar} style={{ marginTop: 10 }}>
+          <div>
+            <label>Competência</label>
+            <input required type="month" value={form.competencia}
+                   onChange={e => setForm({ ...form, competencia: e.target.value })} />
+          </div>
+          <div>
+            <label>Anexo</label>
+            <select value={form.anexo} onChange={e => setForm({ ...form, anexo: e.target.value })}>
+              {['I', 'II', 'III', 'IV', 'V'].map(a => <option key={a} value={a}>Anexo {a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>RBT12 (R$)</label>
+            <input required type="number" step="0.01" min="0" value={form.rbt12}
+                   onChange={e => setForm({ ...form, rbt12: e.target.value })} />
+          </div>
+          <div>
+            <label>Alíquota nominal (%)</label>
+            <input required type="number" step="0.0001" min="0" value={form.aliquota_nominal_pct}
+                   onChange={e => setForm({ ...form, aliquota_nominal_pct: e.target.value })} />
+          </div>
+          <div>
+            <label>Parcela a deduzir (R$)</label>
+            <input type="number" step="0.01" min="0" value={form.parcela_deduzir}
+                   onChange={e => setForm({ ...form, parcela_deduzir: e.target.value })} />
+          </div>
+          <div>
+            <label>Distribuição ICMS na faixa (%)</label>
+            <input type="number" step="0.0001" min="0" value={form.percentual_distribuicao_icms_pct}
+                   onChange={e => setForm({ ...form, percentual_distribuicao_icms_pct: e.target.value })} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            <button className="btn" type="submit" disabled={salvando}>
+              {salvando ? 'Salvando…' : editando ? 'Salvar' : 'Adicionar'}
+            </button>
+            <button className="btn secondary" type="button" onClick={onCancelar}>Cancelar</button>
+          </div>
+        </form>
+      )}
+
+      <div className="items-list" style={{ marginTop: 12 }}>
+        {params.length === 0 && (
+          <p className="muted" style={{ fontSize: 12 }}>Nenhuma competência informada ainda.</p>
+        )}
+        {params.map(p => (
+          <div className="item-line" key={p.id} style={{ flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ minWidth: 90 }}><b>{formatarCompetencia(p.competencia)}</b></span>
+            <span className="muted" style={{ fontSize: 11.5 }}>Anexo {p.anexo}</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>RBT12 {formatarMoeda(p.rbt12)}</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>nominal {formatarPercentual(p.aliquota_nominal)}</span>
+            <span style={{ fontSize: 11.5, flex: 1 }}>
+              crédito ICMS (pCredSN): <b>{formatarPercentual(p.aliquota_credito_icms)}</b>
+            </span>
+            <button className="btn secondary small" onClick={() => onEditar(p)}>Editar</button>
+            <button className="btn danger small" onClick={() => onExcluir(p.id)}>×</button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -353,6 +541,28 @@ function Simulador({ empresaId, produtos, naturezas }) {
 
 function hoje() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function mesAtual() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function fracaoParaPercentual(v) {
+  return v === null || v === undefined ? '' : String(Number(v) * 100);
+}
+
+function formatarPercentual(v) {
+  return v === null || v === undefined ? '—' : `${(Number(v) * 100).toFixed(2)}%`;
+}
+
+function formatarCompetencia(data) {
+  const [ano, mes] = (data || '').split('-');
+  if (!ano || !mes) return data;
+  return `${mes}/${ano}`;
+}
+
+function formatarMoeda(v) {
+  return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 // Campo numérico em branco vira null: os checks do banco testam `is null or ...`,

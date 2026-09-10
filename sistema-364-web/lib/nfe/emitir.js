@@ -109,6 +109,17 @@ function ambienteDoEmpregador(empregador) {
   throw erro('O emitente não tem um ambiente de emissão (ambiente_nfe) válido configurado.', 500);
 }
 
+// Primeiro dia do mês de emissão, no fuso do emitente (mesmo fuso fixo do
+// serializador — ver montarXml.js) — é a chave de parametros_simples_nacional
+// que a emissão lê para o crédito de ICMS do CSOSN 101 (RBT12 muda todo mês).
+function competenciaDoMes(data) {
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Porto_Velho', year: 'numeric', month: '2-digit',
+  }).formatToParts(data);
+  const p = Object.fromEntries(partes.map(({ type, value }) => [type, value]));
+  return `${p.year}-${p.month}-01`;
+}
+
 // A regra mais específica por item. `data` é sempre array (a função SQL é
 // `returns setof regras_tributarias`, chamada via RPC do Supabase) — vazio
 // significa "nenhuma regra casou", não erro; resolverNota (Task 4) é quem
@@ -156,6 +167,10 @@ export function linhaItem(documentoId, empresaId, item) {
     base_calculo_icms: item.vBC,
     aliquota_icms: item.pICMS,
     valor_icms: item.vICMS,
+    // Crédito de ICMS do Simples (CSOSN 101, grupo ICMSSN101) — null quando o
+    // item não é 101, mesma distinção NULL/zero já usada nos campos de ST.
+    percentual_credito_icms_sn: item.pCredSN ?? null,
+    valor_credito_icms_sn: item.vCredICMSSN ?? 0,
     // ST: margem e redução preservam a diferença entre "não informado" (null,
     // omitido no XML) e "informado como zero" — ver a atualização 48.
     modalidade_bc_st: item.modBCST ?? null,
@@ -348,7 +363,30 @@ export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
   // ANTES de resolverNota rodar.
   emitente.informacoesComplementaresPadrao = empresa.informacoes_complementares_padrao || undefined;
 
-  const nota = resolverNota({ pedido, cliente, itens: itensParaResolver, emitente, naturezaOperacao: natureza, ambiente });
+  // Crédito de ICMS do Simples (CSOSN 101) só busca parametros_simples_nacional
+  // quando algum item de verdade precisa — a maioria das notas não tem CSOSN
+  // 101, e consultar a competência à toa custaria uma ida ao banco de graça.
+  let parametroSimples = null;
+  if (itensParaResolver.some(({ regra }) => String(regra?.csosn || '') === '101')) {
+    const competencia = competenciaDoMes(new Date());
+    const { data, error: erroParametro } = await sb.from('parametros_simples_nacional').select('*')
+      .eq('empregador_id', empresa.empregador_id).eq('competencia', competencia)
+      .not('aliquota_credito_icms', 'is', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (erroParametro) throw erro(`Falha ao carregar os parâmetros do Simples Nacional: ${erroParametro.message}`, 500);
+    if (!data) {
+      throw erro(
+        `Não há parâmetros do Simples Nacional cadastrados para a competência ${competencia.slice(0, 7)} — `
+        + 'esta nota tem item com CSOSN 101 (crédito de ICMS), que precisa do RBT12 do mês. Informe a '
+        + 'competência em /fiscal/tributacao antes de emitir.',
+      );
+    }
+    parametroSimples = data;
+  }
+
+  const nota = resolverNota({
+    pedido, cliente, itens: itensParaResolver, emitente, naturezaOperacao: natureza, ambiente, parametroSimples,
+  });
 
   // montarXmlNFe (Task 5) recusa operação interestadual e regime normal, mas
   // só descobre isso ao montar o XML — depois de reservar_numero_fiscal no

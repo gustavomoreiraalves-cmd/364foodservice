@@ -32,28 +32,16 @@ const TPAG_PADRAO_SAIDA = '01';
 
 // CSOSN em que o Simples não destaca ICMS na nota (grupo ICMSSN102): a nota
 // informa só a situação, sem base/alíquota/valor. CSOSN 101 NÃO entra aqui —
-// tem grupo próprio (ICMSSN101), que o leiaute 4.00 exige com pCredSN e
-// vCredICMSSN. Botar 101 nesta lista (como este arquivo fazia antes da
-// revisão) gera <ICMSSN102><CSOSN>101</CSOSN></ICMSSN102>, que o schema da
-// SEFAZ rejeita (Rejeição 215) — com o número fiscal já queimado.
+// tem grupo próprio (ICMSSN101, ver montarICMS), que o leiaute 4.00 exige com
+// pCredSN e vCredICMSSN. Botar 101 nesta lista gera
+// <ICMSSN102><CSOSN>101</CSOSN></ICMSSN102>, que o schema da SEFAZ rejeita
+// (Rejeição 215) — com o número fiscal já queimado.
 const CSOSN_ICMSSN102 = ['102', '103', '300', '400'];
 
 // Todo CSOSN que este arquivo sabe montar. Uma nota com CSOSN fora desta
 // lista (ou sem CSOSN nenhum) é recusada explicitamente — nunca cai no
 // catch-all antigo que inventava CSOSN 900 (ver validarCsosnItem).
-const CSOSN_SUPORTADOS = ['102', '103', '202', '300', '400', '500', '900'];
-
-// Mensagem única para a recusa de CSOSN 101 — usada tanto aqui (serializador)
-// quanto no pré-check de lib/nfe/emitir.js (mesmo texto, uma fonte só).
-const MENSAGEM_CSOSN_101 =
-  'CSOSN 101 (crédito presumido do Simples Nacional) precisa do grupo ICMSSN101, que o leiaute 4.00 '
-  + 'exige com pCredSN (percentual de crédito) e vCredICMSSN (valor do crédito) — nenhum dos dois é '
-  + 'opcional nesse grupo. O cadastro de regra tributária hoje só guarda permite_credito_simples '
-  + '(booleano) e percentual_credito_presumido, que não são o percentual de crédito do Simples (esse '
-  + 'muda todo mês com o RBT12 e viria de parametros_simples_nacional, que esta fase ainda não lê). '
-  + 'Sem um valor de verdade para pCredSN, a emissão não pode chutar um número nem omitir o grupo e '
-  + 'destacar ICMS por engano — por isso este item está fora do que esta fase do motor de emissão '
-  + 'sabe emitir. Isto é uma lacuna de cadastro/próxima fase, não uma falha do sistema.';
+const CSOSN_SUPORTADOS = ['101', '102', '103', '202', '300', '400', '500', '900'];
 
 // Valida o CSOSN de um item ANTES de montar qualquer XML — mesma lógica que
 // decide o grupo ICMS logo abaixo, fatorada para poder rodar de graça no
@@ -62,7 +50,21 @@ const MENSAGEM_CSOSN_101 =
 // as duas checagens nunca divergirem uma da outra.
 export function validarCsosnItem(item) {
   const csosn = String(item.csosn || '');
-  if (csosn === '101') throw new Error(MENSAGEM_CSOSN_101);
+  if (csosn === '101') {
+    // pCredSN e vCredICMSSN vêm de resolverNota, que já os calculou a partir
+    // de parametros_simples_nacional na competência da nota — se faltarem
+    // aqui, é porque não havia parâmetro cadastrado para o mês, e essa falha
+    // já teria interrompido a emissão antes (resolverNota.js). Checagem de
+    // defesa, não o ponto onde a mensagem de cadastro faltando é escrita.
+    if (!(Number(item.pCredSN) > 0) || item.vCredICMSSN === undefined || item.vCredICMSSN === null) {
+      throw new Error(
+        `O item "${item.xProd || item.cProd}" usa CSOSN 101 (crédito do Simples Nacional) sem `
+        + 'percentual de crédito resolvido (pCredSN). Cadastre o RBT12 da competência desta nota em '
+        + '/fiscal/tributacao antes de emitir.',
+      );
+    }
+    return;
+  }
   if (csosn === '500' || csosn === '202' || CSOSN_ICMSSN102.includes(csosn) || csosn === '900') return;
   if (!csosn && item.cstIcms) {
     throw new Error(
@@ -73,9 +75,8 @@ export function validarCsosnItem(item) {
   }
   throw new Error(
     `CSOSN "${csosn || '(vazio)'}" do item "${item.xProd || item.cProd}" não é suportado nesta fase do `
-    + `motor de emissão. Suportados aqui: ${CSOSN_SUPORTADOS.join(', ')} (101 também é reconhecido, mas `
-    + 'recusado explicitamente — ver mensagem própria). Revise a regra tributária deste item em '
-    + '/fiscal/tributacao.',
+    + `motor de emissão. Suportados aqui: ${CSOSN_SUPORTADOS.join(', ')}. Revise a regra tributária `
+    + 'deste item em /fiscal/tributacao.',
   );
 }
 
@@ -134,6 +135,14 @@ function montarICMS(item) {
   // futuro), e o serializador não pode confiar que quem o chama já validou.
   validarCsosnItem(item);
   const csosn = String(item.csosn || '');
+  if (csosn === '101') {
+    return '<ICMS><ICMSSN101>'
+      + tag('orig', item.origem)
+      + tag('CSOSN', csosn)
+      + tag('pCredSN', numero(item.pCredSN, 4))
+      + tag('vCredICMSSN', numero(item.vCredICMSSN, 2))
+      + '</ICMSSN101></ICMS>';
+  }
   if (csosn === '500') {
     return `<ICMS><ICMSSN500>${tag('orig', item.origem)}${tag('CSOSN', csosn)}</ICMSSN500></ICMS>`;
   }
