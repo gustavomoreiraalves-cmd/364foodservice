@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STATUS_PEDIDO, podeEditar, totalPedido, precoDoItem, diffItens, saldoDisponivel, exigeMotivoReabertura } from '../lib/pedidos.js';
 
-test('STATUS_PEDIDO: os quatro status na ordem do fluxo', () => {
-  assert.deepEqual(STATUS_PEDIDO, ['Pendente', 'Faturado', 'Enviado', 'Cancelado']);
+test('STATUS_PEDIDO: os seis status na ordem do fluxo', () => {
+  assert.deepEqual(STATUS_PEDIDO, ['Pendente', 'Separação', 'Conferido', 'Faturado', 'Enviado', 'Cancelado']);
 });
 
 test('podeEditar: só Pendente edita', () => {
@@ -171,4 +171,14 @@ test('saldoDisponivel: soma todas as linhas do mesmo produto', () => {
 test('saldoDisponivel: produto fora da view devolve o que o pedido reservou', () => {
   assert.equal(saldoDisponivel(estoque, [], 'p9'), 0);
   assert.equal(saldoDisponivel(estoque, [{ produto_id: 'p9', quantidade: 4 }], 'p9'), 4);
+});
+
+test('STATUS_PEDIDO inclui Separação e Conferido, entre Pendente e Faturado', () => {
+  assert.deepEqual(STATUS_PEDIDO, ['Pendente', 'Separação', 'Conferido', 'Faturado', 'Enviado', 'Cancelado']);
+});
+
+test('podeEditar: só Pendente libera edição — Separação e Conferido continuam travados', () => {
+  assert.equal(podeEditar('Pendente'), true);
+  assert.equal(podeEditar('Separação'), false);
+  assert.equal(podeEditar('Conferido'), false);
 });

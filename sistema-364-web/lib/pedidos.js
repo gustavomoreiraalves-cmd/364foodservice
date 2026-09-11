@@ -3,7 +3,7 @@
 // (trigger fn_pedido_bloquear_edicao, atualização 27). O que está aqui serve
 // para a tela decidir o que mostrar e para montar o diff antes de gravar.
 
-export const STATUS_PEDIDO = ['Pendente', 'Faturado', 'Enviado', 'Cancelado'];
+export const STATUS_PEDIDO = ['Pendente', 'Separação', 'Conferido', 'Faturado', 'Enviado', 'Cancelado'];
 
 // Pedido só é editável enquanto está Pendente. Status desconhecido vindo do
 // banco não libera edição — na dúvida, tela em leitura.
