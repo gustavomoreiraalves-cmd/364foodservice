@@ -11,6 +11,7 @@
 // graça; falhar depois queima numeração.
 
 import { juntarTextoFiscal, LIMITE_INF_AD_PROD } from '../fiscalRegras.js';
+import { calcularVolumesNfe } from '../expedicao.js';
 
 // A SEFAZ exige esta razão social em homologação. Mandar o nome real do cliente
 // num XML de teste é rejeição 999 / "NF-e de teste em ambiente de produção".
@@ -312,6 +313,28 @@ function resolverIndIEDest(cliente) {
   );
 }
 
+// Grupo transp da NF-e, a partir da expedição (romaneio) do pedido. Sem
+// expedição (chamada antiga, ou pedido sem romaneio — não deveria mais
+// acontecer depois desta implementação, mas a função continua pura e não
+// assume quem a chama): modFrete 9 preserva o comportamento de hoje.
+function resolverTransporte(expedicao) {
+  if (!expedicao) return { modFrete: '9', transportadora: null, veicTransp: null, vol: null };
+  const t = expedicao.transportadora;
+  return {
+    modFrete: String(expedicao.modo_frete ?? '9'),
+    transportadora: t ? {
+      cnpj: digitos(t.cnpj),
+      xNome: normalizarTexto(t.nome, 60, 'xNome da transportadora'),
+      IE: t.ie ? digitos(t.ie) : undefined,
+      xEnder: t.logradouro ? normalizarTexto(t.logradouro, 60, 'endereço da transportadora') : undefined,
+      xMun: t.municipio ? normalizarTexto(t.municipio, 60, 'município da transportadora') : undefined,
+      UF: t.uf || undefined,
+    } : null,
+    veicTransp: expedicao.veiculo_placa ? { placa: expedicao.veiculo_placa, UF: expedicao.veiculo_uf } : null,
+    vol: calcularVolumesNfe(expedicao.caixas || []),
+  };
+}
+
 function resolverDestinatario(cliente, ambiente) {
   const doc = digitos(cliente.cnpj);
   if (doc.length !== 14 && doc.length !== 11) {
@@ -354,7 +377,9 @@ function resolverDestinatario(cliente, ambiente) {
   };
 }
 
-export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperacao, ambiente, parametroSimples }) {
+export function resolverNota({
+  pedido, cliente, itens, emitente, naturezaOperacao, ambiente, parametroSimples, expedicao,
+}) {
   if (!Array.isArray(itens) || itens.length === 0) {
     throw new Error('O pedido não tem nenhum item para emitir.');
   }
@@ -388,6 +413,7 @@ export function resolverNota({ pedido, cliente, itens, emitente, naturezaOperaca
     emit: sanitizarEmit(emitente),
     dest,
     itens: resolvidos,
+    transp: resolverTransporte(expedicao),
     total: {
       vProd,
       vBCST: duasCasas(resolvidos.reduce((s, i) => s + (i.vBCST || 0), 0)),

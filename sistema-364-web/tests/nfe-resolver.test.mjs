@@ -300,3 +300,43 @@ test('CSOSN 101 com parâmetro sem alíquota de crédito calculada aborta', () =
     /alíquota de crédito/i,
   );
 });
+
+test('sem expedição, nota.transp é só modFrete 9 (sem frete) — comportamento de hoje preservado', () => {
+  const nota = resolverNota(ENTRADA);
+  assert.deepEqual(nota.transp, { modFrete: '9', transportadora: null, veicTransp: null, vol: null });
+});
+
+test('expedição com transportadora monta o grupo transporta', () => {
+  const expedicao = {
+    modo_frete: '0',
+    transportadora: {
+      cnpj: '12345678000199', nome: 'Transportadora Rondônia LTDA', ie: '00000001112223',
+      logradouro: 'RUA DOS FRETES', municipio: 'JI-PARANA', uf: 'RO',
+    },
+    veiculo_placa: null, veiculo_uf: null,
+    caixas: [{ peso_bruto_kg: 12 }],
+  };
+  const nota = resolverNota({ ...ENTRADA, expedicao });
+  assert.equal(nota.transp.modFrete, '0');
+  assert.equal(nota.transp.transportadora.cnpj, '12345678000199');
+  assert.equal(nota.transp.transportadora.xNome, 'Transportadora Rondônia LTDA');
+  assert.equal(nota.transp.veicTransp, null);
+  assert.deepEqual(nota.transp.vol, { qVol: 1, esp: 'Caixa', pesoB: 12, pesoL: 12 });
+});
+
+test('expedição com veículo monta o grupo veicTransp', () => {
+  const expedicao = {
+    modo_frete: '0', transportadora: null,
+    veiculo_placa: 'ABC1D23', veiculo_uf: 'RO', caixas: [],
+  };
+  const nota = resolverNota({ ...ENTRADA, expedicao });
+  assert.deepEqual(nota.transp.veicTransp, { placa: 'ABC1D23', UF: 'RO' });
+});
+
+test('expedição sem transportadora nem veículo não monta os grupos, mas modo_frete vale', () => {
+  const expedicao = { modo_frete: '9', transportadora: null, veiculo_placa: null, veiculo_uf: null, caixas: [] };
+  const nota = resolverNota({ ...ENTRADA, expedicao });
+  assert.equal(nota.transp.modFrete, '9');
+  assert.equal(nota.transp.transportadora, null);
+  assert.equal(nota.transp.veicTransp, null);
+});
