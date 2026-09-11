@@ -135,9 +135,9 @@ test('calcularDivergencia: item do pedido sem nenhuma alocação aparece com alo
   ]);
 });
 
-test('calcularVolumesNfe: soma o peso bruto de todas as caixas', () => {
+test('calcularVolumesNfe: conta as caixas como volumes, sem peso (não capturado na UI)', () => {
   const caixas = [{ peso_bruto_kg: 5.5 }, { peso_bruto_kg: 3.2 }, { peso_bruto_kg: null }];
-  assert.deepEqual(calcularVolumesNfe(caixas), { qVol: 3, esp: 'Caixa', pesoB: 8.7, pesoL: 8.7 });
+  assert.deepEqual(calcularVolumesNfe(caixas), { qVol: 3, esp: 'Caixa' });
 });
 
 test('calcularVolumesNfe: nenhuma caixa devolve null (nada a declarar)', () => {

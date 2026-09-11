@@ -321,7 +321,7 @@ test('expedição com transportadora monta o grupo transporta', () => {
   assert.equal(nota.transp.transportadora.cnpj, '12345678000199');
   assert.equal(nota.transp.transportadora.xNome, 'Transportadora Rondônia LTDA');
   assert.equal(nota.transp.veicTransp, null);
-  assert.deepEqual(nota.transp.vol, { qVol: 1, esp: 'Caixa', pesoB: 12, pesoL: 12 });
+  assert.deepEqual(nota.transp.vol, { qVol: 1, esp: 'Caixa' });
 });
 
 test('expedição com veículo monta o grupo veicTransp', () => {

@@ -336,11 +336,11 @@ test('transp com transportadora monta transporta e vol', () => {
     modFrete: '0',
     transportadora: { cnpj: '12345678000199', xNome: 'Transportadora Rondônia LTDA', IE: '00000001112223', xEnder: 'RUA DOS FRETES', xMun: 'JI-PARANA', UF: 'RO' },
     veicTransp: null,
-    vol: { qVol: 2, esp: 'Caixa', pesoB: 24.5, pesoL: 24.5 },
+    vol: { qVol: 2, esp: 'Caixa' },
   };
   const { xml } = montarXmlNFe(nota, OPCOES);
   assert.match(xml, /<transp><modFrete>0<\/modFrete><transporta><CNPJ>12345678000199<\/CNPJ><xNome>Transportadora Rondônia LTDA<\/xNome>/);
-  assert.match(xml, /<vol><qVol>2<\/qVol><esp>Caixa<\/esp><pesoL>24\.5000<\/pesoL><pesoB>24\.5000<\/pesoB><\/vol>/);
+  assert.match(xml, /<vol><qVol>2<\/qVol><esp>Caixa<\/esp><\/vol>/);
 });
 
 test('transp com veículo monta veicTransp', () => {

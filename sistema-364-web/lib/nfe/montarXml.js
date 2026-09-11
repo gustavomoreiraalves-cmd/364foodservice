@@ -344,8 +344,6 @@ function montarTransp(transp) {
     ? '<vol>'
       + tag('qVol', String(t.vol.qVol))
       + tag('esp', t.vol.esp)
-      + tag('pesoL', numero(t.vol.pesoL, 4))
-      + tag('pesoB', numero(t.vol.pesoB, 4))
       + '</vol>'
     : '';
   return `<transp>${tag('modFrete', t.modFrete)}${transporta}${veicTransp}${vol}</transp>`;

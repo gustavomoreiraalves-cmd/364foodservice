@@ -103,10 +103,14 @@ export function calcularDivergencia(pedidoItens, alocacao) {
 // Grupo `vol` da NF-e (transp/vol) — sempre derivado das caixas do romaneio,
 // nunca redigitado (spec de 10/09). null quando não há caixa nenhuma (não
 // deveria acontecer: romaneio só finaliza com o pedido inteiro alocado).
+//
+// Só qVol/esp: não há captura de peso real da caixa em lugar nenhum da UI, e
+// pesoB/pesoL não têm significado sem isso (ver achado C1 da revisão final) —
+// declarar zero seria pior do que omitir. pesoL/pesoB do vol são opcionais no
+// leiaute 4.00; capturar peso real de caixa é melhoria futura, fora de escopo.
 export function calcularVolumesNfe(caixas) {
   if (!caixas?.length) return null;
-  const pesoB = Math.round(caixas.reduce((s, c) => s + Number(c.peso_bruto_kg || 0), 0) * 1000) / 1000;
-  return { qVol: caixas.length, esp: 'Caixa', pesoB, pesoL: pesoB };
+  return { qVol: caixas.length, esp: 'Caixa' };
 }
 
 // RM-AAMMDD-###, mesmo mecanismo de lib/format.js:proximoLote — maior
