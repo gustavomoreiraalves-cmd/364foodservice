@@ -114,3 +114,14 @@ export async function garantirProduto(sb, user, isAdmin, produtoId,
     naoEncontrado: 'Produto não encontrado.',
   });
 }
+
+export async function garantirExpedicao(sb, user, isAdmin, expedicaoId,
+  campos = 'id, pedido_id, status, transportadora_id, modo_frete, veiculo_placa, veiculo_uf, empresa_id') {
+  return garantirLinhaDaEmpresa(sb, user, isAdmin, {
+    tabela: 'expedicoes',
+    id: expedicaoId,
+    campos,
+    rotulo: { artigo: 'a', nome: 'expedição', titulo: 'Expedição' },
+    naoEncontrado: 'Expedição não encontrada.',
+  });
+}
