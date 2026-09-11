@@ -79,9 +79,12 @@ export function bucketNota(status) {
 
 // Monta uma linha de relatório por pedido faturado, cruzando com a nota mais
 // recente de cada um (mesma regra de "pedido relevante para nota fiscal" que
-// app/pedidos/[id]/page.js usa: `pedido.status === 'Faturado' || notaFiscal`
-// — aqui os candidatos já chegam filtrados por Faturado/Enviado na query, e
-// esta função só decide o bucket). Puro: não toca banco.
+// app/pedidos/[id]/page.js usa: `pedido.status === 'Faturado' || pedido.status
+// === 'Conferido' || notaFiscal` — Conferido entra desde que a emissão passa
+// a nascer automaticamente ao finalizar o romaneio, e uma rejeição da SEFAZ
+// deixa o pedido parado nesse status — aqui os candidatos já chegam
+// filtrados por Conferido/Faturado/Enviado na query, e esta função só decide
+// o bucket). Puro: não toca banco.
 //
 // Assume `notas` ordenada por created_at desc (a query já traz assim) — o
 // primeiro registro que aparece para um pedido_id é o mais recente, sem

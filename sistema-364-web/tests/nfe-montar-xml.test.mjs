@@ -318,3 +318,41 @@ test('indIntermed vem depois de indPres e antes de procEmi, como o schema exige'
   assert.ok(ide.indexOf('<indIntermed>') < ide.indexOf('<procEmi>'),
     'indIntermed tem de vir antes de procEmi');
 });
+
+// ------------------------------------------------------------- transp
+// Task 10: o grupo <transp> agora vem de nota.transp (Task 9), com
+// transportadora, veículo e volumes reais, em vez do modFrete 9 fixo.
+
+test('sem transp na nota (chamada antiga), sai modFrete 9 — compatibilidade preservada', () => {
+  const nota = notaBase();
+  delete nota.transp;
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<transp><modFrete>9<\/modFrete><\/transp>/);
+});
+
+test('transp com transportadora monta transporta e vol', () => {
+  const nota = notaBase();
+  nota.transp = {
+    modFrete: '0',
+    transportadora: { cnpj: '12345678000199', xNome: 'Transportadora Rondônia LTDA', IE: '00000001112223', xEnder: 'RUA DOS FRETES', xMun: 'JI-PARANA', UF: 'RO' },
+    veicTransp: null,
+    vol: { qVol: 2, esp: 'Caixa' },
+  };
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<transp><modFrete>0<\/modFrete><transporta><CNPJ>12345678000199<\/CNPJ><xNome>Transportadora Rondônia LTDA<\/xNome>/);
+  assert.match(xml, /<vol><qVol>2<\/qVol><esp>Caixa<\/esp><\/vol>/);
+});
+
+test('transp com veículo monta veicTransp', () => {
+  const nota = notaBase();
+  nota.transp = { modFrete: '0', transportadora: null, veicTransp: { placa: 'ABC1D23', UF: 'RO' }, vol: null };
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.match(xml, /<veicTransp><placa>ABC1D23<\/placa><UF>RO<\/UF><\/veicTransp>/);
+});
+
+test('transp vem antes de pag, na ordem do leiaute', () => {
+  const nota = notaBase();
+  nota.transp = { modFrete: '9', transportadora: null, veicTransp: null, vol: null };
+  const { xml } = montarXmlNFe(nota, OPCOES);
+  assert.ok(xml.indexOf('<transp>') < xml.indexOf('<pag>'));
+});

@@ -13,6 +13,8 @@ export const MODULOS = [
   { id: 'producoes', label: 'Produção', href: '/producoes', ic: '▨', desc: 'Lançamento de lotes produzidos e cálculo de custo' },
   { id: 'clientes', label: 'Clientes/Fornecedores', href: '/clientes', ic: '▦', desc: 'Cadastro de clientes, fornecedores e revendas' },
   { id: 'pedidos', label: 'Pedidos de Venda', href: '/pedidos', ic: '▩', desc: 'Pedidos, faturamento e baixa de estoque' },
+  { id: 'expedicao', label: 'Expedição', href: '/expedicao', ic: '▤', desc: 'Romaneio de separação, lotes e emissão de NF-e' },
+  { id: 'transportadoras', label: 'Transportadoras', href: '/transportadoras', ic: '▥', desc: 'Cadastro de transportadoras' },
   // 'funcionarios' foi unificado ao cadastro de colaboradores (Ponto) — ver ROADMAP.md
   { id: 'financeiro', label: 'Financeiro', href: '/financeiro/contas-a-pagar', ic: '◈', desc: 'Categorias de conta e contas a pagar' },
   { id: 'fiscal', label: 'Fiscal', href: '/fiscal/tributacao', ic: '◇', desc: 'Grupos e regras tributárias, NF-e' },

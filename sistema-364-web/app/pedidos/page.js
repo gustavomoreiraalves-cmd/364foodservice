@@ -6,7 +6,18 @@ import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import PedidoForm from '../../components/PedidoForm';
 import { useEmpresaAtual } from '../../lib/empresa';
-import { totalPedido, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../lib/pedidos';
+import { totalPedido, saldoDisponivel } from '../../lib/pedidos';
+
+// Transições que a trigger do banco ainda aceita como diretas por aqui — sem
+// motivo, sem passar por /expedicao (atualização 50). Pendente→Separação e
+// Separação→Conferido agora exigem uma expedição (romaneio) viva por trás
+// (botões "Iniciar romaneio"/"Continuar romaneio", abaixo); Conferido→Faturado
+// exige nota autorizada e só acontece sozinho, dentro da emissão (automática
+// ao finalizar o romaneio, ou pela retentativa em /pedidos/[id]). Do que
+// sobra, só Faturado→Enviado é de fato livre — Faturado→Pendente e
+// Enviado→Pendente exigem motivo e só existem no diálogo de reabertura da
+// tela do pedido, não aqui na lista.
+const PROXIMOS_STATUS_LIVRES = { Faturado: ['Faturado', 'Enviado'], Enviado: ['Enviado'] };
 
 export default function PedidosPage() {
   return (
@@ -27,6 +38,14 @@ function Conteudo() {
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erroCarregar, setErroCarregar] = useState('');
+  // Expedição viva (rascunho ou finalizada — nunca cancelada) de cada
+  // pedido, por pedido_id. É o que sustenta o botão "Continuar romaneio" de
+  // um pedido em Separação/Conferido; o índice único
+  // expedicoes_pedido_vivo_unico (atualização 50) garante no máximo uma por
+  // pedido, então um mapa simples chave→id nunca perde uma linha em silêncio.
+  const [expedicaoPorPedido, setExpedicaoPorPedido] = useState({});
+  const [iniciandoRomaneio, setIniciandoRomaneio] = useState(null);
+  const [erroRomaneio, setErroRomaneio] = useState('');
 
   const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
@@ -69,6 +88,24 @@ function Conteudo() {
     setEstoqueProd(r4.data || []);
     setFuncionarios(r5.data || []);
     setLoading(false);
+    // Fora do Promise.all principal de propósito (achado I3 da revisão de
+    // 11/09): `expedicoes` só existe depois da atualização 50, que pode não
+    // estar aplicada em todo ambiente ainda — mesmo raciocínio já documentado
+    // nesta tela para outras tabelas opcionais. Um erro aqui não pode derrubar
+    // a lista inteira de pedidos; na pior hipótese, "Continuar romaneio" some
+    // e o operador ainda consegue abrir o pedido pra ver o que fazer.
+    carregarExpedicoesAtivas(eid);
+  }
+
+  // Mapa pedido_id → expedição viva (rascunho ou finalizada — nunca
+  // cancelada), pra sustentar o botão "Continuar romaneio" das linhas em
+  // Separação/Conferido. Uma linha por pedido no máximo
+  // (expedicoes_pedido_vivo_unico), então um mapa simples chave→id nunca
+  // perde uma linha em silêncio.
+  async function carregarExpedicoesAtivas(eid) {
+    const { data, error } = await supabase.from('expedicoes')
+      .select('id, pedido_id').eq('empresa_id', eid).neq('status', 'cancelado');
+    setExpedicaoPorPedido(error ? {} : Object.fromEntries((data || []).map(e => [e.pedido_id, e.id])));
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
@@ -107,6 +144,27 @@ function Conteudo() {
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) alert('Erro ao atualizar status: ' + error.message);
     carregar();
+  }
+
+  // Mesmo padrão de app/expedicao/page.js (Task 19): cria o romaneio (POST
+  // /api/expedicao) e navega direto pra ele. A rota já confere que o pedido
+  // está Pendente e avança o status pra Separação — nada disso é feito aqui.
+  async function iniciarRomaneio(pedidoId) {
+    setIniciandoRomaneio(pedidoId);
+    setErroRomaneio('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch('/api/expedicao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ pedidoId }),
+      });
+      const json = await r.json();
+      if (!r.ok) { setErroRomaneio(json.error || 'Falha ao iniciar o romaneio.'); return; }
+      router.push(`/expedicao/${json.expedicaoId}`);
+    } finally {
+      setIniciandoRomaneio(null);
+    }
   }
 
   const totalDoPedido = p => totalPedido(p.pedido_itens);
@@ -152,6 +210,7 @@ function Conteudo() {
 
       <div className="panel">
         <h3>Pedidos lançados ({pedidos.length})</h3>
+        {erroRomaneio && <div className="banner bad">{erroRomaneio}</div>}
         <div className="table-wrap">
           <table>
             <thead><tr><th>Data</th><th>Cliente</th><th>Itens</th><th>Total</th><th>Status</th><th>Responsável</th><th></th></tr></thead>
@@ -165,19 +224,33 @@ function Conteudo() {
                   <td>
                     <div className="row-actions">
                       {statusTag(p.status)}
-                      <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}
-                        disabled={p.status === 'Cancelado'}>
-                        {/*
-                          Cancelar exige motivo (check pedidos_cancelamento_motivo) e reabrir
-                          exige motivo (trigger fn_pedido_bloquear_cabecalho): as duas coisas
-                          só acontecem na página do pedido, onde há diálogo para o motivo.
-                          Aqui a lista só avança o status.
-                        */}
-                        {STATUS_PEDIDO
-                          .filter(s => s !== 'Cancelado' && !exigeMotivoReabertura(p.status, s))
-                          .map(s => <option key={s}>{s}</option>)}
-                        {p.status === 'Cancelado' && <option>Cancelado</option>}
-                      </select>
+                      {p.status === 'Pendente' && (
+                        <button className="btn secondary small" disabled={iniciandoRomaneio === p.id}
+                          onClick={() => iniciarRomaneio(p.id)}>
+                          {iniciandoRomaneio === p.id ? 'Iniciando…' : 'Iniciar romaneio'}
+                        </button>
+                      )}
+                      {(p.status === 'Separação' || p.status === 'Conferido') && (
+                        expedicaoPorPedido[p.id]
+                          ? <button className="btn secondary small" onClick={() => router.push(`/expedicao/${expedicaoPorPedido[p.id]}`)}>Continuar romaneio</button>
+                          : <span className="muted" style={{ fontSize: 12 }}>Romaneio não encontrado — abra o pedido.</span>
+                      )}
+                      {/*
+                        Cancelar exige motivo (check pedidos_cancelamento_motivo) e reabrir
+                        exige motivo (trigger fn_pedido_bloquear_cabecalho): as duas coisas
+                        só acontecem na página do pedido, onde há diálogo para o motivo.
+                        Aqui a lista só avança o status, e só entre as transições que a
+                        trigger ainda aceita sem motivo nem romaneio/nota por trás
+                        (PROXIMOS_STATUS_LIVRES, acima).
+                      */}
+                      {(p.status === 'Faturado' || p.status === 'Enviado' || p.status === 'Cancelado') && (
+                        <select style={{ width: 'auto' }} value={p.status} onChange={e => mudarStatus(p.id, e.target.value)}
+                          disabled={p.status === 'Cancelado'}>
+                          {p.status === 'Cancelado'
+                            ? <option>Cancelado</option>
+                            : (PROXIMOS_STATUS_LIVRES[p.status] || [p.status]).map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      )}
                     </div>
                   </td>
                   <td className="muted">{p.responsavel?.nome || '—'}</td>

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { garantirEmpresa, garantirColaborador, garantirUnidade } from '../lib/autorizacao.js';
+import { garantirEmpresa, garantirColaborador, garantirUnidade, garantirExpedicao } from '../lib/autorizacao.js';
 
 // As rotas de API usam a service role key, que passa por cima do RLS. Estes
 // testes são a rede de proteção do escopo de empresa: se algum deles passar a
@@ -12,6 +12,8 @@ const COLAB_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const COLAB_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const UNIDADE_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const UNIDADE_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const EXPEDICAO_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+const EXPEDICAO_B = '00000000-0000-4000-8000-000000000000';
 
 const USER_A = { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' };
 
@@ -45,6 +47,10 @@ function banco() {
     unidades: [
       { id: UNIDADE_A, nome: 'Matriz A', empresa_id: EMPRESA_A, fuso: 'America/Sao_Paulo' },
       { id: UNIDADE_B, nome: 'Matriz B', empresa_id: EMPRESA_B, fuso: 'America/Sao_Paulo' },
+    ],
+    expedicoes: [
+      { id: EXPEDICAO_A, pedido_id: '11111111-2222-4333-8444-555555555555', status: 'pendente', empresa_id: EMPRESA_A },
+      { id: EXPEDICAO_B, pedido_id: '66666666-7777-4888-8999-aaaaaaaaaaaa', status: 'pendente', empresa_id: EMPRESA_B },
     ],
   });
 }
@@ -150,4 +156,21 @@ test('garantirUnidade: admin alcança unidade de qualquer empresa', async () => 
 test('garantirUnidade: id que não é UUID é barrado antes do banco', async () => {
   const e = await erroDe(() => garantirUnidade(banco(), USER_A, true, 'nao-e-uuid'));
   assert.match(e.message, /não é um UUID/);
+});
+
+// ---------- garantirExpedicao ----------
+
+// Mesma resposta para "não existe" e "existe mas é de outra empresa": sem esse
+// cuidado, a rota vira um oráculo de enumeração de expedições por UUID.
+test('garantirExpedicao: expedição inexistente é barrada com o 404 genérico', async () => {
+  const e = await erroDe(() =>
+    garantirExpedicao(banco(), USER_A, false, '99999999-9999-4999-8999-999999999999'));
+  assert.equal(e.status, 404);
+  assert.equal(e.message, 'Expedição não encontrada.');
+});
+
+test('garantirExpedicao: expedição de outra empresa é barrada com o mesmo 404', async () => {
+  const e = await erroDe(() => garantirExpedicao(banco(), USER_A, false, EXPEDICAO_B));
+  assert.equal(e.status, 404);
+  assert.equal(e.message, 'Expedição não encontrada.');
 });

@@ -22,11 +22,12 @@ function Conteudo() {
     if (!empresaAtual) return;
     async function carregar() {
       const eid = empresaAtual.id;
-      const [pedidos, producoes, recebimentos, contasAPagar, fornecedores, fichas, mps, produtos] = await Promise.all([
+      const [pedidos, producoes, recebimentos, contasAPagar, contasAReceber, fornecedores, fichas, mps, produtos] = await Promise.all([
         supabase.from('pedidos').select('status, data, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
         supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id, data), inspecoes_qualidade(status)').eq('empresa_id', eid),
         supabase.from('contas_a_pagar').select('valor_total, created_at').is('recebimento_id', null).eq('empresa_id', eid),
+        supabase.from('contas_a_receber').select('valor_total, created_at').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
         supabase.from('ficha_tecnica').select('*').eq('empresa_id', eid),
         supabase.from('materias_primas').select('*').eq('empresa_id', eid),
@@ -42,6 +43,7 @@ function Conteudo() {
           status_qualidade: (Array.isArray(r.inspecoes_qualidade) ? r.inspecoes_qualidade[0] : r.inspecoes_qualidade)?.status ?? null,
         })),
         contasAPagar: contasAPagar.data || [],
+        contasAReceber: contasAReceber.data || [],
         fornecedores: fornecedores.data || [],
         fichas: fichas.data || [],
         mps: mps.data || [],
@@ -60,6 +62,7 @@ function Conteudo() {
     producoes: dTodos.producoes.filter(p => noPeriodo(p.data)),
     recebimentos: dTodos.recebimentos.filter(r => noPeriodo(r.data)),
     contasAPagar: dTodos.contasAPagar.filter(x => noPeriodo(x.created_at)),
+    contasAReceber: dTodos.contasAReceber.filter(x => noPeriodo(x.created_at)),
   };
 
   // custo unitário do produto: média dos lotes produzidos; sem produção, custo teórico pela ficha técnica
@@ -84,6 +87,7 @@ function Conteudo() {
   const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
   const despesasTotal = d.contasAPagar.reduce((s, x) => s + Number(x.valor_total), 0);
+  const receberTotal = d.contasAReceber.reduce((s, x) => s + Number(x.valor_total), 0);
   const lucroBruto = receitaTotal - cmvTotal;
   const lucroLiquido = lucroBruto - despesasTotal;
   const entradasCaixa = d.pedidos
@@ -128,6 +132,7 @@ function Conteudo() {
               <tr><td><b>= Lucro bruto</b></td><td className="num"><b>{fmtMoney(lucroBruto)}</b></td></tr>
               <tr><td>(–) Despesas operacionais</td><td className="num">{fmtMoney(despesasTotal)}</td></tr>
               <tr><td><b>= Lucro líquido</b></td><td className="num" style={{ color: 'var(--amber-bright)' }}><b>{fmtMoney(lucroLiquido)}</b></td></tr>
+              <tr><td className="muted">Contas a receber (emitidas)</td><td className="num muted">{fmtMoney(receberTotal)}</td></tr>
             </tbody>
           </table>
         </div>
@@ -139,6 +144,7 @@ function Conteudo() {
               <tr><td>Saídas (compras de matéria-prima)</td><td className="num">{fmtMoney(comprasTotal)}</td></tr>
               <tr><td>Saídas (despesas operacionais)</td><td className="num">{fmtMoney(despesasTotal)}</td></tr>
               <tr><td><b>= Saldo</b></td><td className="num"><b>{fmtMoney(entradasCaixa - comprasTotal - despesasTotal)}</b></td></tr>
+              <tr><td className="muted">Contas a receber (emitidas)</td><td className="num muted">{fmtMoney(receberTotal)}</td></tr>
             </tbody>
           </table>
         </div>

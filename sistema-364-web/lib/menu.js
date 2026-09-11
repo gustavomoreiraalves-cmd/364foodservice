@@ -33,11 +33,14 @@ export const MENU = [
       { label: 'Vendas PDV (Steakhouse/Afya)', href: '/vendas/importacao', modulo: 'pedidos' },
       { label: 'Vendas Buffet', href: '/vendas/buffet', modulo: 'pedidos' },
       { label: 'Vendas Burguer (iFood)', href: '/vendas/burguer', modulo: 'pedidos' },
+      { label: 'Expedição', href: '/expedicao', modulo: 'expedicao' },
+      { label: 'Transportadoras', href: '/transportadoras', modulo: 'transportadoras' },
     ],
   },
   {
     tipo: 'grupo', id: 'financeiro', label: 'Financeiro', ic: 'financeiro', itens: [
       { label: 'Contas a Pagar', href: '/financeiro/contas-a-pagar', modulo: 'financeiro' },
+      { label: 'Contas a Receber', href: '/financeiro/contas-a-receber', modulo: 'financeiro' },
       { label: 'Conciliação Bancária', href: '/financeiro/conciliacao', modulo: 'financeiro' },
       { label: 'Contas Bancárias', href: '/financeiro/contas-bancarias', modulo: 'financeiro' },
     ],
