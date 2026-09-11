@@ -486,8 +486,6 @@ function Conteudo({ setFicha, setDanfe }) {
     // deste pedido antes da resposta chegar, ela é descartada — pertence ao
     // pedido antigo, não ao que está na tela agora.
     const minhaGeracao = geracaoNotaRef.current;
-    const pedidoAlvo = pedido;
-    const eid = empresaAtual.id;
     // Desabilita o botão durante toda a chamada, inclusive o caminho de erro
     // (o finally cobre as duas saídas) — um duplo clique aqui gastaria
     // numeração fiscal de verdade e pode pôr duas notas na rua para o mesmo
@@ -527,8 +525,16 @@ function Conteudo({ setFicha, setDanfe }) {
       // erro HTTP, é um veredito válido registrado no documento. Recarrega do
       // banco (fonte da verdade) em vez de montar o objeto a partir da
       // resposta: mesmo padrão de cancelar/reabrir/salvar acima.
+      //
+      // carregar() inteiro, não só carregarFiscal(): quando a emissão autoriza
+      // a nota E avança pedidos.status para Faturado no mesmo request
+      // (registrarFaturamentoDoPedido), carregarFiscal sozinho deixava
+      // `pedido.status` parado em Conferido na tela — e a condição de I2 logo
+      // abaixo, lida com esse estado velho, mostrava "o segundo passo falhou"
+      // para um pedido que na verdade já tinha avançado. Achado testando
+      // emissão real em produção em 11/09.
       setEscolhendoNatureza(false);
-      await carregarFiscal(pedidoAlvo, eid);
+      await carregar();
     } catch (e) {
       if (geracaoNotaRef.current !== minhaGeracao) return;
       setErroEmissao(e.message);
