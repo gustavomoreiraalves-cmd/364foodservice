@@ -120,6 +120,23 @@ function competenciaDoMes(data) {
   return `${p.year}-${p.month}-01`;
 }
 
+// Achado da revisão da Task 11 (Importante I2): a data de emissão da nota
+// (dhEmi, montada por isoComOffset em montarXml.js) é sempre lida no fuso do
+// emitente (America/Porto_Velho, fixo — mesmo comentário de competenciaDoMes,
+// acima). `dataEmissao.toISOString().slice(0, 10)` devolve a data em UTC —
+// num servidor rodando em UTC, qualquer emissão a partir de ~20h local (UTC-4)
+// já virou o dia seguinte em UTC, e a parcela nasceria vencendo um dia depois
+// da emissão que ela mesma descreve. A conta a receber "vence na data de
+// emissão" (comentário do bloco 9a) precisa desta mesma data local, dia
+// inteiro — não só o mês, como competenciaDoMes.
+function dataLocalPortoVelho(data) {
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Porto_Velho', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(data);
+  const p = Object.fromEntries(partes.map(({ type, value }) => [type, value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 // A regra mais específica por item. `data` é sempre array (a função SQL é
 // `returns setof regras_tributarias`, chamada via RPC do Supabase) — vazio
 // significa "nenhuma regra casou", não erro; resolverNota (Task 4) é quem
@@ -211,11 +228,89 @@ export function quantidadesAlocadasPorItem(expedicao) {
   return porItem;
 }
 
-// { sb, pedido, naturezaOperacaoId, userId } → { status, chave, numero, protocolo, motivo }
+// Só roda depois que a SEFAZ já confirmou autorizada (bloco 9a, mais abaixo,
+// chama isto só depois do próprio UPDATE que grava
+// nfe_saida_documentos.status = 'autorizado') — pedido → Faturado e, quando a
+// natureza gera financeiro, a conta a receber e a parcela nascem juntas
+// aqui. Nenhuma falha aqui reverte nada: a nota já está autorizada de
+// verdade, então cada erro é só "melhor esforço", relatado com a mensagem
+// dizendo isso — nunca escondido, nunca reportado como se a nota tivesse
+// falhado.
+//
+// Exportada para teste pelo mesmo motivo de quantidadesAlocadasPorItem,
+// acima: uma chamada completa a emitirNfe até aqui passaria pelo certificado
+// A1 (obterCertificadoAtivo → pontoServer.js → next/server, que não resolve
+// em node --test, e usa o Supabase de produção do .env.local) e pela SEFAZ.
+// Isolada, um mock simples de sb já cobre os três caminhos (sucesso com
+// financeiro, sucesso sem financeiro, e cada falha de gravação).
+export async function registrarFaturamentoDoPedido(sb, { pedido, natureza, numero, protocolo, chave, dataEmissao, valorTotal, documento, cliente }) {
+  // Pedido → Faturado e conta a receber nascem na mesma passada em que a
+  // nota é confirmada autorizada — nunca antes (o motor de emissão não
+  // pode gravar "Faturado" achando que vai autorizar; só depois que
+  // autorizou de verdade). fn_pedido_bloquear_cabecalho (atualização 50)
+  // exige exatamente esta ordem: nfe_saida_documentos já 'autorizado'
+  // ANTES do update de pedidos.status.
+  const { error: erroStatusPedido } = await sb.from('pedidos')
+    .update({ status: 'Faturado' }).eq('id', pedido.id);
+  if (erroStatusPedido) {
+    // A nota está autorizada de verdade — mesmo raciocínio dos outros
+    // "melhor esforço" deste arquivo: não reverte, só avisa quem for
+    // investigar. O pedido fica em Conferido com nota autorizada; alguém
+    // precisa rodar o update manualmente.
+    throw erro(
+      `A nota foi autorizada (protocolo ${protocolo}, chave ${chave}), mas falhou ao avançar o pedido para `
+      + `Faturado: ${erroStatusPedido.message}. Atualize o status manualmente.`,
+      500,
+    );
+  }
+
+  // Conta a receber: à vista, vencendo na data de emissão (decisão já
+  // registrada no spec de 25/08 — parcelamento é resolvido depois, em
+  // Financeiro, não aqui). gera_financeiro da natureza da operação decide
+  // se esta operação deve virar conta a receber (ex.: uma natureza de
+  // "Remessa para conserto" não gera financeiro).
+  if (!natureza.gera_financeiro) return;
+
+  const { data: conta, error: erroConta } = await sb.from('contas_a_receber').insert([{
+    descricao: `NF-e ${numero} — ${cliente.nome}`,
+    cliente_id: pedido.cliente_id,
+    pedido_id: pedido.id,
+    nfe_saida_documento_id: documento.id,
+    valor_total: valorTotal,
+    empresa_id: pedido.empresa_id,
+  }]).select('id').single();
+  if (erroConta) {
+    throw erro(
+      `A nota foi autorizada e o pedido avançou para Faturado, mas falhou ao gravar a conta a `
+      + `receber: ${erroConta.message}. Lance manualmente em Financeiro.`,
+      500,
+    );
+  }
+  const { error: erroParcela } = await sb.from('contas_a_receber_parcelas').insert([{
+    conta_a_receber_id: conta.id,
+    numero: 1,
+    valor: valorTotal,
+    // dataLocalPortoVelho, não dataEmissao.toISOString() — ver o comentário
+    // da função, acima: a vencer "na data de emissão" precisa ser a data
+    // local do emitente, não a data UTC.
+    vencimento: dataLocalPortoVelho(dataEmissao),
+    empresa_id: pedido.empresa_id,
+  }]);
+  if (erroParcela) {
+    throw erro(
+      `A nota foi autorizada, mas falhou ao gravar a parcela da conta a receber: ${erroParcela.message}. `
+      + 'Lance manualmente em Financeiro.',
+      500,
+    );
+  }
+}
+
+// { sb, pedido, expedicao, naturezaOperacaoId, userId } → { status, chave, numero, protocolo, motivo }
 //
 // `pedido` já vem carregado e com a empresa conferida (garantirEmpresa) por
 // quem chamou — aqui só falta o resto: cliente, itens, produtos, emitente,
-// configuração de emissão e certificado.
+// configuração de emissão e certificado. `expedicao` também já vem montada
+// por quem chamou (Task 12 ou 16) — esta função não busca a expedição sozinha.
 export async function emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId }) {
   // Achado da revisão (Importante I1): a checagem de status do pedido só
   // existia no botão da UI (app/pedidos/[id]/page.js, `pedido.status ===
@@ -231,6 +326,18 @@ export async function emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, use
       `O pedido está com status "${pedido.status}" — só é possível emitir NF-e para um pedido `
       + 'Conferido (romaneio de separação finalizado). Finalize o romaneio antes de emitir.',
     );
+  }
+  // Achado da revisão da Task 11 (Importante I1): sem esta checagem,
+  // `expedicao` ausente só seria descoberto lá na frente, dentro do loop de
+  // itensParaResolver (quantidadesAlocadasPorItem lendo `expedicao.caixas` de
+  // undefined) — depois de ~6 idas ao banco e de decifrar o certificado A1.
+  // Mesmo critério das outras guardas baratas deste arquivo: falha explícita,
+  // em português, antes de gastar qualquer coisa. `expedicao.caixas` precisa
+  // ser um array (pode ser vazio — um romaneio finalizado sem nenhuma caixa
+  // não tem o que emitir, mas isso já aparece mais à frente como "pedido não
+  // tem itens" quando nenhum item tiver alocação).
+  if (!expedicao || !Array.isArray(expedicao.caixas)) {
+    throw erro('Nenhuma expedição (romaneio de separação) informada para este pedido — não é possível emitir a NF-e sem ela.');
   }
 
   // ---------- 1. Carregar tudo (nada disto gasta número) ----------
@@ -709,62 +816,12 @@ export async function emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, use
       );
     }
 
-    // Pedido → Faturado e conta a receber nascem na mesma passada em que a
-    // nota é confirmada autorizada — nunca antes (o motor de emissão não
-    // pode gravar "Faturado" achando que vai autorizar; só depois que
-    // autorizou de verdade). fn_pedido_bloquear_cabecalho (atualização 50)
-    // exige exatamente esta ordem: nfe_saida_documentos já 'autorizado'
-    // ANTES do update de pedidos.status.
-    const { error: erroStatusPedido } = await sb.from('pedidos')
-      .update({ status: 'Faturado' }).eq('id', pedido.id);
-    if (erroStatusPedido) {
-      // A nota está autorizada de verdade — mesmo raciocínio dos outros
-      // "melhor esforço" deste arquivo: não reverte, só avisa quem for
-      // investigar. O pedido fica em Conferido com nota autorizada; alguém
-      // precisa rodar o update manualmente.
-      throw erro(
-        `A nota foi autorizada (protocolo ${veredito.nProt}), mas falhou ao avançar o pedido para `
-        + `Faturado: ${erroStatusPedido.message}. Atualize o status manualmente.`,
-        500,
-      );
-    }
-
-    // Conta a receber: à vista, vencendo na data de emissão (decisão já
-    // registrada no spec de 25/08 — parcelamento é resolvido depois, em
-    // Financeiro, não aqui). gera_financeiro da natureza da operação decide
-    // se esta operação deve virar conta a receber (ex.: uma natureza de
-    // "Remessa para conserto" não gera financeiro).
-    if (natureza.gera_financeiro) {
-      const { data: conta, error: erroConta } = await sb.from('contas_a_receber').insert([{
-        descricao: `NF-e ${numero} — ${cliente.nome}`,
-        cliente_id: pedido.cliente_id,
-        pedido_id: pedido.id,
-        nfe_saida_documento_id: documento.id,
-        valor_total: valorTotal,
-        empresa_id: pedido.empresa_id,
-      }]).select('id').single();
-      if (erroConta) {
-        throw erro(
-          `A nota foi autorizada e o pedido avançou para Faturado, mas falhou ao gravar a conta a `
-          + `receber: ${erroConta.message}. Lance manualmente em Financeiro.`,
-          500,
-        );
-      }
-      const { error: erroParcela } = await sb.from('contas_a_receber_parcelas').insert([{
-        conta_a_receber_id: conta.id,
-        numero: 1,
-        valor: valorTotal,
-        vencimento: dataEmissao.toISOString().slice(0, 10),
-        empresa_id: pedido.empresa_id,
-      }]);
-      if (erroParcela) {
-        throw erro(
-          `A nota foi autorizada, mas falhou ao gravar a parcela da conta a receber: ${erroParcela.message}. `
-          + 'Lance manualmente em Financeiro.',
-          500,
-        );
-      }
-    }
+    // Pedido → Faturado e conta a receber/parcela, quando a natureza gera
+    // financeiro — ver o comentário de registrarFaturamentoDoPedido, acima,
+    // para o porquê desta lógica estar numa função separada.
+    await registrarFaturamentoDoPedido(sb, {
+      pedido, natureza, numero, protocolo: veredito.nProt, chave, dataEmissao, valorTotal, documento, cliente,
+    });
 
     return { status: 'autorizado', chave, numero, protocolo: veredito.nProt, motivo: null };
   }
