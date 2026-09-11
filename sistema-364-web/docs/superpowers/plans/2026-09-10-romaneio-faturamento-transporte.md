@@ -2834,10 +2834,161 @@ git commit -m "feat(relatorios): soma contas a receber ao lado de contas a pagar
 
 ---
 
+### Task 25: Migração 52 — `registrar_impressao` aceita `expedicao_caixa`
+
+**Contexto:** achado durante a revisão da Task 21 — o check de `source_type` em `etiqueta_impressoes` já aceita `'expedicao_caixa'` desde a atualização 28, mas a função `registrar_impressao` (última definição: `atualizacao_30_ficha_embalagem.sql:669-757`) nunca ganhou o ramo correspondente. O botão de imprimir etiqueta de despacho (Task 21) chama essa RPC e hoje recebe `source_type inválido: expedicao_caixa`. Esta task fecha essa lacuna com um `create or replace function` aditivo — todos os ramos existentes (`producao_interna`, `producao`, `recebimento_item`, `embalagem_item`) ficam idênticos, só ganha um ramo novo.
+
+**Files:**
+- Create: `supabase/atualizacao_52_etiqueta_expedicao_caixa.sql`
+- Create: `tests/migracao-52/fixture.sql`
+- Create: `tests/migracao-52/cenarios.sql`
+- Create: `tests/migracao-52/verificar.sh`
+
+**Interfaces:**
+- Consumes: `expedicao_caixas`/`expedicoes` (Task 1).
+- Produces: `registrar_impressao` aceita `p_source_type = 'expedicao_caixa'`. Consumido pelo botão de imprimir da Task 21 (`app/expedicao/[id]/page.js`).
+
+- [ ] **Step 1: Escrever a migração** — copiar o corpo atual da função (colado abaixo, verbatim, a partir de `atualizacao_30_ficha_embalagem.sql:669-757`) e inserir o ramo novo entre `embalagem_item` e o `else` final, mais a entrada nova em `v_modulo_label`:
+
+```sql
+-- supabase/atualizacao_52_etiqueta_expedicao_caixa.sql
+--
+-- Estende registrar_impressao (atualização 30) com o ramo `expedicao_caixa`
+-- — o check de source_type na tabela etiqueta_impressoes já aceita esse
+-- valor desde a atualização 28, mas a função nunca ganhou o ramo
+-- correspondente. Achado ao implementar a etiqueta de despacho (Task 21).
+--
+-- create or replace: todos os ramos existentes ficam idênticos ao corpo
+-- atual, só o ramo `expedicao_caixa` e a entrada nova em v_modulo_label são
+-- acréscimo.
+begin;
+
+create or replace function public.registrar_impressao(
+  p_source_type text, p_source_id uuid, p_tipo text, p_quantidade int,
+  p_modelo text default 'validade-cozinha', p_impressora text default null, p_motivo text default null
+)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_empresa uuid;
+  v_status text;
+  v_codigo text;
+  v_modulo text;
+  v_modulo_label text;
+begin
+  if p_source_type = 'producao_interna' then
+    v_modulo := 'producoes';
+    select empresa_id, status, codigo into v_empresa, v_status, v_codigo
+      from producoes_internas where id = p_source_id;
+    if not found then raise exception 'Produção interna não encontrada.'; end if;
+    if v_status <> 'finalizada' then
+      raise exception 'Etiquetas só podem ser impressas para produção finalizada (% está "%").', v_codigo, v_status;
+    end if;
+  elsif p_source_type = 'producao' then
+    v_modulo := 'producoes';
+    select empresa_id into v_empresa from producoes where id = p_source_id;
+    if not found then raise exception 'Produção não encontrada.'; end if;
+  elsif p_source_type = 'recebimento_item' then
+    v_modulo := 'recebimentos';
+    select empresa_id into v_empresa
+      from recebimento_itens where id = p_source_id;
+    if not found then raise exception 'Item de recebimento não encontrado.'; end if;
+  elsif p_source_type = 'embalagem_item' then
+    v_modulo := 'producoes';
+    select ei.empresa_id, e.status into v_empresa, v_status
+      from embalagem_itens ei
+      join embalagens e on e.id = ei.embalagem_id
+     where ei.id = p_source_id;
+    if not found then raise exception 'Item de embalagem não encontrado.'; end if;
+    if v_status <> 'finalizada' then
+      raise exception 'Etiquetas só podem ser impressas para ficha de embalagem finalizada (está "%").', v_status;
+    end if;
+  elsif p_source_type = 'expedicao_caixa' then
+    -- Etiqueta de despacho (Task 21): identifica a caixa de um romaneio.
+    -- Módulo `expedicao` (atualização 50) é a permissão que abre a tela de
+    -- expedição — mesma lógica de módulo-por-tela dos ramos irmãos. Confere
+    -- o status da FICHA-MÃE (join com expedicoes), mesmo padrão de defesa em
+    -- profundidade do ramo embalagem_item: a tela só oferece o botão com
+    -- romaneio finalizado, mas a RPC é security definer e chamável direto.
+    v_modulo := 'expedicao';
+    select ec.empresa_id, ex.status into v_empresa, v_status
+      from expedicao_caixas ec
+      join expedicoes ex on ex.id = ec.expedicao_id
+     where ec.id = p_source_id;
+    if not found then raise exception 'Caixa de expedição não encontrada.'; end if;
+    if v_status <> 'finalizado' then
+      raise exception 'Etiquetas só podem ser impressas para romaneio finalizado (está "%").', v_status;
+    end if;
+  else
+    raise exception 'source_type inválido: %', p_source_type;
+  end if;
+
+  if v_empresa not in (select public.empresas_permitidas()) then
+    raise exception 'Sem acesso à empresa desta impressão.';
+  end if;
+  if not public.tem_permissao(v_modulo) then
+    v_modulo_label := case v_modulo
+      when 'producoes' then 'Produção'
+      when 'recebimentos' then 'Recebimento'
+      when 'expedicao' then 'Expedição'
+      else v_modulo
+    end;
+    raise exception 'Sem permissão para imprimir etiquetas de %.', v_modulo_label;
+  end if;
+  if p_tipo = 'reimpressao' and (p_motivo is null or btrim(p_motivo) = '') then
+    raise exception 'Informe o motivo da reimpressão.';
+  end if;
+
+  insert into etiqueta_impressoes (empresa_id, source_type, source_id, tipo, quantidade, modelo, impressora, motivo, usuario_id, usuario_nome)
+  values (v_empresa, p_source_type, p_source_id, p_tipo, p_quantidade, p_modelo, p_impressora, p_motivo, auth.uid(), public.fn_nome_usuario());
+
+  perform public.fn_registrar_auditoria('etiqueta_impressoes', p_source_id,
+                                        case when p_tipo = 'reimpressao' then 'REIMPRESSAO' else 'IMPRESSAO' end,
+                                        v_empresa, null,
+                                        jsonb_build_object('source_type', p_source_type, 'quantidade', p_quantidade,
+                                                           'modelo', p_modelo, 'impressora', p_impressora),
+                                        p_motivo);
+end $$;
+
+commit;
+
+-- ---------- ROLLBACK ----------
+-- Não há como voltar ao corpo exato de antes desta migração sem colar de
+-- volta o texto de atualizacao_30_ficha_embalagem.sql:669-757 (a função é
+-- sempre create or replace, não versionada por linha) — copie aquele bloco
+-- aqui antes de rodar este rollback em produção, se precisar reverter.
+```
+
+- [ ] **Step 2: Escrever fixture.sql** — mínimo necessário: `empresas`, `producoes_internas`, `producoes`, `recebimento_itens`, `embalagens`/`embalagem_itens` (vazios ou com uma linha cada, só para os ramos antigos não quebrarem ao serem exercitados), mais `pedidos`/`pedido_itens`/`expedicoes`/`expedicao_caixas` (Task 1's schema) com uma expedição `finalizado` e uma `rascunho`. Stub `empresas_permitidas()`, `tem_permissao()` (retorna sempre true), `fn_nome_usuario()`, `fn_registrar_auditoria()` (no-op), `etiqueta_impressoes` — siga o padrão de `tests/migracao-30/fixture.sql` se esse diretório existir no repo (pode não existir, já que a 30 é anterior a este projeto de testes de migração — nesse caso, construa o mínimo você mesmo, o objetivo é só exercitar o `registrar_impressao` novo, não recriar o mundo inteiro da 30).
+
+- [ ] **Step 3: Escrever cenarios.sql** — cenários mínimos:
+  1. `expedicao_caixa` com expedição `finalizado` → sucesso, uma linha em `etiqueta_impressoes`.
+  2. `expedicao_caixa` com expedição `rascunho` → recusado com a mensagem de status.
+  3. `source_type` inválido continua recusado com a mesma mensagem de sempre (prova que o `else` não regrediu).
+  4. Um dos ramos antigos (ex.: `recebimento_item`) continua funcionando idêntico ao de antes (prova de não-regressão do `create or replace`).
+
+- [ ] **Step 4: Escrever verificar.sh** — mesmo padrão de `tests/migracao-50/verificar.sh`, trocando nomes de arquivo/banco.
+
+- [ ] **Step 5: Rodar a verificação local**
+
+Run: `chmod +x tests/migracao-52/verificar.sh && ./tests/migracao-52/verificar.sh`
+Expected: `MIGRAÇÃO 52 OK`
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/atualizacao_52_etiqueta_expedicao_caixa.sql tests/migracao-52/
+git commit -m "feat(expedicao): registrar_impressao aceita etiqueta de despacho (expedicao_caixa)"
+```
+
+---
+
 ## Verificação final
 
 - [ ] `npm test` — suíte inteira passa.
-- [ ] `tests/migracao-50/verificar.sh` e `tests/migracao-51/verificar.sh` — `MIGRAÇÃO 50/51 OK`.
+- [ ] `tests/migracao-50/verificar.sh`, `tests/migracao-51/verificar.sh` e `tests/migracao-52/verificar.sh` — `MIGRAÇÃO 50/51/52 OK`.
 - [ ] `npm run build` — sem erro de compilação.
 - [ ] Ciclo completo manual em homologação: pedido → romaneio → caixas → transporte → finalizar → NF-e autorizada → pedido Faturado → conta a receber → baixa de parcela.
-- [ ] Aplicar `atualizacao_50_expedicao_romaneio.sql` e `atualizacao_51_contas_a_receber.sql` em produção **só depois de**: (a) todas as tasks acima commitadas e testadas, (b) o usuário revisar os dois arquivos SQL, (c) confirmação explícita do usuário pra rodar contra `SUPABASE_DB_URL` de produção.
+- [ ] Aplicar `atualizacao_50_expedicao_romaneio.sql`, `atualizacao_51_contas_a_receber.sql` e `atualizacao_52_etiqueta_expedicao_caixa.sql` em produção **só depois de**: (a) todas as tasks acima commitadas e testadas, (b) o usuário revisar os três arquivos SQL, (c) confirmação explícita do usuário pra rodar contra `SUPABASE_DB_URL` de produção.
