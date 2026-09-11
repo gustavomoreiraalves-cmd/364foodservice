@@ -44,14 +44,19 @@ function Conteudo() {
     setErroCarregar('');
     const eid = empresaAtual.id;
     // Mesma regra de "pedido relevante para nota fiscal" de
-    // app/pedidos/[id]/page.js: Faturado é quem libera a emissão, Enviado é o
-    // mesmo pedido depois de despachado — a nota (se existir) continua sendo
-    // dele. Cancelado com nota já emitida antes do cancelamento é uma borda
-    // rara que fica de fora por ora.
+    // app/pedidos/[id]/page.js (Task 23): Faturado é quem libera a emissão
+    // manual, Enviado é o mesmo pedido depois de despachado — a nota (se
+    // existir) continua sendo dele. Conferido entra desde que a emissão
+    // passou a nascer automaticamente ao finalizar o romaneio (Task 16): uma
+    // rejeição da SEFAZ deixa o pedido parado em Conferido, com um
+    // nfe_saida_documentos 'rejeitado' — exatamente o tipo de nota com erro
+    // que esta tela existe para mostrar, e sem Conferido aqui ela ficava
+    // invisível. Cancelado com nota já emitida antes do cancelamento é uma
+    // borda rara que fica de fora por ora.
     const [{ data: pedidos, error: ePed }, { data: notas, error: eNota }] = await Promise.all([
       supabase.from('pedidos')
         .select('id, data, status, clientes(nome, cnpj), pedido_itens(quantidade, preco_unitario)')
-        .eq('empresa_id', eid).in('status', ['Faturado', 'Enviado'])
+        .eq('empresa_id', eid).in('status', ['Conferido', 'Faturado', 'Enviado'])
         .order('data', { ascending: false }),
       supabase.from('nfe_saida_documentos')
         .select('id, pedido_id, status, modelo, serie, numero, chave, valor_total, motivo_rejeicao, emitida_em, created_at')
