@@ -691,7 +691,7 @@ git commit -m "feat(pedidos): schema de romaneio de separação, transportadora 
 
 **Interfaces:**
 - Consumes: `pedidos`, `clientes`, `empresas`, `nfe_saida_documentos` (Task 1's schema não é necessário aqui, mas `nfe_saida_documentos` precisa existir — já existe em produção desde a atualização 43).
-- Produces: `contas_a_receber` (id, descricao, cliente_id, pedido_id, nfe_saida_documento_id único, valor_total, responsavel_id, empresa_id, created_at), `contas_a_receber_parcelas` (id, conta_a_receber_id, numero, valor, vencimento, status ['Pendente'|'Recebido'], data_recebimento, forma_recebimento, comprovante_path, empresa_id, created_at). Task 12 (emitir.js) grava nestas tabelas; Task 22 (tela) lê e dá baixa.
+- Produces: `contas_a_receber` (id, descricao, cliente_id, pedido_id, nfe_saida_documento_id único, valor_total, responsavel_id, empresa_id, created_at), `contas_a_receber_parcelas` (id, conta_a_receber_id, numero, valor, vencimento, status ['Pendente'|'Recebido'], data_recebimento, forma_recebimento, comprovante_path, empresa_id, created_at). Task 11 (emitir.js) grava nestas tabelas; Task 22 (tela) lê e dá baixa.
 
 - [ ] **Step 1: Escrever a migração**
 
@@ -702,7 +702,7 @@ git commit -m "feat(pedidos): schema de romaneio de separação, transportadora 
 -- receita. Schema já fechado em docs/superpowers/specs/
 -- 2026-08-25-financeiro-contas-a-receber-design.md — sem mudança aqui.
 -- Toda conta nasce de uma NF-e de saída autorizada (gravada pelo motor de
--- emissão, Task 12) — sem lançamento avulso nesta fase.
+-- emissão, Task 11) — sem lançamento avulso nesta fase.
 begin;
 
 create table if not exists public.contas_a_receber (
@@ -1176,7 +1176,7 @@ git commit -m "feat(expedicao): empacotamento em caixas (2 produtos/12 unidades)
 - Modify: `tests/expedicao.test.mjs`
 
 **Interfaces:**
-- Produces: `calcularDivergencia(pedidoItens, alocacao)` → `{ pedidoItemId, pedido: number, alocado: number, diferenca: number }[]` (só os itens com diferença ≠ 0). Usado por Task 17 (rota `finalizar`) para bloquear a finalização.
+- Produces: `calcularDivergencia(pedidoItens, alocacao)` → `{ pedidoItemId, pedido: number, alocado: number, diferenca: number }[]` (só os itens com diferença ≠ 0). Usado por Task 16 (rota `finalizar`) para bloquear a finalização.
 
 - [ ] **Step 1: Adicionar os testes**
 
@@ -1257,7 +1257,7 @@ git commit -m "feat(expedicao): cálculo de divergência entre pedido e alocado"
 - Modify: `tests/expedicao.test.mjs`
 
 **Interfaces:**
-- Produces: `proximoNumeroExpedicao(dataStr, empresaId, cliente)` (async, padrão `RM-AAMMDD-###`, mesmo mecanismo de `lib/format.js:proximoLote`) e `calcularVolumesNfe(caixas)` → `{ qVol, esp, pesoB, pesoL }`. A primeira é usada por Task 14 (rota de criação da expedição); a segunda por Task 11 (`resolverNota.js`).
+- Produces: `proximoNumeroExpedicao(dataStr, empresaId, cliente)` (async, padrão `RM-AAMMDD-###`, mesmo mecanismo de `lib/format.js:proximoLote`) e `calcularVolumesNfe(caixas)` → `{ qVol, esp, pesoB, pesoL }`. A primeira é usada por Task 13 (rota de criação da expedição); a segunda por Task 9 (`resolverNota.js`).
 
 - [ ] **Step 1: Escrever os testes**
 
@@ -1351,7 +1351,7 @@ git commit -m "feat(expedicao): numeração do romaneio e cálculo de volumes pa
 - Modify: `tests/pedidos.test.mjs`
 
 **Interfaces:**
-- Produces: `STATUS_PEDIDO` com `Separação`/`Conferido`; `podeEditar`/`exigeMotivoReabertura` sem mudança de assinatura, só de comportamento. Consumido por Task 21 (`app/pedidos/*`) e Task 12 (`emitir.js`, que hoje faz `if (pedido.status !== 'Faturado')`).
+- Produces: `STATUS_PEDIDO` com `Separação`/`Conferido`; `podeEditar`/`exigeMotivoReabertura` sem mudança de assinatura, só de comportamento. Consumido por Task 23 (`app/pedidos/*`) e Task 11 (`emitir.js`, que hoje faz `if (pedido.status !== 'Faturado')`).
 
 - [ ] **Step 1: Ler o arquivo de teste atual pra não duplicar nem quebrar teste existente**
 
@@ -1455,7 +1455,7 @@ git commit -m "feat(autorizacao): garantirExpedicao, mesmo padrão de garantirPe
 - Modify: `tests/nfe-resolver.test.mjs`
 
 **Interfaces:**
-- Consumes: nenhuma task anterior diretamente (parâmetro novo é passado por quem chama — Task 12).
+- Consumes: nenhuma task anterior diretamente (parâmetro novo é passado por quem chama — `emitir.js`, Task 11).
 - Produces: `resolverNota({ ..., expedicao })` (parâmetro novo, opcional) devolvendo `nota.transp` além dos campos já existentes (`ide`, `emit`, `dest`, `itens`, `total`). Consumido por Task 10 (`montarXml.js`).
 
 - [ ] **Step 1: Acrescentar os testes**
@@ -1667,12 +1667,19 @@ git commit -m "feat(nfe): serializa transportadora, veículo e volumes reais no 
 - Modify: `lib/nfe/emitir.js`
 
 **Interfaces:**
-- Consumes: `garantirExpedicao` (Task 8), `resolverNota` com `expedicao` (Task 9), `expedicao.transportadora`/`caixas` montados por quem chama (Task 14/17).
-- Produces: `emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId })` — assinatura ganha `expedicao` (obrigatório); no sucesso (9a), além de gravar `nfe_saida_documentos`, atualiza `pedidos.status = 'Faturado'` e cria `contas_a_receber`/parcela. Chamado por Task 17 (rota `finalizar`), não mais direto pela rota `POST /api/fiscal/emitir-nfe` (Task 12 corrige a rota).
+- Consumes: `garantirExpedicao` (Task 8), `resolverNota` com `expedicao` (Task 9), `expedicao.transportadora`/`caixas` montados por quem chama (Task 12/16).
+- Produces: `emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId })` — assinatura ganha `expedicao` (obrigatório); no sucesso (9a), além de gravar `nfe_saida_documentos`, atualiza `pedidos.status = 'Faturado'` e cria `contas_a_receber`/parcela. Chamado por Task 16 (rota `finalizar`), e por Task 12 (rota `POST /api/fiscal/emitir-nfe`, caminho de retentativa).
 
 Este é o task mais sensível do plano — `emitir.js` tem 762 linhas com ordenação deliberada pra nunca duplicar uma nota autorizada (ver o comentário no topo do arquivo). Mudar a guarda de status e o sucesso 9a sem tocar em mais nada.
 
-- [ ] **Step 1: Trocar a guarda de status (linha 205-210)**
+- [ ] **Step 1: Trocar a assinatura da função (linha 197) e a guarda de status (linha 205-210)**
+
+```js
+// lib/nfe/emitir.js:197 — trocar:
+export async function emitirNfe({ sb, pedido, naturezaOperacaoId, userId }) {
+// por:
+export async function emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId }) {
+```
 
 ```js
 // lib/nfe/emitir.js:205-210 — trocar:
@@ -1736,7 +1743,7 @@ Este é o task mais sensível do plano — `emitir.js` tem 762 linhas com ordena
   });
 ```
 
-`expedicao` chega no parâmetro da função (`emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId })`, ajustar a assinatura na linha 197) já com `.transportadora` (linha carregada por quem chama, Task 17, via `select('*, transportadora:transportadoras(*)')`) e `.caixas` (array de `{ peso_bruto_kg, itens: [{ pedido_item_id, quantidade }] }`, também montado por quem chama).
+`expedicao` chega no parâmetro da função (`emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId })`, ajustar a assinatura na linha 197) já com `.transportadora` (linha carregada por quem chama, Task 12 ou 16, via `select('*, transportadora:transportadoras(*)')`) e `.caixas` (array de `{ peso_bruto_kg, itens: [{ pedido_item_id, quantidade }] }`, também montado por quem chama).
 
 - [ ] **Step 4: No sucesso (9a), atualizar o pedido e criar a conta a receber (depois da linha 660, dentro do bloco de sucesso, antes do `return`)**
 
@@ -1831,7 +1838,7 @@ git commit -m "feat(nfe): emitir a partir da expedição finalizada; Faturado e 
 - Modify: `app/api/fiscal/emitir-nfe/route.js`
 
 **Interfaces:**
-- Consumes: `emitirNfe` com assinatura nova (Task 11), `garantirExpedicao` (Task 8) — mas esta rota deixa de ser chamada pelo botão da tela de pedido (Task 21 remove o botão "Emitir NF-e" solto); passa a ser usada só pelo caminho de retentativa ("Tentar emitir novamente" quando a emissão automática falhou, Task 17/20).
+- Consumes: `emitirNfe` com assinatura nova (Task 11), `garantirExpedicao` (Task 8) — mas esta rota deixa de ser chamada pelo botão da tela de pedido (Task 23 remove o botão "Emitir NF-e" solto); passa a ser usada só pelo caminho de retentativa ("Tentar emitir novamente" quando a emissão automática falhou, Task 23/20).
 
 - [ ] **Step 1: Atualizar a rota pra carregar a expedição do pedido e repassar**
 
