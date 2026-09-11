@@ -37,6 +37,17 @@ export const MODELOS = {
     // 2×2 mm de padding) ao lado do texto de produto/lote/fabricação/validade.
     qr_mm: 16,
   },
+  despacho: {
+    id: 'despacho',
+    nome: 'Despacho',
+    // Couché de caixa secundária, não o rolo BOPP de recebimento/produção —
+    // por isso rolo e etiqueta têm a mesma largura (uma só coluna) e a
+    // geometria não segue o padrão "108 mm com duas de 50" dos outros
+    // modelos. Uma etiqueta por caixa do romaneio (spec de 20/08, seção
+    // "3. Despacho"), nunca em lote — uma impressão = uma caixa.
+    largura_mm: 101, altura_mm: 50, colunas: 1,
+    rolo_mm: 101, gap_coluna_mm: 0, gap_linha_mm: 2,
+  },
 };
 
 // A produção roda em https://364foodservice.vercel.app (projeto Vercel

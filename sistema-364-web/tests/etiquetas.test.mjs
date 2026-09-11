@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MODELOS, modelo, medidasImpressao, paginarEtiquetas, urlRastreio } from '../lib/etiquetas.js';
 
-test('MODELOS: só os três modelos desta fase', () => {
-  assert.deepEqual(Object.keys(MODELOS).sort(), ['producao-lote', 'recebimento', 'validade-cozinha']);
+test('MODELOS: os quatro modelos desta fase', () => {
+  assert.deepEqual(Object.keys(MODELOS).sort(), ['despacho', 'producao-lote', 'recebimento', 'validade-cozinha']);
 });
 
 test('modelo: devolve o modelo pedido', () => {
@@ -12,7 +12,7 @@ test('modelo: devolve o modelo pedido', () => {
 });
 
 test('modelo: id desconhecido é erro, não silêncio', () => {
-  assert.throws(() => modelo('despacho'), /despacho/);
+  assert.throws(() => modelo('inexistente'), /inexistente/);
 });
 
 test('medidasImpressao: a página é uma linha do rolo', () => {
@@ -97,4 +97,22 @@ test('medidasImpressao: producao-lote usa a mesma geometria de rolo dos demais m
   assert.equal(m.gapColuna_mm, 2.5);
   assert.equal(m.colunas, 2);
   assert.equal(m.qrTamanho_mm, 16);
+});
+
+test('medidasImpressao: despacho é coluna única no tamanho do rolo, sem QR', () => {
+  // Couché 101×50mm de caixa secundária, uma etiqueta por página — nada de
+  // par lado a lado como nos modelos de rolo BOPP.
+  const m = medidasImpressao('despacho');
+  assert.equal(m.paginaLargura_mm, 101);
+  assert.equal(m.paginaAltura_mm, 52);
+  assert.equal(m.margemLateral_mm, 0);
+  assert.equal(m.etiquetaLargura_mm, 101);
+  assert.equal(m.etiquetaAltura_mm, 50);
+  assert.equal(m.gapColuna_mm, 0);
+  assert.equal(m.colunas, 1);
+  assert.equal(m.qrTamanho_mm, undefined);
+});
+
+test('paginarEtiquetas: despacho imprime uma etiqueta por página (coluna única)', () => {
+  assert.deepEqual(paginarEtiquetas(1, 1), [[0]]);
 });

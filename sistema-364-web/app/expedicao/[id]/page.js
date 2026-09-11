@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../../../lib/expedicao';
+import EtiquetaDespachoPrint, { imprimirEtiquetaDespacho } from '../../../components/EtiquetaDespachoPrint';
 
 // Mesmo padrão de app/pedidos/[id]/page.js: o token da sessão pode ter
 // girado desde o mount, então pega sempre na hora da chamada em vez de
@@ -29,6 +30,25 @@ function Conteudo() {
   const [expedicao, setExpedicao] = useState(null);
   const [pedidoItens, setPedidoItens] = useState([]);
   const [alocacao, setAlocacao] = useState([]);
+  // Caixas já gravadas no banco (com id real de `expedicao_caixas` e os
+  // produtos/lote de cada item) — só existe depois de `salvar()`. É o que a
+  // etiqueta de despacho usa; `caixas` (linha abaixo, calculado a partir de
+  // `alocacao`) não carrega id nenhum, só serve pra exibir a montagem.
+  const [caixasSalvas, setCaixasSalvas] = useState([]);
+  // Nome/S.I.M. da empresa atual — não vem em `empresaAtual` (lib/empresa.js
+  // só seleciona id/nome/slug/prefixo/grupo/logo/empregador_id pro seletor
+  // de empresas do topo, sem os dois campos do selo).
+  const [empresaSim, setEmpresaSim] = useState(null);
+  // Fabricação/validade por (produto_id|recebimento_item_id) — não vem em
+  // `expedicao_itens` nem em `recebimento_itens` (que é o LOTE da matéria-
+  // prima, não da unidade embalada). Só existe em `embalagem_itens`, que
+  // `expedicao_itens` não referencia diretamente — ver o comentário em
+  // `carregar()` sobre a ambiguidade quando mais de uma embalagem consome o
+  // mesmo produto + lote de origem.
+  const [fabricacaoValidadePorItem, setFabricacaoValidadePorItem] = useState({});
+  const [etiquetaDespacho, setEtiquetaDespacho] = useState(null);
+  const [imprimindoCaixaId, setImprimindoCaixaId] = useState(null);
+  const [erroEtiqueta, setErroEtiqueta] = useState('');
   const [transportadoras, setTransportadoras] = useState([]);
   const [transportadoraId, setTransportadoraId] = useState('');
   const [modoFrete, setModoFrete] = useState('0');
@@ -58,15 +78,26 @@ function Conteudo() {
     setVeiculoPlaca(exp.veiculo_placa || '');
     setVeiculoUf(exp.veiculo_uf || '');
 
-    const [{ data: itens }, { data: transp }, { data: nats }, { data: caixasSalvas }] = await Promise.all([
+    const [{ data: itens }, { data: transp }, { data: nats }, { data: caixasSalvas }, { data: empresaLinha }] = await Promise.all([
       supabase.from('pedido_itens').select('*, produto:produtos(id, nome, rastreado)').eq('pedido_id', exp.pedido_id),
       supabase.from('transportadoras').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('naturezas_operacao').select('id, descricao').eq('empresa_id', empresaAtual.id).eq('tipo_operacao', 'saida').eq('ativo', true),
-      supabase.from('expedicao_caixas').select('*, expedicao_itens(*)').eq('expedicao_id', exp.id).order('numero'),
+      // produtos/recebimento_itens aninhados só pra etiqueta de despacho —
+      // o resto da tela (caixas calculadas a partir de `alocacao`, mais
+      // abaixo) nunca usou esses campos e continua sem usar.
+      supabase.from('expedicao_caixas')
+        .select('*, expedicao_itens(*, produtos(codigo, nome, conservacao_texto), recebimento_itens(lote))')
+        .eq('expedicao_id', exp.id).order('numero'),
+      // Nome e selo S.I.M. da empresa — `empresaAtual` (lib/empresa.js) não
+      // traz `sim_numero`/`sim_municipio`, só o necessário pro seletor do
+      // topo.
+      supabase.from('empresas').select('nome, sim_numero, sim_municipio').eq('id', empresaAtual.id).maybeSingle(),
     ]);
     setPedidoItens(itens || []);
     setTransportadoras(transp || []);
     setNaturezas(nats || []);
+    setCaixasSalvas(caixasSalvas || []);
+    setEmpresaSim(empresaLinha || null);
 
     // Reabrindo um rascunho que já foi salvo antes: usa a alocação que já
     // está gravada, não uma sugestão nova. `vw_estoque_produto_lote.saldo`
@@ -80,6 +111,7 @@ function Conteudo() {
       setAlocacao(itensSalvos.map(i => ({
         pedidoItemId: i.pedido_item_id, recebimentoItemId: i.recebimento_item_id, quantidade: i.quantidade,
       })));
+      await carregarFabricacaoValidade(itensSalvos);
       return;
     }
 
@@ -104,11 +136,95 @@ function Conteudo() {
     setAlocacao(sugerirAlocacao(itensPedidoParaSugestao, porProduto));
   }
 
+  // Fabricação e validade da unidade embalada, por produto + lote de
+  // origem — a etiqueta de despacho (spec de 20/08) mostra os dois, mas
+  // nenhum dos dois mora em `expedicao_itens` nem em `recebimento_itens`
+  // (que é o lote da MATÉRIA-PRIMA recebida, não da unidade embalada
+  // expedida). Só existe em `embalagem_itens.validade` e
+  // `embalagens.data`, e `expedicao_itens` não guarda qual
+  // `embalagem_item` específico originou a unidade — só produto + lote de
+  // origem + quantidade (mesma limitação de `vw_estoque_produto_lote`,
+  // atualizacao_50). Quando mais de uma embalagem consumiu o mesmo produto
+  // + lote de origem, fica a primeira encontrada: não há como desambiguar
+  // sem alterar a migração, fora do escopo desta tarefa.
+  async function carregarFabricacaoValidade(itensSalvos) {
+    const chaves = itensSalvos.filter(i => i.recebimento_item_id);
+    const produtoIds = [...new Set(chaves.map(i => i.produto_id))];
+    const loteIds = [...new Set(chaves.map(i => i.recebimento_item_id))];
+    if (!produtoIds.length || !loteIds.length) { setFabricacaoValidadePorItem({}); return; }
+    const { data } = await supabase.from('embalagem_itens')
+      .select('produto_id, recebimento_item_id, validade, embalagens(data)')
+      .in('produto_id', produtoIds).in('recebimento_item_id', loteIds);
+    const mapa = {};
+    for (const e of data || []) {
+      const chave = `${e.produto_id}|${e.recebimento_item_id}`;
+      if (!mapa[chave]) mapa[chave] = { fabricacao: e.embalagens?.data || null, validade: e.validade || null };
+    }
+    setFabricacaoValidadePorItem(mapa);
+  }
+
   const caixas = empacotarCaixas(alocacao, Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id])));
   // Nome do produto por pedidoItemId — a alocação/caixa só carrega ids
   // (pedidoItemId, recebimentoItemId), e quem monta a caixa fisicamente
   // precisa ver o nome do produto, não um uuid de lote.
   const nomeProdutoPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto?.nome || i.produto_id]));
+
+  // Imprime a etiqueta de despacho de UMA caixa — registra a impressão
+  // ANTES de montar a etiqueta (mesma ordem de ModalEtiquetas.imprimir():
+  // se `registrar_impressao` falhar, nada chega a `window.print()`). Cada
+  // caixa tem seu próprio botão porque a etiqueta é "uma por caixa" (spec
+  // de 20/08), não um lote de N cópias como recebimento/produção.
+  //
+  // `caixa` vem de `caixasSalvas` (linha do banco, com id real e
+  // `expedicao_itens` já com produto/lote aninhados) — nunca do `caixas`
+  // calculado acima, que não carrega id nenhum.
+  async function imprimirEtiquetaCaixa(caixa) {
+    if (imprimindoCaixaId) return; // trava de duplo clique, mesmo padrão de ModalEtiquetas.
+    setImprimindoCaixaId(caixa.id);
+    setErroEtiqueta('');
+    try {
+      const { error } = await supabase.rpc('registrar_impressao', {
+        p_source_type: 'expedicao_caixa',
+        p_source_id: caixa.id,
+        p_tipo: 'original',
+        p_quantidade: 1,
+        p_modelo: 'despacho',
+        p_impressora: null,
+        p_motivo: null,
+      });
+      if (error) { setErroEtiqueta('Não foi possível registrar a impressão: ' + error.message); return; }
+
+      const itensCaixa = caixa.expedicao_itens || [];
+      const produtos = itensCaixa.map(i => {
+        const fv = fabricacaoValidadePorItem[`${i.produto_id}|${i.recebimento_item_id}`] || {};
+        return {
+          codigo: i.produtos?.codigo,
+          nome: i.produtos?.nome,
+          lote: i.recebimento_itens?.lote,
+          quantidade: i.quantidade,
+          fabricacao: fv.fabricacao,
+          validade: fv.validade,
+        };
+      });
+      // Até 2 produtos distintos por caixa (regra de negócio 6) podem, em
+      // tese, ter dizeres de conservação diferentes — a etiqueta nunca
+      // esconde isso: mostra os dois, não só o primeiro.
+      const conservacoes = [...new Set(itensCaixa.map(i => i.produtos?.conservacao_texto).filter(Boolean))];
+
+      imprimirEtiquetaDespacho(setEtiquetaDespacho, {
+        empresa: empresaSim?.nome || empresaAtual?.nome,
+        simNumero: empresaSim?.sim_numero,
+        simMunicipio: empresaSim?.sim_municipio,
+        caixaNumero: caixa.numero,
+        caixaTotal: caixasSalvas.length,
+        romaneioNumero: expedicao?.numero,
+        conservacao: conservacoes.join(' / '),
+        produtos,
+      });
+    } finally {
+      setImprimindoCaixaId(null);
+    }
+  }
 
   // Devolve true se salvou com sucesso — finalizar() depende disso pra não
   // seguir pra emissão com uma montagem de caixas que não bateu no servidor.
@@ -204,6 +320,8 @@ function Conteudo() {
   if (!expedicao) return <p className="muted">Carregando…</p>;
 
   return (
+    <>
+    <EtiquetaDespachoPrint etiqueta={etiquetaDespacho} />
     <section className="panel">
       <h3>Romaneio {expedicao.numero}</h3>
       {erro && <div className="banner erro">{erro}</div>}
@@ -229,6 +347,28 @@ function Conteudo() {
           ))}
         </div>
       ))}
+
+      {/* Só depois de finalizado: a etiqueta é gerada a partir da caixa já
+          gravada em `expedicao_caixas` (com id real), que só existe depois
+          de finalizar() ⇒ salvar() (Task 20). */}
+      {expedicao.status === 'finalizado' && !!caixasSalvas.length && (
+        <>
+          <h4>Etiquetas de despacho</h4>
+          {erroEtiqueta && <div className="banner erro">{erroEtiqueta}</div>}
+          {caixasSalvas.map(c => (
+            <div key={c.id} className="row-actions" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--linha)', padding: '4px 0' }}>
+              <span>Caixa {c.numero}</span>
+              <button
+                className="btn secondary small"
+                onClick={() => imprimirEtiquetaCaixa(c)}
+                disabled={imprimindoCaixaId === c.id}
+              >
+                {imprimindoCaixaId === c.id ? 'Imprimindo…' : 'Imprimir etiqueta de despacho'}
+              </button>
+            </div>
+          ))}
+        </>
+      )}
 
       <h4>Transporte</h4>
       <label>Transportadora</label>
@@ -262,5 +402,6 @@ function Conteudo() {
         {finalizando ? 'Finalizando e emitindo…' : 'Finalizar e emitir NF-e'}
       </button>
     </section>
+    </>
   );
 }
