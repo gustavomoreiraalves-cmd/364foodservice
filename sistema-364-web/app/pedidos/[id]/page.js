@@ -9,7 +9,7 @@ import AppShell from '../../../components/AppShell';
 import PedidoForm from '../../../components/PedidoForm';
 import FichaPrint, { imprimirFicha } from '../../../components/FichaPrint';
 import { useEmpresaAtual } from '../../../lib/empresa';
-import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura, STATUS_PEDIDO } from '../../../lib/pedidos';
+import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura } from '../../../lib/pedidos';
 import { SITUACAO_NOTA, STATUS_NOTA_INDETERMINADO } from '../../../lib/emissaoFiscal';
 import { arquivosDaNota, faltaArquivoDeNotaAutorizada } from '../../../lib/nfe/arquivos';
 import { signedUrlRecebimento } from '../../../lib/storage';
@@ -34,6 +34,16 @@ function rotuloBotaoEmitir(notaFiscal) {
   if (STATUS_NOTA_INDETERMINADO.includes(notaFiscal.status)) return 'Emitir mesmo assim';
   return 'Continuar emissão'; // rascunho/numero_reservado/assinado: retomar uma tentativa interrompida antes do envio é seguro.
 }
+
+// Transições que a trigger do banco ainda aceita direto no <select> do
+// cabeçalho para um pedido Faturado/Enviado (atualização 50) — Separação e
+// Conferido saíram da lista porque nenhum dos dois é mais alcançável a
+// partir daqui sem passar por uma expedição de verdade, e deixá-los como
+// opção só levaria a um erro cru do trigger ao confirmar. 'Pendente'
+// continua nas duas listas de propósito: é o que aciona o diálogo de
+// reabertura (mudarStatus → exigeMotivoReabertura → setReabrindo), que esta
+// task não mexe.
+const PROXIMOS_STATUS_HEADER = { Faturado: ['Faturado', 'Enviado', 'Pendente'], Enviado: ['Enviado', 'Pendente'] };
 
 export default function PedidoPage() {
   const [ficha, setFicha] = useState(null);
@@ -76,6 +86,14 @@ function Conteudo({ setFicha, setDanfe }) {
   const [reabrindo, setReabrindo] = useState(false);
   const [motivoReabertura, setMotivoReabertura] = useState('');
   const [erroReabrir, setErroReabrir] = useState('');
+
+  // Expedição viva (rascunho ou finalizada — nunca cancelada) deste pedido —
+  // sustenta o botão "Continuar romaneio" quando o pedido está em
+  // Separação/Conferido. O índice único expedicoes_pedido_vivo_unico
+  // (atualização 50) garante no máximo uma linha, daí o maybeSingle().
+  const [expedicaoAtiva, setExpedicaoAtiva] = useState(null);
+  const [iniciandoRomaneio, setIniciandoRomaneio] = useState(false);
+  const [erroRomaneio, setErroRomaneio] = useState('');
 
   // notaFiscal é o último nfe_saida_documentos deste pedido (ou null se nunca
   // emitiu). Carregado à parte do resto do pedido (carregarFiscal), não dentro
@@ -131,7 +149,7 @@ function Conteudo({ setFicha, setDanfe }) {
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
-    const [r1, r2, r3, r4, r5] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
       // O filtro por empresa_id é o que impede alcançar pedido de outra marca
       // do grupo adivinhando o uuid da URL.
       //
@@ -153,12 +171,16 @@ function Conteudo({ setFicha, setDanfe }) {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
+      // Expedição viva deste pedido (rascunho ou finalizada) — sustenta o
+      // botão "Continuar romaneio" abaixo. `.eq('id', id)` já é o filtro
+      // principal do pedido; aqui o filtro é pelo pedido_id da URL mesmo.
+      supabase.from('expedicoes').select('id, status').eq('pedido_id', id).eq('empresa_id', eid).neq('status', 'cancelado').maybeSingle(),
     ]);
 
-    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS). Sem essa
+    // Qualquer uma das seis pode falhar (rede, sessão expirada, RLS). Sem essa
     // checagem a tela seguia com dado parcial e nada avisava o operador — o pior
     // caso é abrir "normal" com saldo e produto errados por baixo.
-    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5, r6].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -169,6 +191,7 @@ function Conteudo({ setFicha, setDanfe }) {
     setProdutos(r3.data || []);
     setFuncionarios(r4.data || []);
     setEstoqueProd(r5.data || []);
+    setExpedicaoAtiva(r6.data || null);
 
     const p = r1.data;
     setPedido(p || null);
@@ -218,6 +241,12 @@ function Conteudo({ setFicha, setDanfe }) {
     setEmitindoNota(false);
     setErroEmissao('');
     setEmissaoIndeterminada(false);
+    // Mesmo raciocínio de notaFiscal, acima: a expedição viva é de UM pedido
+    // específico — sem isto, o botão "Continuar romaneio" podia piscar
+    // apontando pra expedição do pedido anterior por uma fração de segundo.
+    setExpedicaoAtiva(null);
+    setIniciandoRomaneio(false);
+    setErroRomaneio('');
     carregar();
   }, [empresaAtual?.id, id]);
 
@@ -324,6 +353,31 @@ function Conteudo({ setFicha, setDanfe }) {
     const { error } = await supabase.from('pedidos').update({ status }).eq('id', id).eq('empresa_id', empresaAtual.id);
     if (error) setErro(`Não foi possível trocar o status do pedido: ${error.message}`);
     carregar();
+  }
+
+  // Mesmo padrão de app/expedicao/page.js (Task 19) e de iniciarRomaneio em
+  // app/pedidos/page.js: cria o romaneio (POST /api/expedicao) e navega
+  // direto pra ele. A rota já confere que o pedido está Pendente e avança o
+  // status pra Separação — nada disso é feito aqui.
+  async function iniciarRomaneio() {
+    // Mesma trava de mudarStatus: não inicia romaneio com edição não salva
+    // na tela — o pedido sairia de Pendente e fn_pedido_bloquear_edicao
+    // travaria a reinserção dos itens.
+    if (temAlteracoesNaoSalvas()) return;
+    setErroRomaneio('');
+    setIniciandoRomaneio(true);
+    try {
+      const r = await fetch('/api/expedicao', {
+        method: 'POST',
+        headers: await cabecalhoAuth(),
+        body: JSON.stringify({ pedidoId: id }),
+      });
+      const json = await r.json();
+      if (!r.ok) { setErroRomaneio(json.error || 'Falha ao iniciar o romaneio.'); return; }
+      router.push(`/expedicao/${json.expedicaoId}`);
+    } finally {
+      setIniciandoRomaneio(false);
+    }
   }
 
   async function reabrir() {
@@ -514,18 +568,37 @@ function Conteudo({ setFicha, setDanfe }) {
   return (
     <>
       {erro && <div className="banner bad">{erro}</div>}
+      {erroRomaneio && <div className="banner bad">{erroRomaneio}</div>}
 
       <div className="panel">
         <div className="row-actions" style={{ justifyContent: 'space-between' }}>
           <h3>Pedido {String(pedido.id).slice(0, 8).toUpperCase()}</h3>
           <div className="row-actions">
-            <select style={{ width: 'auto' }} value={pedido.status}
-              onChange={e => mudarStatus(e.target.value)}
-              disabled={pedido.status === 'Cancelado' || alteracoesPendentes}
-              title={alteracoesPendentes ? 'Salve ou descarte as alterações antes de trocar o status.' : undefined}>
-              {STATUS_PEDIDO.filter(s => s !== 'Cancelado').map(s => <option key={s}>{s}</option>)}
-              {pedido.status === 'Cancelado' && <option>Cancelado</option>}
-            </select>
+            {pedido.status === 'Pendente' && (
+              <button className="btn secondary small" disabled={iniciandoRomaneio || alteracoesPendentes}
+                title={alteracoesPendentes ? 'Salve ou descarte as alterações antes de iniciar a separação.' : undefined}
+                onClick={iniciarRomaneio}>
+                {iniciandoRomaneio ? 'Iniciando…' : 'Ir para separação'}
+              </button>
+            )}
+            {(pedido.status === 'Separação' || pedido.status === 'Conferido') && (
+              expedicaoAtiva
+                ? <button className="btn secondary small" onClick={() => router.push(`/expedicao/${expedicaoAtiva.id}`)}>Continuar romaneio</button>
+                : <span className="muted" style={{ fontSize: 12 }}>Romaneio não encontrado.</span>
+            )}
+            {(pedido.status === 'Faturado' || pedido.status === 'Enviado') && (
+              <select style={{ width: 'auto' }} value={pedido.status}
+                onChange={e => mudarStatus(e.target.value)}
+                disabled={alteracoesPendentes}
+                title={alteracoesPendentes ? 'Salve ou descarte as alterações antes de trocar o status.' : undefined}>
+                {(PROXIMOS_STATUS_HEADER[pedido.status] || [pedido.status]).map(s => <option key={s}>{s}</option>)}
+              </select>
+            )}
+            {pedido.status === 'Cancelado' && (
+              <select style={{ width: 'auto' }} value="Cancelado" disabled>
+                <option>Cancelado</option>
+              </select>
+            )}
             <button className="btn secondary small" onClick={imprimir}>Imprimir pedido</button>
             <button className="btn secondary small" onClick={() => router.push('/pedidos')}>Voltar</button>
           </div>
@@ -591,10 +664,19 @@ function Conteudo({ setFicha, setDanfe }) {
             emitida só porque o pedido mudou de status seria fazer
             desaparecer informação fiscal verdadeira, o mesmo tipo de erro que
             esta task existe para evitar. A AÇÃO de emitir (seletor de
-            natureza + botão) já é mais restrita: só com o pedido Faturado, e
+            natureza + botão) já é mais restrita: só com o pedido Conferido, e
             nunca quando já existe documento autorizado — emitir de novo
-            duplicaria a nota. */}
-        {(pedido.status === 'Faturado' || notaFiscal) && (
+            duplicaria a nota.
+
+            'Conferido' entra na condição do bloco (e não só na da ação, logo
+            abaixo) por um motivo específico da Task 23: a emissão passou a
+            nascer automaticamente ao finalizar o romaneio (Task 16), e uma
+            falha nesse passo automático deixa o pedido parado em Conferido —
+            às vezes sem documento nenhum ainda gravado (falha antes do
+            primeiro INSERT em nfe_saida_documentos). Gatear só por
+            `notaFiscal` escondia o único caminho de volta (a retentativa
+            logo abaixo) justamente no caso em que ele mais faz falta. */}
+        {(pedido.status === 'Faturado' || pedido.status === 'Conferido' || notaFiscal) && (
           <div className="panel" style={{ marginTop: 12 }}>
             <h4 style={{ marginTop: 0 }}>Nota fiscal (NF-e)</h4>
 
@@ -671,7 +753,13 @@ function Conteudo({ setFicha, setDanfe }) {
                   <div className="banner bad">{erroEmissao}</div>
                 )}
 
-                {pedido.status === 'Faturado' && notaFiscal?.status !== 'autorizado' && (
+                {/* Caminho normal de emissão passou a ser exclusivamente /expedicao/[id]
+                    (finalizar o romaneio emite sozinho, Task 16) — o que sobra aqui é só a
+                    retentativa manual (POST /api/fiscal/emitir-nfe) para quando aquela
+                    emissão automática falhou e o pedido ficou em Conferido sem nota
+                    autorizada. lib/nfe/emitir.js exige pedido.status === 'Conferido' na
+                    própria rota; esta condição só espelha isso na tela. */}
+                {pedido.status === 'Conferido' && notaFiscal?.status !== 'autorizado' && (
                   escolhendoNatureza ? (
                     <div style={{ marginTop: 8 }}>
                       <label>Natureza da operação</label>
