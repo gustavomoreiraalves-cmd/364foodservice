@@ -47,6 +47,18 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: 'Falha ao carregar os dados do romaneio para finalizar.' }, { status: 500 });
   }
 
+  // Achado da revisão (Importante I2): migration 50 só aceita a transição
+  // Separação→Conferido — se o pedido estiver em qualquer outro status (uma
+  // limpeza compensatória que ficou pela metade, uma edição manual no banco),
+  // o UPDATE de `pedidos` logo abaixo seria recusado pelo trigger DEPOIS que
+  // `expedicoes` já tivesse virado 'finalizado', deixando um estado sem
+  // saída (cancelar só aceita rascunho; o índice único trava um romaneio
+  // substituto). Checagem barata, com dado que já foi carregado, ANTES de
+  // qualquer escrita.
+  if (pedido.status !== 'Separação') {
+    return NextResponse.json({ error: `Pedido está "${pedido.status}" — só é possível finalizar o romaneio de um pedido em Separação.` }, { status: 400 });
+  }
+
   const alocacao = (caixas || []).flatMap(c => (c.expedicao_itens || [])
     .map(i => ({ pedidoItemId: i.pedido_item_id, quantidade: i.quantidade })));
   const divergencias = calcularDivergencia(pedidoItens, alocacao);
@@ -57,8 +69,28 @@ export async function POST(request, { params }) {
     }, { status: 400 });
   }
 
-  const { error: erroFinalizar } = await sb.from('expedicoes').update({ status: 'finalizado' }).eq('id', expedicao.id);
+  // Achado da revisão (Importante I1): um `update` comum não é
+  // compare-and-swap — duas requisições concorrentes para o mesmo romaneio
+  // (duplo clique, retry por timeout) leriam `status === 'rascunho'` antes
+  // de qualquer uma escrever, as duas marcariam 'finalizado', as duas
+  // avançariam o pedido e as duas chamariam emitirNfe — cuja checagem de
+  // duplicidade olha para `nfe_saida_documentos`, vazio para as duas no
+  // instante em que checam. Resultado: duas notas autorizadas para o mesmo
+  // pedido, exatamente o que o cabeçalho de lib/nfe/emitir.js diz que este
+  // pipeline existe para evitar. O `.eq('status', 'rascunho')` na cláusula
+  // WHERE faz da própria escrita o lock: o bloqueio de linha do Postgres
+  // serializa as duas tentativas, só uma dá match e atualiza, a perdedora
+  // recebe zero linhas de volta e para aqui, em 409, antes de chegar em
+  // emitirNfe.
+  const { data: fechadas, error: erroFinalizar } = await sb.from('expedicoes')
+    .update({ status: 'finalizado' })
+    .eq('id', expedicao.id)
+    .eq('status', 'rascunho')
+    .select('id');
   if (erroFinalizar) return NextResponse.json({ error: `Falha ao finalizar o romaneio: ${erroFinalizar.message}` }, { status: 500 });
+  if (!fechadas?.length) {
+    return NextResponse.json({ error: 'Este romaneio já foi finalizado ou cancelado por outra requisição.' }, { status: 409 });
+  }
 
   const { error: erroConferido } = await sb.from('pedidos').update({ status: 'Conferido' }).eq('id', expedicao.pedido_id);
   if (erroConferido) {
