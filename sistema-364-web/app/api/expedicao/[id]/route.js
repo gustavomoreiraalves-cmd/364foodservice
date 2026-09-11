@@ -11,7 +11,7 @@ export async function PUT(request, { params }) {
 
   let expedicao;
   try {
-    expedicao = await garantirExpedicao(sb, user, isAdmin, params.id, 'id, status, empresa_id');
+    expedicao = await garantirExpedicao(sb, user, isAdmin, params.id, 'id, pedido_id, status, empresa_id');
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: e.status || 404 });
   }
@@ -22,6 +22,34 @@ export async function PUT(request, { params }) {
   let corpo;
   try { corpo = await request.json(); } catch { return NextResponse.json({ error: 'Corpo da requisição inválido.' }, { status: 400 }); }
   const { transportadoraId, modoFrete, veiculoPlaca, veiculoUf, caixas } = corpo;
+
+  // Sem isto, um usuário com acesso ao módulo expedição podia referenciar a
+  // transportadora de outra empresa (CNPJ/nome/endereço dela vazando pra NF-e
+  // desta empresa) ou o item de outro pedido, só passando o id no corpo —
+  // nenhum dos dois vinha de uma consulta restrita à própria empresa/pedido
+  // antes deste achado (I4 da revisão final de 10/09). Falha barata, antes de
+  // qualquer escrita.
+  if (transportadoraId) {
+    const { data: transportadora, error: erroTransp } = await sb
+      .from('transportadoras').select('id, empresa_id').eq('id', transportadoraId).maybeSingle();
+    if (erroTransp) return NextResponse.json({ error: `Falha ao validar a transportadora: ${erroTransp.message}` }, { status: 500 });
+    if (!transportadora || transportadora.empresa_id !== expedicao.empresa_id) {
+      return NextResponse.json({ error: 'Transportadora não encontrada nesta empresa.' }, { status: 400 });
+    }
+  }
+
+  const pedidoItemIds = (caixas || []).flatMap(c => (c.itens || []).map(i => i.pedidoItemId)).filter(Boolean);
+  if (pedidoItemIds.length) {
+    const { data: itensDoPedido, error: erroItensPedido } = await sb
+      .from('pedido_itens').select('id').eq('pedido_id', expedicao.pedido_id);
+    if (erroItensPedido) return NextResponse.json({ error: `Falha ao validar os itens do pedido: ${erroItensPedido.message}` }, { status: 500 });
+    const idsValidos = new Set((itensDoPedido || []).map(i => i.id));
+    for (const pedidoItemId of pedidoItemIds) {
+      if (!idsValidos.has(pedidoItemId)) {
+        return NextResponse.json({ error: `Item de pedido "${pedidoItemId}" não pertence ao pedido desta expedição.` }, { status: 400 });
+      }
+    }
+  }
 
   const { error: erroCabecalho } = await sb.from('expedicoes').update({
     transportadora_id: transportadoraId || null,
