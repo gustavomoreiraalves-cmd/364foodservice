@@ -165,10 +165,10 @@ test('CST em branco continua aceito — o campo ainda não é obrigatório', () 
   assert.deepEqual(validarRegraTributaria({ ...BASE, cst_pis: '', cst_cofins: null }), []);
 });
 
-test('juntarTextoFiscal põe a base legal antes da observação, separadas por travessão', () => {
+test('juntarTextoFiscal põe a base legal antes da observação, separadas por hífen', () => {
   assert.equal(
     juntarTextoFiscal('RICMS-RO Anexo VI, item 84.0', 'ICMS retido por ST'),
-    'RICMS-RO Anexo VI, item 84.0 — ICMS retido por ST',
+    'RICMS-RO Anexo VI, item 84.0 - ICMS retido por ST',
   );
 });
 

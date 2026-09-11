@@ -165,7 +165,7 @@ export function juntarTextoFiscal(baseLegal, observacao) {
   const partes = [baseLegal, observacao]
     .map(p => String(p ?? "").trim())
     .filter(p => p !== "");
-  return partes.length ? partes.join(" — ") : undefined;
+  return partes.length ? partes.join(" - ") : undefined;
 }
 
 export function validarRegraTributaria(regra = {}) {

@@ -278,7 +278,7 @@ function resolverItem({ pedidoItem, produto, regra }, indice, { parametroSimples
     infAdProd: normalizarTexto(
       [juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal), textoCredito]
         .filter(v => v !== undefined && v !== null && v !== '')
-        .join(' — ') || undefined,
+        .join(' - ') || undefined,
       LIMITE_INF_AD_PROD,
       `informação adicional do item "${nome}" (infAdProd)`,
     ),

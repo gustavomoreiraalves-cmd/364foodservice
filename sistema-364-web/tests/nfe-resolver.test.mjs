@@ -241,7 +241,7 @@ test('infAdProd junta base legal e observação, nessa ordem', () => {
   }));
   assert.equal(
     nota.itens[0].infAdProd,
-    'RICMS-RO Anexo VI, Tabela XVII, item 84.0 — ICMS retido por substituição tributária',
+    'RICMS-RO Anexo VI, Tabela XVII, item 84.0 - ICMS retido por substituição tributária',
   );
 });
 
