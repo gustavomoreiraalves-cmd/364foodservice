@@ -321,6 +321,36 @@ function montarTotal(total) {
   return `<total>${icmsTot}</total>`;
 }
 
+// Grupo transp: modFrete sempre presente; transporta/veicTransp/vol só saem
+// quando resolverNota os preencheu (nota.transp), nessa ordem — é a ordem que
+// o leiaute 4.00 exige. Sem nota.transp (chamada antiga, de antes da Task 9),
+// cai no mesmo modFrete 9 fixo que este arquivo sempre emitiu.
+function montarTransp(transp) {
+  const t = transp || { modFrete: '9', transportadora: null, veicTransp: null, vol: null };
+  const transporta = t.transportadora
+    ? '<transporta>'
+      + tag('CNPJ', t.transportadora.cnpj)
+      + tag('xNome', t.transportadora.xNome)
+      + tag('IE', t.transportadora.IE)
+      + tag('xEnder', t.transportadora.xEnder)
+      + tag('xMun', t.transportadora.xMun)
+      + tag('UF', t.transportadora.UF)
+      + '</transporta>'
+    : '';
+  const veicTransp = t.veicTransp
+    ? `<veicTransp>${tag('placa', t.veicTransp.placa)}${tag('UF', t.veicTransp.UF)}</veicTransp>`
+    : '';
+  const vol = t.vol
+    ? '<vol>'
+      + tag('qVol', String(t.vol.qVol))
+      + tag('esp', t.vol.esp)
+      + tag('pesoL', numero(t.vol.pesoL, 4))
+      + tag('pesoB', numero(t.vol.pesoB, 4))
+      + '</vol>'
+    : '';
+  return `<transp>${tag('modFrete', t.modFrete)}${transporta}${veicTransp}${vol}</transp>`;
+}
+
 function montarIde({ ide, cUF, cNF, dhEmi, serie, numero: nNF, tpAmb }) {
   return '<ide>'
     + tag('cUF', cUF)
@@ -406,7 +436,7 @@ export function montarXmlNFe(nota, { serie, numero: nNF, ambiente, dataEmissao, 
     + montarDest(nota.dest)
     + detXml
     + montarTotal(nota.total)
-    + '<transp>' + tag('modFrete', '9') + '</transp>'
+    + montarTransp(nota.transp)
     + '<pag>' + '<detPag>' + tag('indPag', '0') + tag('tPag', TPAG_PADRAO_SAIDA) + tag('vPag', numero(nota.total.vNF, 2)) + '</detPag>' + '</pag>'
     + infAdicXml
     + '</infNFe>';
