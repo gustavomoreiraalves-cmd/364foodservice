@@ -108,6 +108,12 @@ function Conteudo({ setFicha, setDanfe }) {
   const [emitindoNota, setEmitindoNota] = useState(false);
   const [erroEmissao, setErroEmissao] = useState('');
   const [emissaoIndeterminada, setEmissaoIndeterminada] = useState(false);
+  // Recuperação do achado I2 da revisão de 11/09 — ver marcarComoFaturado,
+  // abaixo. Estado próprio (não `salvando`) porque esta ação só existe numa
+  // situação bem específica e não deve ficar acoplada às travas de
+  // salvar/reabrir/cancelar.
+  const [marcandoFaturado, setMarcandoFaturado] = useState(false);
+  const [erroMarcarFaturado, setErroMarcarFaturado] = useState('');
   // Mesmo papel do geracaoRef de app/fiscal/emissor/page.js: identifica a
   // "sessão de pedido" vigente. Incrementado sempre que o efeito de troca de
   // pedido/empresa roda, para que uma resposta de carregarFiscal/emitir ainda
@@ -144,12 +150,31 @@ function Conteudo({ setFicha, setDanfe }) {
     setNaturezaEscolhida(listaNats.length === 1 ? listaNats[0].id : '');
   }
 
+  // Carrega a expedição viva deste pedido (rascunho ou finalizada — nunca
+  // cancelada), pro botão "Continuar romaneio" do cabeçalho. Separada de
+  // carregar() de propósito (achado I3 da revisão de 11/09, mesmo raciocínio
+  // de carregarFiscal/notaFiscal acima): `expedicoes` só existe depois da
+  // atualização 50, que pode não estar aplicada em todo ambiente ainda — um
+  // erro aqui não pode derrubar a tela do pedido inteira (cancelamento,
+  // reabertura e o bloco de nota fiscal continuam funcionando), só o botão
+  // "Continuar romaneio" fica ausente. Guardada pelo mesmo geracaoNotaRef de
+  // carregarFiscal: se o operador trocar de pedido antes da resposta chegar,
+  // ela é descartada.
+  async function carregarExpedicaoAtiva(pedidoId, eid) {
+    const minhaGeracao = geracaoNotaRef.current;
+    const { data, error } = await supabase.from('expedicoes')
+      .select('id, status').eq('pedido_id', pedidoId).eq('empresa_id', eid)
+      .neq('status', 'cancelado').maybeSingle();
+    if (geracaoNotaRef.current !== minhaGeracao) return;
+    setExpedicaoAtiva(error ? null : (data || null));
+  }
+
   async function carregar() {
     if (!empresaAtual) return;
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
-    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       // O filtro por empresa_id é o que impede alcançar pedido de outra marca
       // do grupo adivinhando o uuid da URL.
       //
@@ -171,16 +196,12 @@ function Conteudo({ setFicha, setDanfe }) {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
-      // Expedição viva deste pedido (rascunho ou finalizada) — sustenta o
-      // botão "Continuar romaneio" abaixo. `.eq('id', id)` já é o filtro
-      // principal do pedido; aqui o filtro é pelo pedido_id da URL mesmo.
-      supabase.from('expedicoes').select('id, status').eq('pedido_id', id).eq('empresa_id', eid).neq('status', 'cancelado').maybeSingle(),
     ]);
 
-    // Qualquer uma das seis pode falhar (rede, sessão expirada, RLS). Sem essa
+    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS). Sem essa
     // checagem a tela seguia com dado parcial e nada avisava o operador — o pior
     // caso é abrir "normal" com saldo e produto errados por baixo.
-    const falha = [r1, r2, r3, r4, r5, r6].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -191,7 +212,6 @@ function Conteudo({ setFicha, setDanfe }) {
     setProdutos(r3.data || []);
     setFuncionarios(r4.data || []);
     setEstoqueProd(r5.data || []);
-    setExpedicaoAtiva(r6.data || null);
 
     const p = r1.data;
     setPedido(p || null);
@@ -210,7 +230,7 @@ function Conteudo({ setFicha, setDanfe }) {
       }));
       setItensOriginais(lista);
       setItens(lista);
-      await carregarFiscal(p, eid);
+      await Promise.all([carregarFiscal(p, eid), carregarExpedicaoAtiva(p.id, eid)]);
     }
     setLoading(false);
   }
@@ -241,6 +261,8 @@ function Conteudo({ setFicha, setDanfe }) {
     setEmitindoNota(false);
     setErroEmissao('');
     setEmissaoIndeterminada(false);
+    setMarcandoFaturado(false);
+    setErroMarcarFaturado('');
     // Mesmo raciocínio de notaFiscal, acima: a expedição viva é de UM pedido
     // específico — sem isto, o botão "Continuar romaneio" podia piscar
     // apontando pra expedição do pedido anterior por uma fração de segundo.
@@ -515,6 +537,29 @@ function Conteudo({ setFicha, setDanfe }) {
     }
   }
 
+  // Recuperação do achado I2 da revisão de 11/09. lib/nfe/emitir.js
+  // (registrarFaturamentoDoPedido) já documenta e trata um caso real: a nota
+  // é autorizada de verdade na SEFAZ e SÓ DEPOIS o pipeline tenta avançar
+  // pedidos.status para Faturado — se esse segundo UPDATE falhar, a própria
+  // mensagem de erro do arquivo diz "Atualize o status manualmente", porque
+  // não há como desfazer uma autorização real. O <select> livre antigo dava
+  // esse caminho de volta escolhendo 'Faturado' à mão; o gate novo (que
+  // esconde a ação de emitir assim que existe nota autorizada, corretamente,
+  // pra não reemitir) removeu esse caminho junto. Esta ação é só isso: um
+  // UPDATE direto de status, do mesmo jeito que mudarStatus faz para as
+  // transições livres — nunca chama emitir-nfe de novo. A trigger
+  // (fn_pedido_bloquear_cabecalho) aceita Conferido→Faturado exatamente
+  // quando já existe nfe_saida_documentos autorizado, que é a única condição
+  // sob a qual este botão aparece (ver JSX abaixo).
+  async function marcarComoFaturado() {
+    setErroMarcarFaturado('');
+    setMarcandoFaturado(true);
+    const { error } = await supabase.from('pedidos').update({ status: 'Faturado' }).eq('id', id).eq('empresa_id', empresaAtual.id);
+    setMarcandoFaturado(false);
+    if (error) { setErroMarcarFaturado(`Não foi possível avançar o pedido para Faturado: ${error.message}`); return; }
+    carregar();
+  }
+
   function imprimir() {
     imprimirFicha(setFicha, {
       titulo: 'Pedido de Venda',
@@ -787,6 +832,28 @@ function Conteudo({ setFicha, setDanfe }) {
                       {rotuloBotaoEmitir(notaFiscal)}
                     </button>
                   )
+                )}
+
+                {/* Achado I2 da revisão de 11/09: nota já autorizada, pedido ainda em
+                    Conferido — o pipeline autorizou na SEFAZ mas falhou no UPDATE que
+                    avança o status (ver registrarFaturamentoDoPedido em lib/nfe/emitir.js,
+                    cuja mensagem de erro já diz "Atualize o status manualmente"). Nunca
+                    aparece junto com o botão de emitir/retentativa acima — as duas
+                    condições (`notaFiscal?.status !== 'autorizado'` vs. `===
+                    'autorizado'`) são mutuamente exclusivas. */}
+                {pedido.status === 'Conferido' && notaFiscal?.status === 'autorizado' && (
+                  <div style={{ marginTop: 8 }}>
+                    {erroMarcarFaturado && <div className="banner bad">{erroMarcarFaturado}</div>}
+                    <p className="muted" style={{ fontSize: 12 }}>
+                      A nota já está autorizada na SEFAZ, mas o pedido não avançou sozinho
+                      para Faturado — o segundo passo da emissão (atualizar o status) falhou.
+                      Reemitir agora duplicaria a nota; a ação abaixo só corrige o status do
+                      pedido, sem tocar na nota.
+                    </p>
+                    <button className="btn" onClick={marcarComoFaturado} disabled={marcandoFaturado}>
+                      {marcandoFaturado ? 'Marcando…' : 'Marcar como Faturado'}
+                    </button>
+                  </div>
                 )}
               </>
             )}

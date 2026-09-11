@@ -55,7 +55,7 @@ function Conteudo() {
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
-    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
       // cancelado_por_id, da atualização 27), então `funcionarios(nome)` sem
       // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
@@ -70,16 +70,12 @@ function Conteudo() {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
-      // Uma linha por pedido no máximo (expedicoes_pedido_vivo_unico) — dá pra
-      // montar o mapa pedido_id → expedição viva de uma vez só, sem N+1 por
-      // linha da tabela.
-      supabase.from('expedicoes').select('id, pedido_id').eq('empresa_id', eid).neq('status', 'cancelado'),
     ]);
 
-    // Qualquer uma das seis pode falhar (rede, sessão expirada, RLS, embed
+    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS, embed
     // ambíguo). Sem essa checagem o `|| []` transformava a falha em lista
     // vazia: a tela dizia "Nenhum pedido lançado" com o banco cheio.
-    const falha = [r1, r2, r3, r4, r5, r6].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -91,8 +87,25 @@ function Conteudo() {
     setProdutos(r3.data || []);
     setEstoqueProd(r4.data || []);
     setFuncionarios(r5.data || []);
-    setExpedicaoPorPedido(Object.fromEntries((r6.data || []).map(e => [e.pedido_id, e.id])));
     setLoading(false);
+    // Fora do Promise.all principal de propósito (achado I3 da revisão de
+    // 11/09): `expedicoes` só existe depois da atualização 50, que pode não
+    // estar aplicada em todo ambiente ainda — mesmo raciocínio já documentado
+    // nesta tela para outras tabelas opcionais. Um erro aqui não pode derrubar
+    // a lista inteira de pedidos; na pior hipótese, "Continuar romaneio" some
+    // e o operador ainda consegue abrir o pedido pra ver o que fazer.
+    carregarExpedicoesAtivas(eid);
+  }
+
+  // Mapa pedido_id → expedição viva (rascunho ou finalizada — nunca
+  // cancelada), pra sustentar o botão "Continuar romaneio" das linhas em
+  // Separação/Conferido. Uma linha por pedido no máximo
+  // (expedicoes_pedido_vivo_unico), então um mapa simples chave→id nunca
+  // perde uma linha em silêncio.
+  async function carregarExpedicoesAtivas(eid) {
+    const { data, error } = await supabase.from('expedicoes')
+      .select('id, pedido_id').eq('empresa_id', eid).neq('status', 'cancelado');
+    setExpedicaoPorPedido(error ? {} : Object.fromEntries((data || []).map(e => [e.pedido_id, e.id])));
   }
 
   useEffect(() => { carregar(); }, [empresaAtual?.id]);
