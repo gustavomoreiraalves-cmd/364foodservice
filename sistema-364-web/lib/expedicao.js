@@ -1,3 +1,4 @@
+// lib/expedicao.js
 //
 // Lógica pura do romaneio de separação (expedição): FEFO, empacotamento em
 // caixas, divergência pedido × alocado, numeração e volumes pra NF-e. Nada
