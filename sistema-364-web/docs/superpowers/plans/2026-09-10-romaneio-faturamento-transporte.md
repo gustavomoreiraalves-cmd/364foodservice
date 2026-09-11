@@ -1407,7 +1407,7 @@ git commit -m "feat(pedidos): Separação e Conferido na máquina de estados do 
 - Test: `tests/autorizacao.test.mjs` (ler primeiro para seguir o padrão exato dos testes de `garantirPedido`/`garantirProduto` já existentes)
 
 **Interfaces:**
-- Produces: `garantirExpedicao(sb, user, isAdmin, expedicaoId, campos?)` — mesmo formato de `garantirPedido` (`lib/autorizacao.js:93-101`). Consumido pelas Tasks 14-17 (rotas `/api/expedicao/*`).
+- Produces: `garantirExpedicao(sb, user, isAdmin, expedicaoId, campos?)` — mesmo formato de `garantirPedido` (`lib/autorizacao.js:93-101`). Consumido pelas Tasks 14-16 (rotas `/api/expedicao/[id]/*`, que recebem o id da expedição na URL — Task 13 recebe `pedidoId` no lugar e não usa este helper).
 
 - [ ] **Step 1: Ler o teste existente de `garantirPedido` pra copiar o padrão**
 
@@ -1667,7 +1667,7 @@ git commit -m "feat(nfe): serializa transportadora, veículo e volumes reais no 
 - Modify: `lib/nfe/emitir.js`
 
 **Interfaces:**
-- Consumes: `garantirExpedicao` (Task 8), `resolverNota` com `expedicao` (Task 9), `expedicao.transportadora`/`caixas` montados por quem chama (Task 12/16).
+- Consumes: `resolverNota` com `expedicao` (Task 9) — `expedicao` chega já montada de quem chama (Task 12 ou 16), esta task não busca a expedição sozinha nem usa `garantirExpedicao` diretamente.
 - Produces: `emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId })` — assinatura ganha `expedicao` (obrigatório); no sucesso (9a), além de gravar `nfe_saida_documentos`, atualiza `pedidos.status = 'Faturado'` e cria `contas_a_receber`/parcela. Chamado por Task 16 (rota `finalizar`), e por Task 12 (rota `POST /api/fiscal/emitir-nfe`, caminho de retentativa).
 
 Este é o task mais sensível do plano — `emitir.js` tem 762 linhas com ordenação deliberada pra nunca duplicar uma nota autorizada (ver o comentário no topo do arquivo). Mudar a guarda de status e o sucesso 9a sem tocar em mais nada.
@@ -1838,7 +1838,7 @@ git commit -m "feat(nfe): emitir a partir da expedição finalizada; Faturado e 
 - Modify: `app/api/fiscal/emitir-nfe/route.js`
 
 **Interfaces:**
-- Consumes: `emitirNfe` com assinatura nova (Task 11), `garantirExpedicao` (Task 8) — mas esta rota deixa de ser chamada pelo botão da tela de pedido (Task 23 remove o botão "Emitir NF-e" solto); passa a ser usada só pelo caminho de retentativa ("Tentar emitir novamente" quando a emissão automática falhou, Task 23/20).
+- Consumes: `emitirNfe` com assinatura nova (Task 11); busca a expedição finalizada direto por `pedido_id` (não usa `garantirExpedicao`, que exige o id da expedição — aqui só se tem o id do pedido) — mas esta rota deixa de ser chamada pelo botão da tela de pedido (Task 23 remove o botão "Emitir NF-e" solto); passa a ser usada só pelo caminho de retentativa ("Tentar emitir novamente" quando a emissão automática falhou, Task 23/20).
 
 - [ ] **Step 1: Atualizar a rota pra carregar a expedição do pedido e repassar**
 
