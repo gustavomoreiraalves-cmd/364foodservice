@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ordenarFefo, sugerirAlocacao, empacotarCaixas } from '../lib/expedicao.js';
+import { ordenarFefo, sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../lib/expedicao.js';
 
 test('ordenarFefo: lote que vence primeiro vem primeiro', () => {
   const lotes = [
@@ -103,4 +103,34 @@ test('empacotarCaixas: caixa não passa de 12 unidades mesmo com 2 produtos cabe
   for (const caixa of caixas) {
     assert.ok(caixa.reduce((s, i) => s + i.quantidade, 0) <= 12);
   }
+});
+
+test('calcularDivergencia: nada diverge quando o alocado bate com o pedido', () => {
+  const pedidoItens = [{ id: 'i1', quantidade: 10 }];
+  const alocacao = [{ pedidoItemId: 'i1', recebimentoItemId: 'lote_a', quantidade: 10 }];
+  assert.deepEqual(calcularDivergencia(pedidoItens, alocacao), []);
+});
+
+test('calcularDivergencia: soma várias linhas de alocação do mesmo item', () => {
+  const pedidoItens = [{ id: 'i1', quantidade: 10 }];
+  const alocacao = [
+    { pedidoItemId: 'i1', recebimentoItemId: 'lote_a', quantidade: 6 },
+    { pedidoItemId: 'i1', recebimentoItemId: 'lote_b', quantidade: 4 },
+  ];
+  assert.deepEqual(calcularDivergencia(pedidoItens, alocacao), []);
+});
+
+test('calcularDivergencia: falta alocar aparece com diferença negativa', () => {
+  const pedidoItens = [{ id: 'i1', quantidade: 10 }];
+  const alocacao = [{ pedidoItemId: 'i1', recebimentoItemId: null, quantidade: 7 }];
+  assert.deepEqual(calcularDivergencia(pedidoItens, alocacao), [
+    { pedidoItemId: 'i1', pedido: 10, alocado: 7, diferenca: -3 },
+  ]);
+});
+
+test('calcularDivergencia: item do pedido sem nenhuma alocação aparece com alocado 0', () => {
+  const pedidoItens = [{ id: 'i1', quantidade: 5 }];
+  assert.deepEqual(calcularDivergencia(pedidoItens, []), [
+    { pedidoItemId: 'i1', pedido: 5, alocado: 0, diferenca: -5 },
+  ]);
 });

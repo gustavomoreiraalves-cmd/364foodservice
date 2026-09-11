@@ -81,3 +81,21 @@ export function empacotarCaixas(alocacao, produtoPorPedidoItemId) {
   }
   return caixas;
 }
+
+// Diferença entre o que o pedido pede e o que foi de fato alocado nas
+// caixas, por item — só devolve os itens com diferença ≠ 0 (regra 11 do
+// spec de expedição de 25/08: finalizar exige lista vazia aqui).
+export function calcularDivergencia(pedidoItens, alocacao) {
+  const alocadoPorItem = new Map();
+  for (const linha of alocacao) {
+    alocadoPorItem.set(linha.pedidoItemId, (alocadoPorItem.get(linha.pedidoItemId) || 0) + Number(linha.quantidade));
+  }
+  const divergencias = [];
+  for (const item of pedidoItens) {
+    const pedido = Number(item.quantidade);
+    const alocado = alocadoPorItem.get(item.id) || 0;
+    const diferenca = Math.round((alocado - pedido) * 10000) / 10000;
+    if (diferenca !== 0) divergencias.push({ pedidoItemId: item.id, pedido, alocado, diferenca });
+  }
+  return divergencias;
+}
