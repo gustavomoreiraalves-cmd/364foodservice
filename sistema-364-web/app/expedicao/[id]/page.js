@@ -348,6 +348,13 @@ function Conteudo() {
 
   if (!expedicao) return <p className="muted">Carregando…</p>;
 
+  // Salvar/Cancelar/Finalizar exigem status 'rascunho' nas três rotas de API
+  // — passado disso elas só devolvem 400. Um romaneio finalizado continua
+  // acessível aqui (é daqui que se reimprime a etiqueta de despacho), então
+  // esconde as ações que não funcionam mais em vez de deixá-las clicáveis
+  // pra sempre falhar (achado I2 da revisão final de 10/09).
+  const somenteLeitura = expedicao.status !== 'rascunho';
+
   return (
     <>
     <EtiquetaDespachoPrint etiqueta={etiquetaDespacho} />
@@ -401,35 +408,44 @@ function Conteudo() {
 
       <h4>Transporte</h4>
       <label>Transportadora</label>
-      <select value={transportadoraId} onChange={e => setTransportadoraId(e.target.value)}>
+      <select value={transportadoraId} onChange={e => setTransportadoraId(e.target.value)} disabled={somenteLeitura}>
         <option value="">Nenhuma (retirada / frota própria)</option>
         {transportadoras.map(t => <option key={t.id} value={t.id}>{t.nome_fantasia || t.nome}</option>)}
       </select>
       <label>Modo de frete</label>
-      <select value={modoFrete} onChange={e => setModoFrete(e.target.value)}>
+      <select value={modoFrete} onChange={e => setModoFrete(e.target.value)} disabled={somenteLeitura}>
         <option value="0">Contratação por conta do remetente (CIF)</option>
         <option value="1">Contratação por conta do destinatário (FOB)</option>
         <option value="9">Sem frete (retirada)</option>
       </select>
       <div className="row-actions">
-        <div><label>Placa do veículo</label><input value={veiculoPlaca} onChange={e => setVeiculoPlaca(e.target.value.toUpperCase())} /></div>
-        <div><label>UF do veículo</label><input maxLength={2} value={veiculoUf} onChange={e => setVeiculoUf(e.target.value.toUpperCase())} /></div>
+        <div><label>Placa do veículo</label><input value={veiculoPlaca} onChange={e => setVeiculoPlaca(e.target.value.toUpperCase())} disabled={somenteLeitura} /></div>
+        <div><label>UF do veículo</label><input maxLength={2} value={veiculoUf} onChange={e => setVeiculoUf(e.target.value.toUpperCase())} disabled={somenteLeitura} /></div>
       </div>
 
-      <div className="row-actions" style={{ marginTop: 12 }}>
-        <button className="btn secondary" onClick={salvar} disabled={salvando || finalizando}>{salvando ? 'Salvando…' : 'Salvar rascunho'}</button>
-        <button className="btn secondary" onClick={cancelar} disabled={salvando || finalizando}>Cancelar romaneio</button>
-      </div>
+      {somenteLeitura ? (
+        <div className="row-actions" style={{ marginTop: 12, alignItems: 'center' }}>
+          <span>Romaneio <strong>{expedicao.status}</strong> — salvar, cancelar e finalizar só valem para rascunho.</span>
+          <button className="btn secondary" onClick={() => router.push(`/pedidos/${expedicao.pedido_id}`)}>Ver o pedido</button>
+        </div>
+      ) : (
+        <>
+          <div className="row-actions" style={{ marginTop: 12 }}>
+            <button className="btn secondary" onClick={salvar} disabled={salvando || finalizando}>{salvando ? 'Salvando…' : 'Salvar rascunho'}</button>
+            <button className="btn secondary" onClick={cancelar} disabled={salvando || finalizando}>Cancelar romaneio</button>
+          </div>
 
-      <h4>Finalizar</h4>
-      <label>Natureza da operação</label>
-      <select value={naturezaEscolhida} onChange={e => setNaturezaEscolhida(e.target.value)}>
-        <option value="">Selecione…</option>
-        {naturezas.map(n => <option key={n.id} value={n.id}>{n.descricao}</option>)}
-      </select>
-      <button className="btn" onClick={finalizar} disabled={finalizando || salvando || !naturezaEscolhida}>
-        {finalizando ? 'Finalizando e emitindo…' : 'Finalizar e emitir NF-e'}
-      </button>
+          <h4>Finalizar</h4>
+          <label>Natureza da operação</label>
+          <select value={naturezaEscolhida} onChange={e => setNaturezaEscolhida(e.target.value)}>
+            <option value="">Selecione…</option>
+            {naturezas.map(n => <option key={n.id} value={n.id}>{n.descricao}</option>)}
+          </select>
+          <button className="btn" onClick={finalizar} disabled={finalizando || salvando || !naturezaEscolhida}>
+            {finalizando ? 'Finalizando e emitindo…' : 'Finalizar e emitir NF-e'}
+          </button>
+        </>
+      )}
     </section>
     </>
   );
