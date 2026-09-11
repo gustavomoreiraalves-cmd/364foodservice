@@ -99,7 +99,7 @@ test('medidasImpressao: producao-lote usa a mesma geometria de rolo dos demais m
   assert.equal(m.qrTamanho_mm, 16);
 });
 
-test('medidasImpressao: despacho é coluna única no tamanho do rolo, sem QR', () => {
+test('medidasImpressao: despacho é coluna única no tamanho do rolo', () => {
   // Couché 101×50mm de caixa secundária, uma etiqueta por página — nada de
   // par lado a lado como nos modelos de rolo BOPP.
   const m = medidasImpressao('despacho');
@@ -110,7 +110,14 @@ test('medidasImpressao: despacho é coluna única no tamanho do rolo, sem QR', (
   assert.equal(m.etiquetaAltura_mm, 50);
   assert.equal(m.gapColuna_mm, 0);
   assert.equal(m.colunas, 1);
-  assert.equal(m.qrTamanho_mm, undefined);
+});
+
+test('medidasImpressao: despacho tem QR por linha de produto, menor que o de recebimento/produção-lote', () => {
+  // Um QR por produto da caixa (até 2, regra de negócio 6), não um só pro
+  // rótulo inteiro — por isso cabe menos módulo por mm que os 16 mm dos
+  // modelos de uma linha só.
+  const m = medidasImpressao('despacho');
+  assert.equal(m.qrTamanho_mm, 12);
 });
 
 test('paginarEtiquetas: despacho imprime uma etiqueta por página (coluna única)', () => {

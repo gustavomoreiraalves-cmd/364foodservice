@@ -5,6 +5,8 @@ import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../../../lib/expedicao';
+import { medidasImpressao, urlRastreio } from '../../../lib/etiquetas';
+import { qrSvg } from '../../../lib/qr';
 import EtiquetaDespachoPrint, { imprimirEtiquetaDespacho } from '../../../components/EtiquetaDespachoPrint';
 
 // Mesmo padrão de app/pedidos/[id]/page.js: o token da sessão pode ter
@@ -180,6 +182,17 @@ function Conteudo() {
   // calculado acima, que não carrega id nenhum.
   async function imprimirEtiquetaCaixa(caixa) {
     if (imprimindoCaixaId) return; // trava de duplo clique, mesmo padrão de ModalEtiquetas.
+    const itensCaixa = caixa.expedicao_itens || [];
+    // QR por linha (não um só pro rótulo inteiro — ver EtiquetaDespachoPrint.js):
+    // só as linhas com lote (produto rastreado) precisam de prefixo de
+    // empresa pra montar a URL de rastreio sem ambiguidade entre empresas
+    // (mesma checagem de app/recebimentos/page.js:abrirEtiquetas).
+    const algumaLinhaTemLote = itensCaixa.some(i => i.recebimento_itens?.lote);
+    if (algumaLinhaTemLote && !empresaAtual?.prefixo_codigo) {
+      setErroEtiqueta('Esta empresa não tem prefixo de código cadastrado. Cadastre o prefixo antes de imprimir '
+        + 'etiquetas de despacho — sem ele o QR pode ficar ambíguo entre empresas.');
+      return;
+    }
     setImprimindoCaixaId(caixa.id);
     setErroEtiqueta('');
     try {
@@ -194,18 +207,34 @@ function Conteudo() {
       });
       if (error) { setErroEtiqueta('Não foi possível registrar a impressão: ' + error.message); return; }
 
-      const itensCaixa = caixa.expedicao_itens || [];
-      const produtos = itensCaixa.map(i => {
-        const fv = fabricacaoValidadePorItem[`${i.produto_id}|${i.recebimento_item_id}`] || {};
-        return {
-          codigo: i.produtos?.codigo,
-          nome: i.produtos?.nome,
-          lote: i.recebimento_itens?.lote,
-          quantidade: i.quantidade,
-          fabricacao: fv.fabricacao,
-          validade: fv.validade,
-        };
-      });
+      // O QR é resolvido ANTES de window.print() (síncrono, não espera
+      // promessa nenhuma) — mesma ordem de app/recebimentos/page.js. Se
+      // falhar, a impressão em si não sai, mas o registro acima já foi
+      // gravado (produção e impressão são independentes, spec de 20/08).
+      const tamanhoQr = medidasImpressao('despacho').qrTamanho_mm;
+      let produtos;
+      try {
+        produtos = await Promise.all(itensCaixa.map(async i => {
+          const fv = fabricacaoValidadePorItem[`${i.produto_id}|${i.recebimento_item_id}`] || {};
+          const lote = i.recebimento_itens?.lote;
+          const qr = lote
+            ? await qrSvg(urlRastreio(empresaAtual.prefixo_codigo, lote, process.env.NEXT_PUBLIC_SITE_URL), tamanhoQr)
+            : null; // sem lote (não rastreado) — nada pra apontar, a linha sai sem QR.
+          return {
+            codigo: i.produtos?.codigo,
+            nome: i.produtos?.nome,
+            lote,
+            quantidade: i.quantidade,
+            fabricacao: fv.fabricacao,
+            validade: fv.validade,
+            qrSvg: qr,
+          };
+        }));
+      } catch (e) {
+        setErroEtiqueta('Não foi possível gerar o QR do lote: ' + e.message);
+        return;
+      }
+
       // Até 2 produtos distintos por caixa (regra de negócio 6) podem, em
       // tese, ter dizeres de conservação diferentes — a etiqueta nunca
       // esconde isso: mostra os dois, não só o primeiro.

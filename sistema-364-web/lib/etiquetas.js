@@ -47,6 +47,17 @@ export const MODELOS = {
     // "3. Despacho"), nunca em lote — uma impressão = uma caixa.
     largura_mm: 101, altura_mm: 50, colunas: 1,
     rolo_mm: 101, gap_coluna_mm: 0, gap_linha_mm: 2,
+    // Um QR por LINHA de produto (não um só pro rótulo inteiro) — uma caixa
+    // pode ter até 2 produtos/lotes distintos (regra de negócio 6), e cada
+    // linha tem seu próprio lote a rastrear. 12 mm é menor que os 16 mm de
+    // recebimento/produção-lote (0,364 mm/módulo numa matriz 33×33 ≈ 2,9pt a
+    // 203dpi — abaixo dos "≥3pt" que o comentário de `recebimento` estabelece
+    // como piso prático): é a etiqueta ter até DUAS linhas empilhadas nos
+    // mesmos 50 mm de altura, não uma só; confirmar legibilidade na
+    // impressora física antes de rodar em produção, como toda etiqueta nova
+    // (spec de 20/08: "toda etiqueta tem pré-visualização... confere-se na
+    // primeira e depois é só rodar").
+    qr_mm: 12,
   },
 };
 

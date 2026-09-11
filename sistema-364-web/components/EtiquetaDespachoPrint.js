@@ -9,20 +9,21 @@ import { medidasImpressao } from '../lib/etiquetas';
 // `window.print()` com `@page` em milímetro exato, montada/desmontada pelo
 // helper `imprimirEtiquetaDespacho` no fim deste arquivo.
 //
-// Ao contrário de recebimento/produção-lote, não leva QR: o desenho de
-// 20/08 ("3. Despacho") não pede rastreio por QR aqui — o elemento gráfico é
-// o selo do Serviço de Inspeção Municipal (número e município do cadastro
-// da empresa), desenhado em SVG por `seloSim` abaixo. A cópia da ASCII-art
-// do spec reaproveitou o retângulo "▓QR▓" de recebimento/produção por
-// engano nesse desenho — o texto da própria seção 3 só descreve o selo
-// S.I.M., nunca um QR, e é o texto que vale.
+// Como recebimento/produção-lote, leva QR — mas UM POR LINHA DE PRODUTO, não
+// um só pro rótulo inteiro: uma caixa pode ter até 2 produtos/lotes
+// distintos (regra de negócio 6), cada um com seu próprio lote a rastrear, e
+// o desenho de 20/08 ("3. Despacho") não define o que um único QR
+// representaria numa caixa mista. `qrSvg` chega PRONTO em cada item de
+// `etiqueta.produtos` (gerado por quem chama, mesmo contrato de `qrSvg` em
+// EtiquetaPrint.js) — `null`/ausente pra item sem lote (produto não
+// rastreado), que não tem URL de rastreio nenhuma pra codificar.
 //
 // `etiqueta` (mesma ideia de `dados` em ModalEtiquetas/EtiquetaPrint — nunca
 // redigitado, sempre o que a tela de expedição já leu do banco):
 //   empresa, simNumero, simMunicipio, caixaNumero, caixaTotal,
 //   romaneioNumero, conservacao, produtos: [{ codigo, nome, lote,
-//   fabricacao, validade, quantidade }] (1 ou 2 linhas — regra de negócio
-//   "no máximo 2 produtos distintos por caixa").
+//   fabricacao, validade, quantidade, qrSvg }] (1 ou 2 linhas — regra de
+//   negócio "no máximo 2 produtos distintos por caixa").
 export default function EtiquetaDespachoPrint({ etiqueta }) {
   if (!etiqueta) return null;
 
@@ -47,17 +48,34 @@ export default function EtiquetaDespachoPrint({ etiqueta }) {
           display: flex; flex-direction: column;
         }
         .etiqueta-despacho-print .etd-empresa { font-size: 9pt; font-weight: 700; text-transform: uppercase; }
-        .etiqueta-despacho-print .etd-regra { border: none; border-top: 0.5pt solid #000; margin: 1mm 0; flex-shrink: 0; }
+        /* Margens enxutas de propósito: com 2 produtos, cada um com seu
+           próprio QR de 12mm (lib/etiquetas.js), a soma do texto fixo
+           (empresa/regras/conservação/rodapé) mais 2x12mm de QR já usa quase
+           toda a altura útil de 46mm (50mm menos 2mm de padding em cima e
+           embaixo) — sobra pouca folga pro texto de cada item. Ver o
+           comentário de qr_mm em lib/etiquetas.js sobre confirmar isso na
+           impressora física antes de rodar em produção.
+        */
+        .etiqueta-despacho-print .etd-regra { border: none; border-top: 0.5pt solid #000; margin: .6mm 0; flex-shrink: 0; }
         /* A lista de produtos encolhe antes do rodapé (selo/caixa/romaneio),
            que é o dado de conferência física da caixa e não pode sumir —
            mesmo raciocínio do rodapé de vol. N/total em EtiquetaPrint. */
         .etiqueta-despacho-print .etd-itens { flex: 1; min-height: 0; overflow: hidden; }
-        .etiqueta-despacho-print .etd-item + .etd-item { margin-top: 1mm; padding-top: 1mm; border-top: 0.5pt solid #000; }
+        .etiqueta-despacho-print .etd-item {
+          display: flex; align-items: center; gap: 2mm;
+        }
+        .etiqueta-despacho-print .etd-item + .etd-item { margin-top: .6mm; padding-top: .6mm; border-top: 0.5pt solid #000; }
+        /* O texto encolhe antes do QR — um QR cortado não escaneia, uma
+           palavra cortada ainda se lê (mesmo raciocínio de .et-prod-texto
+           em EtiquetaPrint.js). */
+        .etiqueta-despacho-print .etd-item-texto { flex: 1; min-width: 0; overflow: hidden; }
+        .etiqueta-despacho-print .etd-item-qr { flex-shrink: 0; line-height: 0; }
+        .etiqueta-despacho-print .etd-item-qr svg { display: block; }
         .etiqueta-despacho-print .etd-produto { font-size: 8.5pt; font-weight: 700; text-transform: uppercase; }
         .etiqueta-despacho-print .etd-codigo { font-family: 'Courier New', monospace; margin-right: 2mm; }
         .etiqueta-despacho-print .etd-linha { font-size: 7pt; margin-left: 2.5mm; }
         .etiqueta-despacho-print .etd-conservacao { font-size: 8pt; font-weight: 700; text-transform: uppercase; flex-shrink: 0; }
-        .etiqueta-despacho-print .etd-rodape { flex-shrink: 0; margin-top: .8mm; display: flex; align-items: center; gap: 2mm; }
+        .etiqueta-despacho-print .etd-rodape { flex-shrink: 0; margin-top: .4mm; display: flex; align-items: center; gap: 2mm; }
         .etiqueta-despacho-print .etd-selo { flex-shrink: 0; line-height: 0; }
         .etiqueta-despacho-print .etd-rodape-texto { flex: 1; display: flex; justify-content: space-between; gap: 2mm; font-size: 7pt; font-weight: 700; white-space: nowrap; }
       `}</style>
@@ -68,11 +86,16 @@ export default function EtiquetaDespachoPrint({ etiqueta }) {
           <div className="etd-itens">
             {produtos.map((p, i) => (
               <div className="etd-item" key={i}>
-                <div className="etd-produto">
-                  {p.codigo ? <span className="etd-codigo">{p.codigo}</span> : null}{p.nome}
+                <div className="etd-item-texto">
+                  <div className="etd-produto">
+                    {p.codigo ? <span className="etd-codigo">{p.codigo}</span> : null}{p.nome}
+                  </div>
+                  <div className="etd-linha">LOTE {p.lote || '—'}</div>
+                  <div className="etd-linha">FAB {fmtDate(p.fabricacao)}   VAL {fmtDate(p.validade)}    {p.quantidade} un</div>
                 </div>
-                <div className="etd-linha">LOTE {p.lote || '—'}</div>
-                <div className="etd-linha">FAB {fmtDate(p.fabricacao)}   VAL {fmtDate(p.validade)}    {p.quantidade} un</div>
+                {/* Sem lote (produto não rastreado), não há URL de rastreio
+                    pra codificar — a linha fica sem QR, não com um QR vazio. */}
+                {p.qrSvg && <div className="etd-item-qr" dangerouslySetInnerHTML={{ __html: p.qrSvg }} />}
               </div>
             ))}
           </div>
@@ -98,7 +121,11 @@ export default function EtiquetaDespachoPrint({ etiqueta }) {
 // empresa não tem.
 function seloSim(numero, municipio) {
   if (!numero) return '';
-  return `<svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
+  // width/height em mm, mesma convenção de `qrSvg` (lib/qr.js) — o resto do
+  // rótulo inteiro é dimensionado em milímetro exato pro `@page`, então um
+  // elemento em pixel sem unidade renderizaria num tamanho que não bate com
+  // o resto do layout.
+  return `<svg width="9mm" height="9mm" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
     <circle cx="15" cy="15" r="14" fill="none" stroke="#000" stroke-width="1" />
     <circle cx="15" cy="15" r="11.5" fill="none" stroke="#000" stroke-width="0.5" />
     <text x="15" y="11" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" font-weight="700">S.I.M.</text>
