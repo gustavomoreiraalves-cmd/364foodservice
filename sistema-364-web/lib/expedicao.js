@@ -42,3 +42,42 @@ export function sugerirAlocacao(itensPedido, lotesPorProduto) {
   }
   return alocacao;
 }
+
+const MAX_UNIDADES_CAIXA = 12;
+const MAX_PRODUTOS_DISTINTOS_CAIXA = 2;
+
+// Empacota a alocação em caixas: no máximo 2 produtos distintos e 12
+// unidades por caixa (regra 6 do desenho de 20/08). Guloso, em ordem de
+// chegada — não otimiza o número de caixas, só respeita os dois limites.
+// `produtoPorPedidoItemId` é um mapa simples { pedidoItemId: produtoId },
+// já que a alocação não carrega o produto (só o pedidoItemId).
+export function empacotarCaixas(alocacao, produtoPorPedidoItemId) {
+  const caixas = [];
+  let atual = null;
+
+  function novaCaixa() {
+    atual = [];
+    caixas.push(atual);
+    return atual;
+  }
+
+  for (const item of alocacao) {
+    let restante = Number(item.quantidade);
+    while (restante > 0) {
+      if (!atual) novaCaixa();
+      const produtosNaCaixa = new Set(atual.map(i => produtoPorPedidoItemId[i.pedidoItemId]));
+      const produto = produtoPorPedidoItemId[item.pedidoItemId];
+      const cabeProduto = produtosNaCaixa.has(produto) || produtosNaCaixa.size < MAX_PRODUTOS_DISTINTOS_CAIXA;
+      const unidadesNaCaixa = atual.reduce((s, i) => s + i.quantidade, 0);
+      const espaco = MAX_UNIDADES_CAIXA - unidadesNaCaixa;
+      if (!cabeProduto || espaco <= 0) {
+        novaCaixa();
+        continue;
+      }
+      const usar = Math.min(espaco, restante);
+      atual.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: item.recebimentoItemId, quantidade: usar });
+      restante -= usar;
+    }
+  }
+  return caixas;
+}
