@@ -40,6 +40,11 @@ function Conteudo() {
   const [finalizando, setFinalizando] = useState(false);
   const [erro, setErro] = useState('');
   const [divergencias, setDivergencias] = useState([]);
+  // true quando uma falha em finalizar() pode ter deixado o romaneio
+  // travado no servidor (já 'finalizado', ainda 'rascunho' aqui na tela) —
+  // as três rotas exigem 'rascunho', então depois disso salvar/cancelar/
+  // finalizar de novo só devolvem 400 e o usuário fica sem saída por aqui.
+  const [emissaoTravada, setEmissaoTravada] = useState(false);
 
   useEffect(() => { carregar(); }, [id, empresaAtual?.id]);
 
@@ -53,17 +58,34 @@ function Conteudo() {
     setVeiculoPlaca(exp.veiculo_placa || '');
     setVeiculoUf(exp.veiculo_uf || '');
 
-    const [{ data: itens }, { data: transp }, { data: nats }] = await Promise.all([
+    const [{ data: itens }, { data: transp }, { data: nats }, { data: caixasSalvas }] = await Promise.all([
       supabase.from('pedido_itens').select('*, produto:produtos(id, nome, rastreado)').eq('pedido_id', exp.pedido_id),
       supabase.from('transportadoras').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('naturezas_operacao').select('id, descricao').eq('empresa_id', empresaAtual.id).eq('tipo_operacao', 'saida').eq('ativo', true),
+      supabase.from('expedicao_caixas').select('*, expedicao_itens(*)').eq('expedicao_id', exp.id).order('numero'),
     ]);
     setPedidoItens(itens || []);
     setTransportadoras(transp || []);
     setNaturezas(nats || []);
 
-    // Saldo por lote (vw_estoque_produto_lote, Task 1) só dos produtos deste
-    // pedido — só busca se houver produto pra filtrar (`.in()` com array
+    // Reabrindo um rascunho que já foi salvo antes: usa a alocação que já
+    // está gravada, não uma sugestão nova. `vw_estoque_produto_lote.saldo`
+    // já desconta as PRÓPRIAS linhas deste rascunho (via total_expedido),
+    // então rodar sugerirAlocacao de novo aqui leria esse lote como
+    // consumido e degradaria a alocação rastreada pra "sem lote" em
+    // silêncio — o total bateria (calcularDivergencia não vê problema), mas
+    // a rastreabilidade do lote se perderia sem nenhum aviso.
+    const itensSalvos = (caixasSalvas || []).flatMap(c => c.expedicao_itens || []);
+    if (itensSalvos.length) {
+      setAlocacao(itensSalvos.map(i => ({
+        pedidoItemId: i.pedido_item_id, recebimentoItemId: i.recebimento_item_id, quantidade: i.quantidade,
+      })));
+      return;
+    }
+
+    // Rascunho novo, sem nada salvo ainda — sugere a alocação FEFO a partir
+    // do saldo de lote (vw_estoque_produto_lote, Task 1) dos produtos deste
+    // pedido. Só busca se houver produto pra filtrar (`.in()` com array
     // vazio não deveria bater em nada, mas evita depender disso).
     const produtoIds = [...new Set((itens || []).map(i => i.produto_id))];
     const { data: saldosLote } = produtoIds.length
@@ -83,10 +105,17 @@ function Conteudo() {
   }
 
   const caixas = empacotarCaixas(alocacao, Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id])));
+  // Nome do produto por pedidoItemId — a alocação/caixa só carrega ids
+  // (pedidoItemId, recebimentoItemId), e quem monta a caixa fisicamente
+  // precisa ver o nome do produto, não um uuid de lote.
+  const nomeProdutoPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto?.nome || i.produto_id]));
 
   // Devolve true se salvou com sucesso — finalizar() depende disso pra não
   // seguir pra emissão com uma montagem de caixas que não bateu no servidor.
   async function salvar() {
+    // NF-e recusa <veicTransp> com placa e sem UF — checagem barata antes de
+    // gravar ou finalizar (regra 5 do achado I5 da revisão de 10/09).
+    if (veiculoPlaca && !veiculoUf) { alert('Informe a UF do veículo.'); return false; }
     setSalvando(true);
     setErro('');
     try {
@@ -123,19 +152,49 @@ function Conteudo() {
 
   async function finalizar() {
     if (!naturezaEscolhida) { alert('Selecione a natureza da operação.'); return; }
+    if (veiculoPlaca && !veiculoUf) { alert('Informe a UF do veículo.'); return; }
     const divs = calcularDivergencia(pedidoItens, alocacao);
     if (divs.length) { setDivergencias(divs); return; }
     setDivergencias([]);
     setFinalizando(true);
     setErro('');
+    setEmissaoTravada(false);
     try {
       const salvou = await salvar();
       if (!salvou) return;
-      const r = await fetch(`/api/expedicao/${id}/finalizar`, {
-        method: 'POST', headers: await cabecalhoAuth(), body: JSON.stringify({ naturezaOperacaoId: naturezaEscolhida }),
-      });
-      const json = await r.json();
-      if (!r.ok) { setErro(json.error || 'Falha ao finalizar.'); if (json.divergencias) setDivergencias(json.divergencias); return; }
+      let r, json;
+      try {
+        r = await fetch(`/api/expedicao/${id}/finalizar`, {
+          method: 'POST', headers: await cabecalhoAuth(), body: JSON.stringify({ naturezaOperacaoId: naturezaEscolhida }),
+        });
+        json = await r.json();
+      } catch {
+        // Rede caiu, ou o gateway devolveu algo que não é JSON (ex.: 504 de
+        // um SEFAZ lento — finalizar/route.js tem maxDuration 60). O
+        // `finally` ainda reabilita os botões, mas sem isto o erro
+        // desaparecia em silêncio (achado I1 da revisão de 10/09).
+        setErro('Falha ao finalizar: não foi possível confirmar a resposta do servidor.');
+        setEmissaoTravada(true);
+        return;
+      }
+      if (!r.ok) {
+        setErro(json.error || 'Falha ao finalizar.');
+        if (json.divergencias) {
+          // Divergência: nada foi travado no servidor (a checagem roda
+          // antes do UPDATE que marca 'finalizado') — o usuário corrige as
+          // caixas aqui mesmo, sem precisar sair da tela.
+          setDivergencias(json.divergencias);
+        } else {
+          // Qualquer outra falha aqui (já finalizado por outra tentativa,
+          // erro dentro de emitirNfe, etc.) — finalizar/route.js já marcou
+          // 'finalizado' e o pedido 'Conferido' ANTES de chamar emitirNfe, e
+          // não desfaz isso se a emissão falhar (regra 13 do spec de 25/08).
+          // Esta tela exige 'rascunho' pra qualquer ação, então fica sem
+          // saída sem o link abaixo (achado I2 da revisão de 10/09).
+          setEmissaoTravada(true);
+        }
+        return;
+      }
       router.push(`/pedidos/${expedicao.pedido_id}`);
     } finally {
       setFinalizando(false);
@@ -148,6 +207,12 @@ function Conteudo() {
     <section className="panel">
       <h3>Romaneio {expedicao.numero}</h3>
       {erro && <div className="banner erro">{erro}</div>}
+      {emissaoTravada && (
+        <div className="banner erro">
+          <p>O romaneio pode já ter sido finalizado no servidor mesmo com esse erro — as ações desta tela deixam de funcionar depois disso.</p>
+          <button className="btn secondary" onClick={() => router.push(`/pedidos/${expedicao.pedido_id}`)}>Ver o pedido para tentar novamente</button>
+        </div>
+      )}
       {!!divergencias.length && (
         <div className="banner erro">
           <p>O romaneio não cobre exatamente o pedido:</p>
@@ -159,7 +224,9 @@ function Conteudo() {
       {caixas.map((itensCaixa, i) => (
         <div key={i} className="row-actions" style={{ borderBottom: '1px solid var(--linha)', padding: '4px 0' }}>
           <strong>Caixa {i + 1}</strong> — {itensCaixa.reduce((s, it) => s + it.quantidade, 0)} un.
-          {itensCaixa.map((it, j) => <span key={j} className="tag"> {it.recebimentoItemId || 'sem lote'} × {it.quantidade}</span>)}
+          {itensCaixa.map((it, j) => (
+            <span key={j} className="tag"> {nomeProdutoPorPedidoItemId[it.pedidoItemId] || '?'} — lote {it.recebimentoItemId || 'sem lote'} × {it.quantidade}</span>
+          ))}
         </div>
       ))}
 
