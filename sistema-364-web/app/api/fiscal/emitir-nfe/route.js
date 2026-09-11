@@ -50,8 +50,46 @@ export async function POST(request) {
     return NextResponse.json({ error: e.message }, { status: e.status || 400 });
   }
 
+  // Esta rota deixou de ser o caminho principal de emissão (Task 23 remove o
+  // botão "Emitir NF-e" solto da tela de pedido) — agora é só a retentativa
+  // manual quando a emissão automática (Task 16, disparada ao finalizar o
+  // romaneio) falhou. Por isso a expedição não vem no corpo da requisição:
+  // ela é buscada aqui, direto pelo pedido_id, sempre a mais recente
+  // finalizada. Só se busca pelo id do pedido (não por garantirExpedicao, que
+  // exige o id da própria expedição — não temos esse id aqui).
+  const { data: expedicaoRow, error: erroExpedicao } = await sb.from('expedicoes')
+    .select('*, transportadora:transportadoras(*), expedicao_caixas(*, expedicao_itens(*))')
+    .eq('pedido_id', pedido.id).eq('status', 'finalizado')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (erroExpedicao) {
+    return NextResponse.json({ error: `Falha ao carregar o romaneio: ${erroExpedicao.message}` }, { status: 500 });
+  }
+  if (!expedicaoRow) {
+    return NextResponse.json(
+      { error: 'Pedido sem romaneio finalizado — finalize o romaneio antes de emitir.' },
+      { status: 400 },
+    );
+  }
+
+  // Mesma forma que emitirNfe (lib/nfe/emitir.js, Task 11) e
+  // resolverNota/calcularVolumesNfe exigem: `caixas` sempre array (mesmo
+  // vazio), cada item com `pedido_item_id`/`quantidade` (nomes de coluna
+  // crus, lidos por quantidadesAlocadasPorItem), `transportadora` como a
+  // linha crua de transportadoras (cnpj/nome/ie/logradouro/municipio/uf —
+  // resolverTransporte lê esses nomes diretamente, não um formato NFe).
+  const expedicao = {
+    modo_frete: expedicaoRow.modo_frete,
+    transportadora: expedicaoRow.transportadora,
+    veiculo_placa: expedicaoRow.veiculo_placa,
+    veiculo_uf: expedicaoRow.veiculo_uf,
+    caixas: (expedicaoRow.expedicao_caixas || []).map(c => ({
+      peso_bruto_kg: c.peso_bruto_kg,
+      itens: (c.expedicao_itens || []).map(i => ({ pedido_item_id: i.pedido_item_id, quantidade: i.quantidade })),
+    })),
+  };
+
   try {
-    const resultado = await emitirNfe({ sb, pedido, naturezaOperacaoId, userId: user.id });
+    const resultado = await emitirNfe({ sb, pedido, expedicao, naturezaOperacaoId, userId: user.id });
     return NextResponse.json(resultado);
   } catch (e) {
     // e.status vem de lib/nfe/emitir.js (erro() local): 400 para dado de
