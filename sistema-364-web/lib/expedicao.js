@@ -99,3 +99,26 @@ export function calcularDivergencia(pedidoItens, alocacao) {
   }
   return divergencias;
 }
+
+// Grupo `vol` da NF-e (transp/vol) — sempre derivado das caixas do romaneio,
+// nunca redigitado (spec de 10/09). null quando não há caixa nenhuma (não
+// deveria acontecer: romaneio só finaliza com o pedido inteiro alocado).
+export function calcularVolumesNfe(caixas) {
+  if (!caixas?.length) return null;
+  const pesoB = Math.round(caixas.reduce((s, c) => s + Number(c.peso_bruto_kg || 0), 0) * 1000) / 1000;
+  return { qVol: caixas.length, esp: 'Caixa', pesoB, pesoL: pesoB };
+}
+
+// RM-AAMMDD-###, mesmo mecanismo de lib/format.js:proximoLote — maior
+// sufixo já usado no dia NA MESMA EMPRESA, não contagem de linhas (evita a
+// mesma corrida que o comentário daquela função documenta). `cliente` é o
+// client Supabase já injetado por quem chama (mesmo padrão de proximoLote).
+export async function proximoNumeroExpedicao(dataStr, empresaId, cliente) {
+  const prefixo = `RM-${dataStr.slice(2, 4)}${dataStr.slice(5, 7)}${dataStr.slice(8, 10)}-`;
+  const { data } = await cliente.from('expedicoes').select('numero').eq('empresa_id', empresaId).like('numero', `${prefixo}%`);
+  const maiorSufixo = (data || []).reduce((max, l) => {
+    const sufixo = String(l.numero || '').slice(prefixo.length);
+    return /^\d+$/.test(sufixo) ? Math.max(max, Number(sufixo)) : max;
+  }, 0);
+  return prefixo + String(maiorSufixo + 1).padStart(3, '0');
+}

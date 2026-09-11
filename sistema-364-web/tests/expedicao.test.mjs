@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ordenarFefo, sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../lib/expedicao.js';
+import { ordenarFefo, sugerirAlocacao, empacotarCaixas, calcularDivergencia, calcularVolumesNfe, proximoNumeroExpedicao } from '../lib/expedicao.js';
 
 test('ordenarFefo: lote que vence primeiro vem primeiro', () => {
   const lotes = [
@@ -133,4 +133,34 @@ test('calcularDivergencia: item do pedido sem nenhuma alocação aparece com alo
   assert.deepEqual(calcularDivergencia(pedidoItens, []), [
     { pedidoItemId: 'i1', pedido: 5, alocado: 0, diferenca: -5 },
   ]);
+});
+
+test('calcularVolumesNfe: soma o peso bruto de todas as caixas', () => {
+  const caixas = [{ peso_bruto_kg: 5.5 }, { peso_bruto_kg: 3.2 }, { peso_bruto_kg: null }];
+  assert.deepEqual(calcularVolumesNfe(caixas), { qVol: 3, esp: 'Caixa', pesoB: 8.7, pesoL: 8.7 });
+});
+
+test('calcularVolumesNfe: nenhuma caixa devolve null (nada a declarar)', () => {
+  assert.equal(calcularVolumesNfe([]), null);
+});
+
+test('proximoNumeroExpedicao: primeiro romaneio do dia começa em 001', async () => {
+  const clienteFalso = {
+    from: () => ({
+      select: () => ({ eq: () => ({ like: async () => ({ data: [] }) }) }),
+    }),
+  };
+  const numero = await proximoNumeroExpedicao('2026-09-10', 'empresa-1', clienteFalso);
+  assert.equal(numero, 'RM-260910-001');
+});
+
+test('proximoNumeroExpedicao: continua do maior sufixo já usado no dia', async () => {
+  const linhas = [{ numero: 'RM-260910-001' }, { numero: 'RM-260910-003' }];
+  const clienteFalso = {
+    from: () => ({
+      select: () => ({ eq: () => ({ like: async () => ({ data: linhas }) }) }),
+    }),
+  };
+  const numero = await proximoNumeroExpedicao('2026-09-10', 'empresa-1', clienteFalso);
+  assert.equal(numero, 'RM-260910-004');
 });
