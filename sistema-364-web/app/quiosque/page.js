@@ -171,8 +171,9 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
     }).catch(() => { /* telemetria: falha silenciosa */ });
   }
 
-  async function aoVideoPronto(video) {
-    videoRef.current = video;
+  async function aoVideoPronto(fonte) {
+    videoRef.current = fonte;
+    const largura = fonte.videoWidth || fonte.width;
     cancelarLoopRef.current = false;
     if (!modelosProntos) {
       setInstrucao('Carregando reconhecimento…');
@@ -185,10 +186,10 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
     const detTimeout = Date.now() + 20000;
     let estaveis = 0;
     while (!cancelarLoopRef.current && Date.now() < detTimeout) {
-      const dets = await detectarComLandmarks(video);
+      const dets = await detectarComLandmarks(fonte);
       if (dets.length === 1) {
         const box = dets[0].detection.box;
-        const proporcao = box.width / video.videoWidth;
+        const proporcao = box.width / largura;
         if (proporcao > 0.22) { estaveis++; if (estaveis >= 3) break; }
         else setInstrucao('Aproxime-se um pouco da câmera');
       } else if (dets.length > 1) {
@@ -210,7 +211,7 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
     let earMin = 1;
     let fechado = false;
     while (!cancelarLoopRef.current && Date.now() < liveTimeout && piscadas < 1) {
-      const dets = await detectarComLandmarks(video);
+      const dets = await detectarComLandmarks(fonte);
       if (dets.length === 1) {
         const ear = calcularEAR(dets[0].landmarks);
         earMin = Math.min(earMin, ear);
@@ -229,13 +230,13 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
 
     // 3) matching
     setInstrucao('Reconhecendo…');
-    let resultado = await extrairDescritor(video);
+    let resultado = await extrairDescritor(fonte);
     if (!resultado) { encerrarCamera('Rosto perdido durante o reconhecimento. Tente novamente.'); return; }
     let { melhor, segundo } = melhorMatch(resultado.descritor, colaboradoresRef.current);
 
     // zona cinzenta: recaptura e usa a média
     if (melhor.dist > LIMIAR_MATCH && melhor.dist <= ZONA_CINZENTA) {
-      const r2 = await extrairDescritor(video);
+      const r2 = await extrairDescritor(fonte);
       if (r2) {
         const media = resultado.descritor.map((v, i) => (v + r2.descritor[i]) / 2);
         ({ melhor, segundo } = melhorMatch(media, colaboradoresRef.current));

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
@@ -9,7 +9,7 @@ import ThOrdenar from '../../components/ThOrdenar';
 import Paginacao from '../../components/Paginacao';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { totalPedido, saldoDisponivel } from '../../lib/pedidos';
-import { alternarOrdenacao, ordenarRegistros, paginar } from '../../lib/listaCadastro';
+import { filtrarRegistros, alternarOrdenacao, ordenarRegistros, paginar } from '../../lib/listaCadastro';
 
 // Transições que a trigger do banco ainda aceita como diretas por aqui — sem
 // motivo, sem passar por /expedicao (atualização 50). Pendente→Separação e
@@ -53,10 +53,11 @@ function Conteudo() {
   const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
 
+  const [busca, setBusca] = useState('');
   const [ordenacao, setOrdenacao] = useState({ campo: 'data', direcao: 'desc' });
   const [pagina, setPagina] = useState(1);
   const [tamanhoPagina, setTamanhoPagina] = useState(10);
-  useEffect(() => { setPagina(1); }, [tamanhoPagina]);
+  useEffect(() => { setPagina(1); }, [busca, tamanhoPagina]);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -177,6 +178,14 @@ function Conteudo() {
 
   const totalDoPedido = p => totalPedido(p.pedido_itens);
 
+  // `filtrarRegistros` só busca em campo direto do registro — o nome do
+  // cliente vem aninhado (`p.clientes.nome`), por isso a cópia achatada aqui.
+  const pedidosComBusca = useMemo(() => pedidos.map(p => ({ ...p, clienteNome: p.clientes?.nome || '' })), [pedidos]);
+  const visiveis = useMemo(
+    () => filtrarRegistros(pedidosComBusca, { campos: ['clienteNome'], busca, mostrarInativos: true }),
+    [pedidosComBusca, busca],
+  );
+
   const COLUNAS_ORDENACAO = [
     { id: 'data', valor: p => p.data || '' },
     { id: 'cliente', valor: p => p.clientes?.nome || '' },
@@ -185,7 +194,7 @@ function Conteudo() {
     { id: 'status', valor: p => p.status || '' },
     { id: 'responsavel', valor: p => p.responsavel?.nome || '' },
   ];
-  const ordenados = ordenarRegistros(pedidos, COLUNAS_ORDENACAO, ordenacao);
+  const ordenados = ordenarRegistros(visiveis, COLUNAS_ORDENACAO, ordenacao);
   const paginacao = paginar(ordenados, pagina, tamanhoPagina);
 
   if (loading) return <p className="muted">Carregando…</p>;
@@ -228,8 +237,23 @@ function Conteudo() {
       </div>
 
       <div className="panel">
-        <h3>Pedidos lançados ({pedidos.length})</h3>
+        <h3>Pedidos lançados</h3>
         {erroRomaneio && <div className="banner bad">{erroRomaneio}</div>}
+
+        <div className="filter-bar" style={{ marginBottom: 10 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label htmlFor="busca-pedido">Buscar</label>
+            <input id="busca-pedido" value={busca} placeholder="nome do cliente"
+                   onChange={e => setBusca(e.target.value)} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 8 }}>
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {visiveis.length} de {pedidos.length} pedido{pedidos.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
         <div className="table-wrap">
           <table>
             <thead>
@@ -289,12 +313,12 @@ function Conteudo() {
                     </div>
                   </td>
                 </tr>
-              )) : <tr className="empty-row"><td colSpan={7}>Nenhum pedido lançado.</td></tr>}
+              )) : <tr className="empty-row"><td colSpan={7}>{busca ? 'Nenhum pedido encontrado para essa busca.' : 'Nenhum pedido lançado.'}</td></tr>}
             </tbody>
           </table>
         </div>
 
-        {pedidos.length > 0 && (
+        {visiveis.length > 0 && (
           <Paginacao paginaAtual={paginacao.paginaAtual} totalPaginas={paginacao.totalPaginas}
                      tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
         )}
