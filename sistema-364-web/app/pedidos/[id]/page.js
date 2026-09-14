@@ -12,7 +12,7 @@ import { useEmpresaAtual } from '../../../lib/empresa';
 import { podeEditar, totalPedido, diffItens, saldoDisponivel, exigeMotivoReabertura } from '../../../lib/pedidos';
 import { SITUACAO_NOTA, STATUS_NOTA_INDETERMINADO } from '../../../lib/emissaoFiscal';
 import { arquivosDaNota, faltaArquivoDeNotaAutorizada } from '../../../lib/nfe/arquivos';
-import { signedUrlRecebimento } from '../../../lib/storage';
+import { signedUrlRecebimento, urlLogoEmpresa } from '../../../lib/storage';
 import DanfePrint, { imprimirDanfe } from '../../../components/DanfePrint';
 import { modeloDanfe } from '../../../lib/nfe/danfe';
 
@@ -468,7 +468,7 @@ function Conteudo({ setFicha, setDanfe }) {
       const url = await signedUrlRecebimento(path);
       const resposta = await fetch(url);
       if (!resposta.ok) throw new Error(`não consegui baixar o XML (HTTP ${resposta.status})`);
-      imprimirDanfe(setDanfe, modeloDanfe(await resposta.text()));
+      imprimirDanfe(setDanfe, { ...modeloDanfe(await resposta.text()), logoUrl: urlLogoEmpresa(empresaAtual.logo_path) });
     } catch (err) {
       alert('Não foi possível montar o DANFE: ' + err.message);
     }
