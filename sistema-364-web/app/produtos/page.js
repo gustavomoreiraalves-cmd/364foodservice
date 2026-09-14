@@ -48,7 +48,7 @@ const LIMITES_LARGURA_COLUNAS = {
   custo: [50, 160], venda: [50, 160], margem: [44, 140],
   fiscal: [54, 180], status: [54, 160],
 };
-const TAMANHOS_PAGINA = [25, 50, 100, 200];
+const TAMANHOS_PAGINA = [10, 25, 50, 100, 200];
 const LS_LARGURAS_COLUNAS = 'produtos:colunas:largura';
 const LS_COLUNAS_VISIVEIS = 'produtos:colunas:visiveis';
 const LS_TAMANHO_PAGINA = 'produtos:paginacao:tamanho';

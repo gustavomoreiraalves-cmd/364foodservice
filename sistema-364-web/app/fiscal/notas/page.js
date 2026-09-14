@@ -4,11 +4,12 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
 import ListaCadastro from '../../../components/ListaCadastro';
+import Paginacao from '../../../components/Paginacao';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { fmtMoney, fmtDate } from '../../../lib/format';
 import { totalPedido } from '../../../lib/pedidos';
 import { SITUACAO_NOTA, montarRelatorioNotas } from '../../../lib/emissaoFiscal';
-import { filtrarRegistros } from '../../../lib/listaCadastro';
+import { filtrarRegistros, alternarOrdenacao, ordenarRegistros, paginar } from '../../../lib/listaCadastro';
 import { formatarCnpj } from '../../../lib/cnpj';
 
 const ABAS = [
@@ -37,6 +38,9 @@ function Conteudo() {
   const [busca, setBusca] = useState('');
   const [de, setDe] = useState('');
   const [ate, setAte] = useState('');
+  const [ordenacao, setOrdenacao] = useState({ campo: null, direcao: 'asc' });
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(10);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -90,13 +94,14 @@ function Conteudo() {
     () => filtrarRegistros(daAba, { campos: CAMPOS_BUSCA, busca, mostrarInativos: true }),
     [daAba, busca],
   );
+  useEffect(() => { setPagina(1); }, [busca, de, ate, aba, tamanhoPagina]);
 
   const COLUNAS = [
-    { titulo: 'Data', largura: 92, render: r => fmtDate(r.data), textoPuro: r => fmtDate(r.data) },
-    { titulo: 'Cliente', principal: true, minimo: 200, render: r => r.clienteNome || null, textoPuro: r => r.clienteNome },
+    { titulo: 'Data', id: 'data', valor: r => r.data || '', largura: 92, render: r => fmtDate(r.data), textoPuro: r => fmtDate(r.data) },
+    { titulo: 'Cliente', id: 'clienteNome', valor: r => r.clienteNome || '', principal: true, minimo: 200, render: r => r.clienteNome || null, textoPuro: r => r.clienteNome },
     { titulo: 'CNPJ', largura: 132, mono: true, render: r => (r.clienteDoc ? formatarCnpj(r.clienteDoc) : null), textoPuro: r => r.clienteDoc },
     {
-      titulo: 'Nº Nota', largura: 90, mono: true, alinhamento: 'right',
+      titulo: 'Nº Nota', id: 'numeroNota', valor: r => Number(r.numeroNota) || 0, largura: 90, mono: true, alinhamento: 'right',
       render: r => (r.nota?.numero != null ? `${r.nota.numero}/${r.nota.serie}` : null),
       textoPuro: r => (r.nota?.numero != null ? `${r.nota.numero}/${r.nota.serie}` : ''),
     },
@@ -113,8 +118,11 @@ function Conteudo() {
       render: r => r.nota?.motivo_rejeicao || null,
       textoPuro: r => r.nota?.motivo_rejeicao || '',
     },
-    { titulo: 'Valor', largura: 110, alinhamento: 'right', render: r => fmtMoney(r.valor), textoPuro: r => fmtMoney(r.valor) },
+    { titulo: 'Valor', id: 'valor', valor: r => r.valor || 0, largura: 110, alinhamento: 'right', render: r => fmtMoney(r.valor), textoPuro: r => fmtMoney(r.valor) },
   ];
+
+  const ordenados = ordenarRegistros(visiveis, COLUNAS, ordenacao);
+  const paginacao = paginar(ordenados, pagina, tamanhoPagina);
 
   if (!empresaAtual) return <p className="muted">Carregando empresa…</p>;
   if (loading) return <p className="muted">Carregando…</p>;
@@ -155,11 +163,17 @@ function Conteudo() {
       </div>
 
       <ListaCadastro
-        colunas={COLUNAS} registros={visiveis} onAbrir={r => router.push(`/pedidos/${r.id}`)}
+        colunas={COLUNAS} registros={paginacao.linhas} onAbrir={r => router.push(`/pedidos/${r.id}`)}
         rotulo="Notas fiscais"
+        ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))}
         vazio={busca || de || ate
           ? 'Nenhum pedido encontrado para esse filtro.'
           : (aba === 'pendente' ? 'Nenhum pedido faturado pendente de nota.' : aba === 'erro' ? 'Nenhuma nota com erro.' : 'Nenhuma nota emitida ainda.')} />
+
+      {visiveis.length > 0 && (
+        <Paginacao paginaAtual={paginacao.paginaAtual} totalPaginas={paginacao.totalPaginas}
+                   tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
+      )}
     </section>
   );
 }

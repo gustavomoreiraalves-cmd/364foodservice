@@ -15,6 +15,7 @@ function estiloDaColuna(col) {
 
 export default function ListaCadastro({
   colunas, registros, selecionado, onAbrir, vazio, rotulo = 'Registros',
+  ordenacao, onOrdenar,
 }) {
   if (!registros.length) {
     return <p className="muted" style={{ padding: '18px 0' }}>{vazio}</p>;
@@ -22,12 +23,24 @@ export default function ListaCadastro({
 
   return (
     <div className="registro-lista" role="listbox" aria-label={rotulo}>
-      <div className="registro-cabecalho" aria-hidden="true">
-        {colunas.map(col => (
-          <span key={col.titulo} style={{ ...estiloDaColuna(col), textAlign: col.alinhamento || 'left' }}>
-            {col.titulo}
-          </span>
-        ))}
+      <div className="registro-cabecalho">
+        {colunas.map(col => {
+          const estilo = { ...estiloDaColuna(col), textAlign: col.alinhamento || 'left' };
+          // Só coluna com `id` tem como que `onOrdenar` diga ao pai qual campo
+          // ordenar (o mesmo `id` que `ordenarRegistros` usa pra achar `valor()`).
+          if (!col.id || !onOrdenar) {
+            return <span key={col.titulo} style={estilo} aria-hidden="true">{col.titulo}</span>;
+          }
+          const ativa = ordenacao?.campo === col.id;
+          const seta = ativa ? (ordenacao.direcao === 'asc' ? '▲' : '▼') : '';
+          return (
+            <button key={col.titulo} type="button" className="registro-cabecalho-ordenar"
+                    style={estilo} onClick={() => onOrdenar(col.id)}
+                    aria-label={`Ordenar por ${col.titulo}` + (ativa ? (ordenacao.direcao === 'asc' ? ', crescente' : ', decrescente') : '')}>
+              {col.titulo}{seta && <span aria-hidden="true"> {seta}</span>}
+            </button>
+          );
+        })}
       </div>
 
       {registros.map(r => (

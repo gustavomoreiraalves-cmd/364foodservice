@@ -5,8 +5,11 @@ import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, hoje } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import PedidoForm from '../../components/PedidoForm';
+import ThOrdenar from '../../components/ThOrdenar';
+import Paginacao from '../../components/Paginacao';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { totalPedido, saldoDisponivel } from '../../lib/pedidos';
+import { alternarOrdenacao, ordenarRegistros, paginar } from '../../lib/listaCadastro';
 
 // Transições que a trigger do banco ainda aceita como diretas por aqui — sem
 // motivo, sem passar por /expedicao (atualização 50). Pendente→Separação e
@@ -49,6 +52,11 @@ function Conteudo() {
 
   const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
   const [itens, setItens] = useState([]);
+
+  const [ordenacao, setOrdenacao] = useState({ campo: 'data', direcao: 'desc' });
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(10);
+  useEffect(() => { setPagina(1); }, [tamanhoPagina]);
 
   async function carregar() {
     if (!empresaAtual) return;
@@ -169,6 +177,17 @@ function Conteudo() {
 
   const totalDoPedido = p => totalPedido(p.pedido_itens);
 
+  const COLUNAS_ORDENACAO = [
+    { id: 'data', valor: p => p.data || '' },
+    { id: 'cliente', valor: p => p.clientes?.nome || '' },
+    { id: 'itens', valor: p => (p.pedido_itens || []).length },
+    { id: 'total', valor: p => totalDoPedido(p) },
+    { id: 'status', valor: p => p.status || '' },
+    { id: 'responsavel', valor: p => p.responsavel?.nome || '' },
+  ];
+  const ordenados = ordenarRegistros(pedidos, COLUNAS_ORDENACAO, ordenacao);
+  const paginacao = paginar(ordenados, pagina, tamanhoPagina);
+
   if (loading) return <p className="muted">Carregando…</p>;
 
   if (erroCarregar) {
@@ -213,9 +232,19 @@ function Conteudo() {
         {erroRomaneio && <div className="banner bad">{erroRomaneio}</div>}
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Data</th><th>Cliente</th><th>Itens</th><th>Total</th><th>Status</th><th>Responsável</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <ThOrdenar titulo="Data" campo="data" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <ThOrdenar titulo="Cliente" campo="cliente" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <ThOrdenar titulo="Itens" campo="itens" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <ThOrdenar titulo="Total" campo="total" alinhamento="right" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <ThOrdenar titulo="Status" campo="status" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <ThOrdenar titulo="Responsável" campo="responsavel" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+                <th></th>
+              </tr>
+            </thead>
             <tbody>
-              {pedidos.length ? pedidos.map(p => (
+              {paginacao.linhas.length ? paginacao.linhas.map(p => (
                 <tr key={p.id}>
                   <td>{fmtDate(p.data)}</td>
                   <td>{p.clientes?.nome || '—'}</td>
@@ -264,6 +293,11 @@ function Conteudo() {
             </tbody>
           </table>
         </div>
+
+        {pedidos.length > 0 && (
+          <Paginacao paginaAtual={paginacao.paginaAtual} totalPaginas={paginacao.totalPaginas}
+                     tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
+        )}
       </div>
     </>
   );

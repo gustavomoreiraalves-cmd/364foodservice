@@ -77,10 +77,13 @@ export default function DanfePrint({ danfe }) {
 
         <div className="danfe-cab">
           <div className="danfe-emit">
-            <b>{d.emitente.nome}</b>
-            <div>{endEmit.logradouro}, {endEmit.numero}</div>
-            <div>{endEmit.bairro} — {endEmit.municipio}/{endEmit.uf}</div>
-            <div>CEP {endEmit.cep}{endEmit.fone ? ` — Fone ${endEmit.fone}` : ''}</div>
+            {d.logoUrl && <img className="danfe-emit-logo" src={d.logoUrl} alt="" />}
+            <div className="danfe-emit-texto">
+              <b>{d.emitente.nome}</b>
+              <div>{endEmit.logradouro}, {endEmit.numero}</div>
+              <div>{endEmit.bairro} — {endEmit.municipio}/{endEmit.uf}</div>
+              <div>CEP {endEmit.cep}{endEmit.fone ? ` — Fone ${endEmit.fone}` : ''}</div>
+            </div>
           </div>
           <div className="danfe-titulo">
             <b>DANFE</b>
@@ -151,6 +154,29 @@ export default function DanfePrint({ danfe }) {
           <Campo rot="V. total da nota"><b>{d.totais.vNF}</b></Campo>
         </div>
 
+        <div className="danfe-sec">Transportador / volumes transportados</div>
+        <div className="danfe-linha">
+          <Campo rot="Nome / Razão social" largo>&nbsp;</Campo>
+          <Campo rot="Frete por conta">&nbsp;</Campo>
+          <Campo rot="Código ANTT">&nbsp;</Campo>
+          <Campo rot="Placa">&nbsp;</Campo>
+          <Campo rot="UF">&nbsp;</Campo>
+        </div>
+        <div className="danfe-linha">
+          <Campo rot="Endereço" largo>&nbsp;</Campo>
+          <Campo rot="Município">&nbsp;</Campo>
+          <Campo rot="UF">&nbsp;</Campo>
+          <Campo rot="CNPJ / CPF">&nbsp;</Campo>
+        </div>
+        <div className="danfe-linha">
+          <Campo rot="Quantidade">&nbsp;</Campo>
+          <Campo rot="Espécie">&nbsp;</Campo>
+          <Campo rot="Marca">&nbsp;</Campo>
+          <Campo rot="Numeração">&nbsp;</Campo>
+          <Campo rot="Peso bruto (kg)">&nbsp;</Campo>
+          <Campo rot="Peso líquido (kg)">&nbsp;</Campo>
+        </div>
+
         <div className="danfe-sec">Dados dos produtos / serviços</div>
         <table className="danfe-itens">
           <thead>
@@ -191,10 +217,26 @@ export default function DanfePrint({ danfe }) {
 
 // Mesma mecânica de imprimirFicha: monta o documento, deixa o React pintar,
 // manda imprimir e limpa quando a caixa de impressão fecha.
+//
+// A logo é imagem de fora (CDN do Supabase) — os 150ms que bastam pro React
+// pintar texto e SVG não garantem que ela já baixou. Pré-carrega antes de
+// chamar print() para não sair sem logo na primeira impressão; um teto de
+// 2s evita que uma rede lenta ou a imagem quebrada trave a impressão.
 export function imprimirDanfe(setDanfe, danfe) {
-  setDanfe(danfe);
-  setTimeout(() => {
-    window.addEventListener('afterprint', () => setDanfe(null), { once: true });
-    window.print();
-  }, 150);
+  let chamado = false;
+  const pronto = () => {
+    if (chamado) return;
+    chamado = true;
+    setDanfe(danfe);
+    setTimeout(() => {
+      window.addEventListener('afterprint', () => setDanfe(null), { once: true });
+      window.print();
+    }, 150);
+  };
+  if (!danfe?.logoUrl) { pronto(); return; }
+  const img = new Image();
+  img.onload = pronto;
+  img.onerror = pronto;
+  img.src = danfe.logoUrl;
+  setTimeout(pronto, 2000);
 }
