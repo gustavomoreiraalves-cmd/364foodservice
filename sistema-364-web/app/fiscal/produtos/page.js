@@ -2,10 +2,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import AppShell from '../../../components/AppShell';
+import ThOrdenar from '../../../components/ThOrdenar';
+import Paginacao from '../../../components/Paginacao';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import {
   situacaoFiscalProduto, camposCopiaFiscal, CAMPOS_COPIA_FISCAL, gruposComRegra,
 } from '../../../lib/fiscal';
+import { alternarOrdenacao, ordenarRegistros, paginar } from '../../../lib/listaCadastro';
 
 // Quais produtos ainda não conseguem emitir nota — pergunta que não tinha
 // resposta em tela nenhuma, e que é o impedimento atual da linha Food Service.
@@ -30,6 +33,10 @@ function Conteudo() {
   const [destinos, setDestinos] = useState([]);
   const [aplicando, setAplicando] = useState(false);
   const [resultado, setResultado] = useState(null);
+  const [ordenacao, setOrdenacao] = useState({ campo: 'codigo', direcao: 'asc' });
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(10);
+  useEffect(() => { setPagina(1); }, [tamanhoPagina]);
 
   useEffect(() => { if (empresaAtual?.id) carregar(); /* eslint-disable-next-line */ }, [empresaAtual?.id]);
 
@@ -94,6 +101,16 @@ function Conteudo() {
 
   const pendentes = linhas.filter(l => l.pendencias.length > 0 || l.grupoSemRegra || !l.ativo_fiscal).length;
 
+  const COLUNAS_ORDENACAO = [
+    { id: 'codigo', valor: l => l.codigo || '' },
+    { id: 'nome', valor: l => l.nome || '' },
+    { id: 'ncm', valor: l => l.ncm || '' },
+    { id: 'cest', valor: l => l.cest || '' },
+    { id: 'grupo', valor: l => l.grupoCodigo || '' },
+  ];
+  const ordenadas = ordenarRegistros(linhas, COLUNAS_ORDENACAO, ordenacao);
+  const paginacao = paginar(ordenadas, pagina, tamanhoPagina);
+
   return (
     <>
       <p className="muted" style={{ marginTop: 0 }}>
@@ -103,12 +120,17 @@ function Conteudo() {
       <table className="tabela">
         <thead>
           <tr>
-            <th></th><th>Código</th><th>Produto</th><th>NCM</th><th>CEST</th>
-            <th>Grupo</th><th>Situação</th>
+            <th></th>
+            <ThOrdenar titulo="Código" campo="codigo" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+            <ThOrdenar titulo="Produto" campo="nome" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+            <ThOrdenar titulo="NCM" campo="ncm" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+            <ThOrdenar titulo="CEST" campo="cest" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+            <ThOrdenar titulo="Grupo" campo="grupo" ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))} />
+            <th>Situação</th>
           </tr>
         </thead>
         <tbody>
-          {linhas.map(l => (
+          {paginacao.linhas.map(l => (
             <tr key={l.id}>
               <td>
                 <input type="checkbox" checked={destinos.includes(l.id)}
@@ -142,6 +164,11 @@ function Conteudo() {
           ))}
         </tbody>
       </table>
+
+      {linhas.length > 0 && (
+        <Paginacao paginaAtual={paginacao.paginaAtual} totalPaginas={paginacao.totalPaginas}
+                   tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
+      )}
 
       <h3 style={{ marginTop: 24 }}>Copiar configuração fiscal</h3>
       <div className="form-grid">

@@ -4,11 +4,12 @@ import { supabase } from '../../lib/supabase';
 import AppShell from '../../components/AppShell';
 import Icone from '../../components/Icone';
 import ListaCadastro from '../../components/ListaCadastro';
+import Paginacao from '../../components/Paginacao';
 import FichaModal from '../../components/FichaModal';
 import FichaParceiro from '../../components/FichaParceiro';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { camposDoFormulario } from '../../lib/cadastro';
-import { filtrarRegistros } from '../../lib/listaCadastro';
+import { filtrarRegistros, alternarOrdenacao, ordenarRegistros, paginar } from '../../lib/listaCadastro';
 import { pendenciasFiscaisCliente, soDigitos } from '../../lib/fiscal';
 import { montarListaParceiros, salvarParceiro, excluirParceiro, alternarAtivoParceiro } from '../../lib/parceiro';
 import { formatarCnpj } from '../../lib/cnpj';
@@ -47,6 +48,9 @@ function Conteudo() {
   const [busca, setBusca] = useState('');
   const [mostrarInativos, setMostrarInativos] = useState(false);
   const [fiscalDisponivel, setFiscalDisponivel] = useState(true);
+  const [ordenacao, setOrdenacao] = useState({ campo: null, direcao: 'asc' });
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(10);
 
   const [selecionadoId, setSelecionadoId] = useState(null);
   const [criando, setCriando] = useState(false);
@@ -79,6 +83,7 @@ function Conteudo() {
     () => filtrarRegistros(listaParceiros, { campos: CAMPOS_BUSCA, busca, mostrarInativos }),
     [listaParceiros, busca, mostrarInativos],
   );
+  useEffect(() => { setPagina(1); }, [busca, mostrarInativos, tamanhoPagina]);
   const selecionado = selecionadoId ? listaParceiros.find(p => p.id === selecionadoId) ?? null : null;
   const pendencias = fiscalDisponivel && papeis.includes('cliente') ? pendenciasFiscaisCliente(form) : [];
   const aberto = criando || !!selecionado;
@@ -171,7 +176,7 @@ function Conteudo() {
   }
 
   const COLUNAS = [
-    { titulo: 'Nome', principal: true, minimo: 200, render: p => p.nome_fantasia || p.nome, textoPuro: p => p.nome_fantasia || p.nome },
+    { titulo: 'Nome', id: 'nome', valor: p => p.nome_fantasia || p.nome, principal: true, minimo: 200, render: p => p.nome_fantasia || p.nome, textoPuro: p => p.nome_fantasia || p.nome },
     {
       titulo: 'Papel', largura: 150,
       render: p => (
@@ -186,8 +191,8 @@ function Conteudo() {
       titulo: 'CNPJ / CPF', largura: 132, mono: true,
       render: p => docFormatado(p) || null, textoPuro: p => docFormatado(p),
     },
-    { titulo: 'Município', largura: 130, render: p => (p.municipio ? `${p.municipio}/${p.uf || ''}` : null), textoPuro: p => p.municipio || '' },
-    { titulo: 'Contato', largura: 140, render: p => p.contato || null, textoPuro: p => p.contato || '' },
+    { titulo: 'Município', id: 'municipio', valor: p => p.municipio || '', largura: 130, render: p => (p.municipio ? `${p.municipio}/${p.uf || ''}` : null), textoPuro: p => p.municipio || '' },
+    { titulo: 'Contato', id: 'contato', valor: p => p.contato || '', largura: 140, render: p => p.contato || null, textoPuro: p => p.contato || '' },
     {
       titulo: 'Telefone', largura: 118, mono: true,
       render: p => (p.telefone ? formatarTelefone(p.telefone) : null),
@@ -202,6 +207,9 @@ function Conteudo() {
       textoPuro: p => (!p.papeis.includes('cliente') ? '' : pendenciasFiscaisCliente(p.cliente).length ? 'faltam dados para emitir' : 'pronto para emitir'),
     },
   ];
+
+  const ordenados = ordenarRegistros(visiveis, COLUNAS, ordenacao);
+  const paginacao = paginar(ordenados, pagina, tamanhoPagina);
 
   if (loading) return <p className="muted">Carregando…</p>;
 
@@ -230,9 +238,15 @@ function Conteudo() {
         </div>
 
         <ListaCadastro
-          colunas={COLUNAS} registros={visiveis} selecionado={selecionado?.id} onAbrir={abrir}
+          colunas={COLUNAS} registros={paginacao.linhas} selecionado={selecionado?.id} onAbrir={abrir}
           rotulo="Clientes/Fornecedores"
+          ordenacao={ordenacao} onOrdenar={campo => setOrdenacao(o => alternarOrdenacao(o, campo))}
           vazio={busca ? 'Nenhum parceiro encontrado para essa busca.' : 'Nenhum cliente ou fornecedor cadastrado ainda.'} />
+
+        {visiveis.length > 0 && (
+          <Paginacao paginaAtual={paginacao.paginaAtual} totalPaginas={paginacao.totalPaginas}
+                     tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
+        )}
       </section>
 
       {aberto && (

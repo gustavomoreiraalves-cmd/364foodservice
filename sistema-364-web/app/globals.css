@@ -303,6 +303,12 @@ th{
   font-size:10.5px; font-weight:600; padding:8px 10px; border-bottom:1px solid var(--seam); background:var(--sunken);
 }
 td{padding:7px 10px; border-bottom:1px solid var(--seam);}
+.th-ordenar{
+  border:0; background:none; padding:0; margin:0; cursor:pointer; width:100%;
+  font:inherit; color:inherit; text-transform:inherit; letter-spacing:inherit; text-align:inherit;
+  display:inline-flex; align-items:center; gap:3px;
+}
+.th-ordenar:hover{color:var(--ink);}
 tbody tr:hover td{background:var(--sunken);}
 .empty-row td{color:var(--ink-muted); text-align:center; padding:26px;}
 .tag{
@@ -350,6 +356,12 @@ tbody tr:hover td{background:var(--sunken);}
 .registro-cabecalho .valores{display:flex; gap:10px; flex:none;}
 .registro-cabecalho .valores span{width:62px; text-align:right; flex:none;}
 .registro-cabecalho .valores span:last-child{width:40px;}
+.registro-cabecalho-ordenar{
+  border:0; background:none; padding:0; margin:0; cursor:pointer;
+  font:inherit; color:inherit; text-transform:inherit; letter-spacing:inherit;
+  display:inline-flex; align-items:center; gap:3px;
+}
+.registro-cabecalho-ordenar:hover{color:var(--ink);}
 .registro{
   display:flex; align-items:center; gap:8px; width:100%; text-align:left;
   padding:11px 14px; border:0; border-bottom:1px solid var(--seam); background:var(--panel);
@@ -519,7 +531,8 @@ tbody tr:hover td{background:var(--sunken);}
    Documento que acompanha a mercadoria. Moldura preta fina e fonte pequena
    porque tudo tem de caber numa folha A4 — é a mesma densidade do DANFE que
    qualquer emissor imprime. Só aparece na impressão, dentro de .print-area. */
-.danfe{font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#000; position:relative;}
+.danfe{font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#000; position:relative;
+  display:flex; flex-direction:column; min-height:277mm;}
 .danfe-canhoto,.danfe-cab,.danfe-linha{display:flex; border:1px solid #000; margin-bottom:2px;}
 .danfe-canhoto>*,.danfe-cab>*,.danfe-linha>*{border-right:1px solid #000; padding:2px 4px; flex:1; min-width:0;}
 .danfe-canhoto>*:last-child,.danfe-cab>*:last-child,.danfe-linha>*:last-child{border-right:0;}
@@ -528,7 +541,9 @@ tbody tr:hover td{background:var(--sunken);}
 .danfe-canhoto-texto{font-size:6.5pt;}
 .danfe-canhoto-assin{display:flex; gap:12px; margin-top:14px; font-size:6pt; text-transform:uppercase;}
 .danfe-canhoto-nf{text-align:center; font-size:8pt;}
-.danfe-emit{flex:2 !important;}
+.danfe-emit{flex:2 !important; display:flex; align-items:center; gap:6px;}
+.danfe-emit-logo{height:44px; width:44px; object-fit:contain; flex-shrink:0;}
+.danfe-emit-texto b{font-size:11pt;}
 .danfe-titulo{text-align:center; font-size:7pt;}
 .danfe-titulo b{font-size:13pt; letter-spacing:.05em;}
 .danfe-es{display:flex; gap:6px; justify-content:center; align-items:center; font-size:6pt; margin:2px 0;}
@@ -543,7 +558,7 @@ tbody tr:hover td{background:var(--sunken);}
 .danfe-itens th{font-size:5.5pt; text-transform:uppercase;}
 .danfe-itens .num{text-align:right;}
 .danfe-item-inf{font-size:5.5pt; font-style:italic; color:#333;}
-.danfe-adic{border:1px solid #000; min-height:60px; padding:3px 4px; font-size:6.5pt;}
+.danfe-adic{border:1px solid #000; flex:1 1 auto; min-height:60px; padding:3px 4px; font-size:6.5pt;}
 /* Marca d'água de homologação: atravessa a página inteira para não haver
    chance de ser lida como conteúdo da nota. */
 .danfe-marca{position:absolute; top:38%; left:0; right:0; text-align:center;
