@@ -231,16 +231,6 @@ function resolverItem({ pedidoItem, produto, regra }, indice, { parametroSimples
   const pPIS = Number(regra.aliquota_pis || 0);
   const pCOFINS = Number(regra.aliquota_cofins || 0);
 
-  // Frase do art. 23 da LC 123/2006 por item (não no rodapé da nota): cada
-  // item com CSOSN 101 tem seu próprio pCredSN/vCredICMSSN, e uma nota pode
-  // ter itens com e sem direito ao crédito — texto no rodapé sozinho não diz
-  // qual item ele descreve. Mesmo padrão já usado para ST (comentário abaixo,
-  // no infAdProd).
-  const textoCredito = credito
-    ? `Permite aproveitamento de crédito de ICMS no valor de R$ ${credito.vCredICMSSN.toFixed(2)} `
-      + `(${credito.pCredSN.toFixed(4)}%), nos termos do art. 23 da LC 123/2006.`
-    : undefined;
-
   return {
     numeroItem: indice + 1,
     pedidoItemId: pedidoItem.id,
@@ -275,10 +265,14 @@ function resolverItem({ pedidoItem, produto, regra }, indice, { parametroSimples
     // Informação adicional POR ITEM. Nota com ST retido que não diz no item de
     // onde vem a retenção gera questionamento fiscal e cliente sem como se
     // creditar. O rodapé (infCpl) é da nota inteira e não serve para isso.
+    //
+    // O crédito do Simples (art. 23 da LC 123/2006) NÃO entra aqui — vai
+    // resumido no infCpl (ver resolverNota), com o total da nota. pCredSN e
+    // vCredICMSSN abaixo continuam por item porque o leiaute exige (grupo
+    // ICMSSN101 do XML, ver montarXml.js): a SEFAZ valida os números
+    // estruturados, não a frase — o texto é convenção contábil, não exigência.
     infAdProd: normalizarTexto(
-      [juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal), textoCredito]
-        .filter(v => v !== undefined && v !== null && v !== '')
-        .join(' - ') || undefined,
+      juntarTextoFiscal(regra.base_legal, regra.observacao_fiscal) || undefined,
       LIMITE_INF_AD_PROD,
       `informação adicional do item "${nome}" (infAdProd)`,
     ),
@@ -387,13 +381,26 @@ export function resolverNota({
   const resolvidos = itens.map((it, indice) => resolverItem(it, indice, { parametroSimples }));
   const vProd = duasCasas(resolvidos.reduce((s, i) => s + i.vProd, 0));
 
+  // Crédito do Simples (art. 23 da LC 123/2006): a SEFAZ só exige os campos
+  // numéricos por item (pCredSN/vCredICMSSN, no grupo ICMSSN101 do XML — ver
+  // montarXml.js). A frase para o comprador é convenção contábil, e escrita
+  // aqui somada pra nota inteira, não por item: o pCredSN é o mesmo em toda a
+  // nota (vem do RBT12 da competência, não do item), então uma nota com mais
+  // de um item com CSOSN 101 teria a mesma frase repetida em cada um.
+  const totalCreditoSN = duasCasas(resolvidos.reduce((s, i) => s + (i.vCredICMSSN || 0), 0));
+  const pCredSN = resolvidos.find(i => i.pCredSN)?.pCredSN;
+  const textoCredito = totalCreditoSN > 0
+    ? `Permite aproveitamento de crédito de ICMS no valor de R$ ${totalCreditoSN.toFixed(2)} `
+      + `(${pCredSN.toFixed(4)}%), nos termos do art. 23 da LC 123/2006.`
+    : undefined;
+
   // infCpl junta o texto padrão do emitente (informacoesComplementaresPadrao,
-  // vindo de uma textarea em /fiscal/emissor) com as observações do pedido —
-  // as duas fontes livres de texto que alimentam este campo. A junção
-  // acontece aqui, não no serializador, porque a normalização (sem quebra de
-  // linha, dentro do limite de 5000 caracteres) tem que rodar antes de
-  // reservar_numero_fiscal.
-  const infCplBruto = [emitente.informacoesComplementaresPadrao, pedido.observacoes]
+  // vindo de uma textarea em /fiscal/emissor), as observações do pedido e o
+  // crédito do Simples acima — as fontes de texto livre que alimentam este
+  // campo. A junção acontece aqui, não no serializador, porque a normalização
+  // (sem quebra de linha, dentro do limite de 5000 caracteres) tem que rodar
+  // antes de reservar_numero_fiscal.
+  const infCplBruto = [emitente.informacoesComplementaresPadrao, pedido.observacoes, textoCredito]
     .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
     .join(' | ');
   const infCpl = infCplBruto ? normalizarTexto(infCplBruto, 5000, 'infCpl (informações complementares)') : undefined;

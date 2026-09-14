@@ -200,10 +200,15 @@ test('xNome do destinatário maior que 60 caracteres é recusado', () => {
   );
 });
 
+// csosn '102' nos dois testes abaixo: ITEM usa '101' por padrão neste
+// arquivo, e o crédito do Simples (art. 23 da LC 123/2006) some no infCpl —
+// aqui o que se testa é a composição do texto padrão do emitente com as
+// observações do pedido, não o crédito, que tem seus próprios testes abaixo.
 test('infCpl junta o texto padrão do emitente com as observações do pedido, sem quebra de linha', () => {
   const emitenteComTexto = { ...EMITENTE, informacoesComplementaresPadrao: 'Texto padrão\nem duas linhas' };
   const nota = resolverNota({
     ...ENTRADA,
+    itens: [{ ...ITEM, regra: { ...ITEM.regra, csosn: '102' } }],
     pedido: { ...PEDIDO, observacoes: '  observação   com espaço  ' },
     emitente: emitenteComTexto,
   });
@@ -211,7 +216,11 @@ test('infCpl junta o texto padrão do emitente com as observações do pedido, s
 });
 
 test('infCpl fica undefined quando emitente e pedido não têm nada a dizer', () => {
-  const nota = resolverNota({ ...ENTRADA, pedido: { ...PEDIDO, observacoes: null } });
+  const nota = resolverNota({
+    ...ENTRADA,
+    itens: [{ ...ITEM, regra: { ...ITEM.regra, csosn: '102' } }],
+    pedido: { ...PEDIDO, observacoes: null },
+  });
   assert.equal(nota.ide.infCpl, undefined);
 });
 
@@ -281,9 +290,20 @@ test('CSOSN 101 calcula pCredSN e vCredICMSSN a partir do parâmetro da competê
   assert.equal(nota.itens[0].vCredICMSSN, 3.72); // 255.00 * 1.46%
 });
 
-test('CSOSN 101 escreve a frase do art. 23 da LC 123/2006 no infAdProd do item', () => {
-  const infAdProd = resolverNota(ENTRADA).itens[0].infAdProd;
-  assert.match(infAdProd, /cr[ée]dito de ICMS.*R\$ 3\.72.*1\.4600%.*art\. 23 da LC 123\/2006/is);
+test('CSOSN 101 escreve a frase do art. 23 da LC 123/2006 no infCpl da nota, somada, não no infAdProd do item', () => {
+  const nota = resolverNota(ENTRADA);
+  assert.match(nota.ide.infCpl, /cr[ée]dito de ICMS.*R\$ 3\.72.*1\.4600%.*art\. 23 da LC 123\/2006/is);
+  assert.equal(nota.itens[0].infAdProd, undefined,
+    'a frase do crédito não é por item — só os campos numéricos (pCredSN/vCredICMSSN) continuam por item');
+});
+
+test('CSOSN 101 com dois itens soma o crédito de ambos numa frase só no infCpl', () => {
+  const nota = resolverNota({
+    ...ENTRADA,
+    itens: [ITEM, { ...ITEM, pedidoItem: { ...ITEM.pedidoItem, id: 'i2', quantidade: 4, preco_unitario: 24.9 } }],
+  });
+  // item 1: 255,00 * 1,46% = 3,72 — item 2: 99,60 * 1,46% = 1,45 — soma 5,17
+  assert.match(nota.ide.infCpl, /R\$ 5\.17/);
 });
 
 test('CSOSN 101 sem parâmetro do Simples cadastrado para a competência aborta antes de reservar número', () => {
