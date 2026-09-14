@@ -22,22 +22,30 @@ export async function carregarModelos() {
     faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
     faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
   ]);
+  // aquece os shaders WebGL num frame descartável, pra tirar esse pico de
+  // latência (bem maior que os seguintes) de dentro do fluxo real de reconhecimento
+  const aquecimento = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+  if (aquecimento) {
+    aquecimento.width = 1; aquecimento.height = 1;
+    await faceapi.detectSingleFace(aquecimento, OPCOES()).withFaceLandmarks().withFaceDescriptor().catch(() => {});
+  }
   carregado = true;
   return faceapi;
 }
 
-const OPCOES = () => new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+const OPCOES = () => new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
 
 // Detecta 1 rosto com landmarks (sem descritor — rápido, para o loop de vídeo).
-export async function detectarComLandmarks(video) {
-  const det = await faceapi.detectAllFaces(video, OPCOES()).withFaceLandmarks();
+// `fonte` é o <video> ou <canvas> entregue pelo CameraCapture (zoom nativo ou digital).
+export async function detectarComLandmarks(fonte) {
+  const det = await faceapi.detectAllFaces(fonte, OPCOES()).withFaceLandmarks();
   return det; // array; chamador valida length === 1
 }
 
 // Extrai o descritor 128-d do rosto (mais pesado — usar só no momento certo).
-export async function extrairDescritor(video) {
+export async function extrairDescritor(fonte) {
   const det = await faceapi
-    .detectSingleFace(video, OPCOES())
+    .detectSingleFace(fonte, OPCOES())
     .withFaceLandmarks()
     .withFaceDescriptor();
   if (!det) return null;

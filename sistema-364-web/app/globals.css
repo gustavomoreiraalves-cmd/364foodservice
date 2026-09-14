@@ -617,7 +617,7 @@ tbody tr:hover td{background:var(--sunken);}
   position:relative; width:min(92vw,460px); aspect-ratio:3/4; border-radius:var(--radius-lg);
   overflow:hidden; border:1px solid var(--seam-strong); background:#000;
 }
-.quiosque .qk-video-wrap video{width:100%; height:100%; object-fit:cover; transform:scaleX(-1);}
+.quiosque .qk-video-wrap video, .quiosque .qk-video-wrap canvas{width:100%; height:100%; object-fit:cover; transform:scaleX(-1);}
 .quiosque .qk-instrucao{font-size:18px; color:var(--ink); min-height:26px;}
 .quiosque .qk-confirma{background:var(--panel); border:1px solid var(--seam); border-radius:var(--radius-lg); padding:26px 34px; max-width:460px;}
 .quiosque .qk-confirma .nome{font-size:28px; font-weight:600; color:var(--ink); margin-bottom:4px;}
