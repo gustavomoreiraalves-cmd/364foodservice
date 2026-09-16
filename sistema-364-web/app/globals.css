@@ -531,8 +531,14 @@ tbody tr:hover td{background:var(--sunken);}
    Documento que acompanha a mercadoria. Moldura preta fina e fonte pequena
    porque tudo tem de caber numa folha A4 — é a mesma densidade do DANFE que
    qualquer emissor imprime. Só aparece na impressão, dentro de .print-area. */
+/* min-height fica bem abaixo dos 285mm úteis da A4 (297mm - 2x6mm de @page)
+   de propósito: uma nota com XML mais imprevisível, uma impressora que
+   ignora o @page e aplica margem própria, ou só a variação normal de fonte
+   entre máquinas some com a folga rápido — foi o que fez uma nota real
+   vazar pra uma página 2 em branco. Preferimos rodapé um pouco mais alto na
+   folha a arriscar imprimir/anexar um PDF de duas páginas por causa disso. */
 .danfe{font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#000; position:relative;
-  display:flex; flex-direction:column; min-height:277mm;}
+  display:flex; flex-direction:column; min-height:250mm;}
 .danfe-canhoto,.danfe-cab,.danfe-linha{display:flex; border:1px solid #000; margin-bottom:2px;}
 .danfe-canhoto>*,.danfe-cab>*,.danfe-linha>*{border-right:1px solid #000; padding:2px 4px; flex:1; min-width:0;}
 .danfe-canhoto>*:last-child,.danfe-cab>*:last-child,.danfe-linha>*:last-child{border-right:0;}
