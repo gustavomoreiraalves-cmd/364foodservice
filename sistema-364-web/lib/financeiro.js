@@ -42,7 +42,10 @@ export function agruparPorCategoria(itens) {
     if (!item?.categoria_conta) continue;
     const valor = Number(item.quantidade) * Number(item.custo_unitario);
     if (!valor) continue;
-    totais[item.categoria_conta] = Math.round(((totais[item.categoria_conta] || 0) + valor) * 100) / 100;
+    totais[item.categoria_conta] = (totais[item.categoria_conta] || 0) + valor;
+  }
+  for (const categoria of Object.keys(totais)) {
+    totais[categoria] = Math.round(totais[categoria] * 100) / 100;
   }
   return totais;
 }
