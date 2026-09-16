@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ordenarFefo, sugerirAlocacao, empacotarCaixas, calcularDivergencia, calcularVolumesNfe, proximoNumeroExpedicao } from '../lib/expedicao.js';
+import { ordenarFefo, sugerirAlocacao, empacotarCaixas, calcularDivergencia, calcularVolumesNfe, proximoNumeroExpedicao, loteAcimaDoSaldo } from '../lib/expedicao.js';
 
 test('ordenarFefo: lote que vence primeiro vem primeiro', () => {
   const lotes = [
@@ -142,6 +142,37 @@ test('calcularVolumesNfe: conta as caixas como volumes, sem peso (não capturado
 
 test('calcularVolumesNfe: nenhuma caixa devolve null (nada a declarar)', () => {
   assert.equal(calcularVolumesNfe([]), null);
+});
+
+test('loteAcimaDoSaldo: par dentro do saldo não aparece', () => {
+  const paresAlocados = [{ produtoId: 'p1', embalagemId: 'emb_a' }];
+  const saldos = [{ produto_id: 'p1', embalagem_id: 'emb_a', saldo: 5 }];
+  assert.deepEqual(loteAcimaDoSaldo(paresAlocados, saldos), []);
+});
+
+test('loteAcimaDoSaldo: saldo negativo (alocado maior que o embalado) aparece', () => {
+  const paresAlocados = [{ produtoId: 'p1', embalagemId: 'emb_a' }];
+  // saldo já vem negativo da view (total_embalado - total_expedido, que já
+  // inclui as próprias linhas deste romaneio) quando a alocação estourou.
+  const saldos = [{ produto_id: 'p1', embalagem_id: 'emb_a', saldo: -15 }];
+  assert.deepEqual(loteAcimaDoSaldo(paresAlocados, saldos), [{ produtoId: 'p1', embalagemId: 'emb_a' }]);
+});
+
+test('loteAcimaDoSaldo: par sem nenhuma linha na view (lote cancelado/sumido) aparece', () => {
+  const paresAlocados = [{ produtoId: 'p1', embalagemId: 'emb_a' }];
+  assert.deepEqual(loteAcimaDoSaldo(paresAlocados, []), [{ produtoId: 'p1', embalagemId: 'emb_a' }]);
+});
+
+test('loteAcimaDoSaldo: só reporta os pares que realmente estouraram', () => {
+  const paresAlocados = [
+    { produtoId: 'p1', embalagemId: 'emb_a' },
+    { produtoId: 'p1', embalagemId: 'emb_b' },
+  ];
+  const saldos = [
+    { produto_id: 'p1', embalagem_id: 'emb_a', saldo: 3 },
+    { produto_id: 'p1', embalagem_id: 'emb_b', saldo: -1 },
+  ];
+  assert.deepEqual(loteAcimaDoSaldo(paresAlocados, saldos), [{ produtoId: 'p1', embalagemId: 'emb_b' }]);
 });
 
 test('proximoNumeroExpedicao: primeiro romaneio do dia começa em 001', async () => {

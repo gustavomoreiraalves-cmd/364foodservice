@@ -100,6 +100,33 @@ export function calcularDivergencia(pedidoItens, alocacao) {
   return divergencias;
 }
 
+// Confere se algum par produto+embalagem alocado neste romaneio estourou o
+// saldo real do lote (achado Importante da revisão final de 16/09: a seção
+// "Alocação por produto" deixa o operador digitar qualquer quantidade contra
+// qualquer lote, sem checagem — sugerirAlocacao sempre limitava a
+// min(saldo, restante), mas a edição manual não passa mais por ali).
+//
+// Não soma quantidade aqui: `saldos` já vem de vw_estoque_produto_lote, cujo
+// `saldo` é total_embalado − total_expedido, e total_expedido já inclui as
+// PRÓPRIAS linhas deste romaneio (é uma expedição com status ≠ 'cancelado',
+// exatamente o filtro da view) — então saldo < 0 já significa "o que foi
+// alocado (neste romaneio e/ou em outro concorrente) passou do que existe".
+// Um par sem saldo nenhum na view (lote não encontrado — embalagem cancelada
+// depois da alocação, achado 2) também bloqueia: `saldoPorChave.get` devolve
+// undefined, e `!(undefined >= 0)` é true.
+//
+// `paresAlocados`: [{ produtoId, embalagemId }] únicos, embalagemId != null,
+//   referenciados pelas caixas deste romaneio.
+// `saldos`: [{ produto_id, embalagem_id, saldo }] de vw_estoque_produto_lote,
+//   já filtrada pela empresa e pelos embalagem_id de paresAlocados.
+export function loteAcimaDoSaldo(paresAlocados, saldos) {
+  const saldoPorChave = new Map((saldos || []).map(s => [`${s.produto_id}::${s.embalagem_id}`, Number(s.saldo)]));
+  return (paresAlocados || []).filter(p => {
+    const saldo = saldoPorChave.get(`${p.produtoId}::${p.embalagemId}`);
+    return !(saldo >= 0);
+  });
+}
+
 // Grupo `vol` da NF-e (transp/vol) — sempre derivado das caixas do romaneio,
 // nunca redigitado (spec de 10/09). null quando não há caixa nenhuma (não
 // deveria acontecer: romaneio só finaliza com o pedido inteiro alocado).

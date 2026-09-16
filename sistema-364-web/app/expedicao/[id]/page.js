@@ -6,6 +6,7 @@ import AppShell from '../../../components/AppShell';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../../../lib/expedicao';
 import { medidasImpressao, urlRastreio } from '../../../lib/etiquetas';
+import { fmtDate } from '../../../lib/format';
 import { qrSvg } from '../../../lib/qr';
 import EtiquetaDespachoPrint, { imprimirEtiquetaDespacho } from '../../../components/EtiquetaDespachoPrint';
 
@@ -157,12 +158,49 @@ function Conteudo() {
   // alocação, que só carrega pedidoItemId.
   const produtoIdPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id]));
 
+  // Lote/fabricação por embalagem_id vindo do embed de `caixasSalvas`
+  // (`expedicao_itens(*, embalagens(lote, data))`, carregado em carregar()) —
+  // esse embed é um join simples por FK, sem o `status = 'finalizada'` que
+  // `vw_estoque_produto_lote` exige. Serve de fallback quando uma embalagem
+  // referenciada por um rascunho salvo some da view (status mudou depois da
+  // alocação) — ver comentário de `opcoesLoteComExtras`, abaixo.
+  const loteInfoPorEmbalagemId = Object.fromEntries(
+    caixasSalvas.flatMap(c => (c.expedicao_itens || [])
+      .filter(i => i.embalagem_id)
+      .map(i => [i.embalagem_id, { lote: i.embalagens?.lote || null, fabricacao: i.embalagens?.data || null }]))
+  );
+
   // Rótulo do lote pra exibição (código de embalagens.lote, não o uuid) —
   // usado tanto na seção de alocação quanto no resumo de "Caixas", abaixo.
   function labelLote(produtoId, embalagemId) {
     if (!embalagemId) return 'sem lote';
     const encontrado = (lotesPorProduto[produtoId] || []).find(l => l.embalagemId === embalagemId);
-    return encontrado?.lote || embalagemId;
+    if (encontrado) return encontrado.lote;
+    return loteInfoPorEmbalagemId[embalagemId]?.lote || embalagemId;
+  }
+
+  // Opções do select de lote pra um item do pedido: a lista "viva" de
+  // lotesPorProduto (Task 1, filtrada por status='finalizada' na view) mais
+  // — achado 2 da revisão final — qualquer embalagemId já selecionado em uma
+  // linha deste item que não esteja mais nessa lista (embalagem cancelada
+  // depois que o rascunho já alocou contra ela). Mesmo padrão de
+  // PedidoForm.js (`.filter(c => c.ativo !== false || c.id === ...)`) pra
+  // não deixar o select em branco e a linha de "Caixas" caindo pro uuid cru.
+  function opcoesLoteComExtras(opcoesLote, linhasItem) {
+    const idsExistentes = new Set(opcoesLote.map(l => l.embalagemId));
+    const extras = [];
+    for (const linha of linhasItem) {
+      if (linha.embalagemId && !idsExistentes.has(linha.embalagemId) && !extras.some(e => e.embalagemId === linha.embalagemId)) {
+        const info = loteInfoPorEmbalagemId[linha.embalagemId];
+        extras.push({
+          embalagemId: linha.embalagemId,
+          lote: `${info?.lote || linha.embalagemId} (lote removido?)`,
+          validade: null,
+          saldo: null,
+        });
+      }
+    }
+    return extras.length ? [...opcoesLote, ...extras] : opcoesLote;
   }
 
   function atualizarLinhaAlocacao(indice, campo, valor) {
@@ -386,31 +424,42 @@ function Conteudo() {
         const totalAlocado = linhas.reduce((s, a) => s + Number(a.quantidade || 0), 0);
         const totalPedido = Number(item.quantidade);
         const opcoesLote = lotesPorProduto[item.produto_id] || [];
+        const opcoesLoteExibidas = opcoesLoteComExtras(opcoesLote, linhas);
         return (
           <div key={item.id} style={{ borderBottom: '1px solid var(--linha)', padding: '6px 0' }}>
             <strong>{item.produto?.nome}</strong> — pedido {totalPedido}, alocado {totalAlocado}
             {totalAlocado !== totalPedido && (
               <span className="tag warn" style={{ marginLeft: 8 }}>diferente do pedido</span>
             )}
-            {linhas.map(a => (
-              <div key={a.idx} className="row-actions" style={{ marginTop: 4 }}>
-                <select disabled={somenteLeitura} value={a.embalagemId || ''}
-                  onChange={e => atualizarLinhaAlocacao(a.idx, 'embalagemId', e.target.value || null)}>
-                  <option value="">Sem lote</option>
-                  {opcoesLote.map(l => (
-                    <option key={l.embalagemId} value={l.embalagemId}>
-                      {l.lote}{l.validade ? ` — val. ${l.validade}` : ''} — saldo {l.saldo}
-                    </option>
-                  ))}
-                </select>
-                <input type="number" min="0" step="0.001" style={{ width: 90 }} disabled={somenteLeitura}
-                  value={a.quantidade}
-                  onChange={e => atualizarLinhaAlocacao(a.idx, 'quantidade', Number(e.target.value))} />
-                {!somenteLeitura && (
-                  <button className="btn danger small" type="button" onClick={() => removerLinhaAlocacao(a.idx)}>×</button>
-                )}
-              </div>
-            ))}
+            {linhas.map(a => {
+              // Saldo real do lote selecionado (não a lista com extras
+              // injetados de opcoesLoteComExtras — um lote "removido" tem
+              // saldo null ali, e a quantidade digitada não deveria ser
+              // comparada contra isso). Mesmo alerta de PedidoForm.js
+              // (excedeSaldo/"acima do saldo") pro caso equivalente.
+              const loteReal = a.embalagemId ? opcoesLote.find(l => l.embalagemId === a.embalagemId) : null;
+              const acimaDoSaldo = !!loteReal && Number(a.quantidade || 0) > Number(loteReal.saldo);
+              return (
+                <div key={a.idx} className="row-actions" style={{ marginTop: 4 }}>
+                  <select disabled={somenteLeitura} value={a.embalagemId || ''}
+                    onChange={e => atualizarLinhaAlocacao(a.idx, 'embalagemId', e.target.value || null)}>
+                    <option value="">Sem lote</option>
+                    {opcoesLoteExibidas.map(l => (
+                      <option key={l.embalagemId} value={l.embalagemId}>
+                        {l.lote}{l.validade ? ` — val. ${fmtDate(l.validade)}` : ''}{l.saldo != null ? ` — saldo ${l.saldo}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="number" min="0" max={totalPedido} step="0.001" style={{ width: 90 }} disabled={somenteLeitura}
+                    value={a.quantidade}
+                    onChange={e => atualizarLinhaAlocacao(a.idx, 'quantidade', Number(e.target.value))} />
+                  {acimaDoSaldo && <span className="tag warn">acima do saldo</span>}
+                  {!somenteLeitura && (
+                    <button className="btn danger small" type="button" onClick={() => removerLinhaAlocacao(a.idx)}>×</button>
+                  )}
+                </div>
+              );
+            })}
             {!somenteLeitura && (
               <button className="btn secondary small" type="button" style={{ marginTop: 4 }}
                 onClick={() => adicionarLinhaAlocacao(item.id)}>
