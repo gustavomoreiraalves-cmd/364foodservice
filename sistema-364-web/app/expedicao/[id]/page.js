@@ -41,13 +41,14 @@ function Conteudo() {
   // só seleciona id/nome/slug/prefixo/grupo/logo/empregador_id pro seletor
   // de empresas do topo, sem os dois campos do selo).
   const [empresaSim, setEmpresaSim] = useState(null);
-  // Fabricação/validade por (produto_id|recebimento_item_id) — não vem em
-  // `expedicao_itens` nem em `recebimento_itens` (que é o LOTE da matéria-
-  // prima, não da unidade embalada). Só existe em `embalagem_itens`, que
-  // `expedicao_itens` não referencia diretamente — ver o comentário em
-  // `carregar()` sobre a ambiguidade quando mais de uma embalagem consome o
-  // mesmo produto + lote de origem.
-  const [fabricacaoValidadePorItem, setFabricacaoValidadePorItem] = useState({});
+  // Saldo por produto+embalagem (Task 1: vw_estoque_produto_lote agrupada
+  // por embalagem, não mais por matéria-prima) — alimenta a sugestão FEFO
+  // de um rascunho novo E as opções de lote da seção de alocação editável
+  // (Task 4). Sem filtrar saldo>0 aqui: reabrindo um rascunho salvo, o
+  // lote que ele já usa precisa aparecer mesmo com saldo zerado por si
+  // mesmo (mesmo raciocínio que já existia pra não re-rodar sugerirAlocacao
+  // num rascunho salvo, comentário abaixo).
+  const [lotesPorProduto, setLotesPorProduto] = useState({});
   const [etiquetaDespacho, setEtiquetaDespacho] = useState(null);
   const [imprimindoCaixaId, setImprimindoCaixaId] = useState(null);
   const [erroEtiqueta, setErroEtiqueta] = useState('');
@@ -84,11 +85,11 @@ function Conteudo() {
       supabase.from('pedido_itens').select('*, produto:produtos(id, nome, rastreado)').eq('pedido_id', exp.pedido_id),
       supabase.from('transportadoras').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('naturezas_operacao').select('id, descricao').eq('empresa_id', empresaAtual.id).eq('tipo_operacao', 'saida').eq('ativo', true),
-      // produtos/recebimento_itens aninhados só pra etiqueta de despacho —
-      // o resto da tela (caixas calculadas a partir de `alocacao`, mais
-      // abaixo) nunca usou esses campos e continua sem usar.
+      // produtos/embalagens aninhados só pra etiqueta de despacho — o resto
+      // da tela (caixas calculadas a partir de `alocacao`, mais abaixo)
+      // nunca usou esses campos e continua sem usar.
       supabase.from('expedicao_caixas')
-        .select('*, expedicao_itens(*, produtos(codigo, nome, conservacao_texto), recebimento_itens(lote))')
+        .select('*, expedicao_itens(*, produtos(codigo, nome, conservacao_texto), embalagens(lote, data))')
         .eq('expedicao_id', exp.id).order('numero'),
       // Nome e selo S.I.M. da empresa — `empresaAtual` (lib/empresa.js) não
       // traz `sim_numero`/`sim_municipio`, só o necessário pro seletor do
@@ -101,6 +102,22 @@ function Conteudo() {
     setCaixasSalvas(caixasSalvas || []);
     setEmpresaSim(empresaLinha || null);
 
+    // Saldo por produto+embalagem (Task 1) dos produtos deste pedido — sem
+    // filtro de saldo>0 na consulta (ver comentário do estado
+    // lotesPorProduto, acima); o filtro pra sugestão de rascunho novo é
+    // feito abaixo, em JS, só ali onde faz diferença.
+    const produtoIds = [...new Set((itens || []).map(i => i.produto_id))];
+    const { data: saldosLote } = produtoIds.length
+      ? await supabase.from('vw_estoque_produto_lote').select('*').eq('empresa_id', empresaAtual.id).in('produto_id', produtoIds)
+      : { data: [] };
+    const porProduto = {};
+    for (const l of saldosLote || []) {
+      (porProduto[l.produto_id] ||= []).push({
+        embalagemId: l.embalagem_id, lote: l.lote, fabricacao: l.fabricacao, validade: l.validade, saldo: Number(l.saldo),
+      });
+    }
+    setLotesPorProduto(porProduto);
+
     // Reabrindo um rascunho que já foi salvo antes: usa a alocação que já
     // está gravada, não uma sugestão nova. `vw_estoque_produto_lote.saldo`
     // já desconta as PRÓPRIAS linhas deste rascunho (via total_expedido),
@@ -111,58 +128,22 @@ function Conteudo() {
     const itensSalvos = (caixasSalvas || []).flatMap(c => c.expedicao_itens || []);
     if (itensSalvos.length) {
       setAlocacao(itensSalvos.map(i => ({
-        pedidoItemId: i.pedido_item_id, recebimentoItemId: i.recebimento_item_id, quantidade: i.quantidade,
+        pedidoItemId: i.pedido_item_id, embalagemId: i.embalagem_id, quantidade: i.quantidade,
       })));
-      await carregarFabricacaoValidade(itensSalvos);
       return;
     }
 
     // Rascunho novo, sem nada salvo ainda — sugere a alocação FEFO a partir
     // do saldo de lote (vw_estoque_produto_lote, Task 1) dos produtos deste
-    // pedido. Só busca se houver produto pra filtrar (`.in()` com array
-    // vazio não deveria bater em nada, mas evita depender disso).
-    const produtoIds = [...new Set((itens || []).map(i => i.produto_id))];
-    const { data: saldosLote } = produtoIds.length
-      ? await supabase.from('vw_estoque_produto_lote').select('*').eq('empresa_id', empresaAtual.id).in('produto_id', produtoIds).gt('saldo', 0)
-      : { data: [] };
-
-    // Agrupa o saldo por produto — sugerirAlocacao espera { [produtoId]: lotes[] }.
-    const porProduto = {};
-    for (const l of saldosLote || []) {
-      (porProduto[l.produto_id] ||= []).push({ recebimentoItemId: l.recebimento_item_id, validade: l.validade, saldo: l.saldo });
-    }
-
+    // pedido, só com saldo>0 (porProduto acima não filtra — ver comentário
+    // do estado lotesPorProduto).
     const itensPedidoParaSugestao = (itens || []).map(i => ({
       pedidoItemId: i.id, produtoId: i.produto_id, quantidade: i.quantidade, rastreado: i.produto?.rastreado,
     }));
-    setAlocacao(sugerirAlocacao(itensPedidoParaSugestao, porProduto));
-  }
-
-  // Fabricação e validade da unidade embalada, por produto + lote de
-  // origem — a etiqueta de despacho (spec de 20/08) mostra os dois, mas
-  // nenhum dos dois mora em `expedicao_itens` nem em `recebimento_itens`
-  // (que é o lote da MATÉRIA-PRIMA recebida, não da unidade embalada
-  // expedida). Só existe em `embalagem_itens.validade` e
-  // `embalagens.data`, e `expedicao_itens` não guarda qual
-  // `embalagem_item` específico originou a unidade — só produto + lote de
-  // origem + quantidade (mesma limitação de `vw_estoque_produto_lote`,
-  // atualizacao_50). Quando mais de uma embalagem consumiu o mesmo produto
-  // + lote de origem, fica a primeira encontrada: não há como desambiguar
-  // sem alterar a migração, fora do escopo desta tarefa.
-  async function carregarFabricacaoValidade(itensSalvos) {
-    const chaves = itensSalvos.filter(i => i.recebimento_item_id);
-    const produtoIds = [...new Set(chaves.map(i => i.produto_id))];
-    const loteIds = [...new Set(chaves.map(i => i.recebimento_item_id))];
-    if (!produtoIds.length || !loteIds.length) { setFabricacaoValidadePorItem({}); return; }
-    const { data } = await supabase.from('embalagem_itens')
-      .select('produto_id, recebimento_item_id, validade, embalagens(data)')
-      .in('produto_id', produtoIds).in('recebimento_item_id', loteIds);
-    const mapa = {};
-    for (const e of data || []) {
-      const chave = `${e.produto_id}|${e.recebimento_item_id}`;
-      if (!mapa[chave]) mapa[chave] = { fabricacao: e.embalagens?.data || null, validade: e.validade || null };
-    }
-    setFabricacaoValidadePorItem(mapa);
+    const porProdutoComSaldo = Object.fromEntries(
+      Object.entries(porProduto).map(([pid, lotes]) => [pid, lotes.filter(l => l.saldo > 0)])
+    );
+    setAlocacao(sugerirAlocacao(itensPedidoParaSugestao, porProdutoComSaldo));
   }
 
   const caixas = empacotarCaixas(alocacao, Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id])));
@@ -187,7 +168,7 @@ function Conteudo() {
     // só as linhas com lote (produto rastreado) precisam de prefixo de
     // empresa pra montar a URL de rastreio sem ambiguidade entre empresas
     // (mesma checagem de app/recebimentos/page.js:abrirEtiquetas).
-    const algumaLinhaTemLote = itensCaixa.some(i => i.recebimento_itens?.lote);
+    const algumaLinhaTemLote = itensCaixa.some(i => i.embalagens?.lote);
     if (algumaLinhaTemLote && !empresaAtual?.prefixo_codigo) {
       setErroEtiqueta('Esta empresa não tem prefixo de código cadastrado. Cadastre o prefixo antes de imprimir '
         + 'etiquetas de despacho — sem ele o QR pode ficar ambíguo entre empresas.');
@@ -215,8 +196,8 @@ function Conteudo() {
       let produtos;
       try {
         produtos = await Promise.all(itensCaixa.map(async i => {
-          const fv = fabricacaoValidadePorItem[`${i.produto_id}|${i.recebimento_item_id}`] || {};
-          const lote = i.recebimento_itens?.lote;
+          const fv = (lotesPorProduto[i.produto_id] || []).find(l => l.embalagemId === i.embalagem_id) || {};
+          const lote = i.embalagens?.lote || null;
           const qr = lote
             ? await qrSvg(urlRastreio(empresaAtual.prefixo_codigo, lote, process.env.NEXT_PUBLIC_SITE_URL), tamanhoQr)
             : null; // sem lote (não rastreado) — nada pra apontar, a linha sai sem QR.
@@ -225,7 +206,7 @@ function Conteudo() {
             nome: i.produtos?.nome,
             lote,
             quantidade: i.quantidade,
-            fabricacao: fv.fabricacao,
+            fabricacao: i.embalagens?.data || fv.fabricacao,
             validade: fv.validade,
             qrSvg: qr,
           };
