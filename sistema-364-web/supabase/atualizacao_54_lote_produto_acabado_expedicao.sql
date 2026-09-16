@@ -10,7 +10,11 @@
 -- docs/superpowers/specs/2026-09-16-lote-produto-acabado-expedicao-design.md
 --
 -- Aditiva: recebimento_item_id fica na tabela (romaneios já finalizados não
--- mudam); só gravações novas passam a preencher embalagem_id.
+-- mudam); só gravações novas passam a preencher embalagem_id. A view não dá
+-- pra recriar com `create or replace` porque a lista de colunas mudou
+-- (`create or replace view` recusa isso) — por isso é `drop view if exists
+-- ... cascade` seguido de `create view`; ainda idempotente (o `if exists`
+-- faz a segunda rodada não falhar), só não é "substituição no lugar".
 begin;
 
 alter table public.expedicao_itens

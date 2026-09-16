@@ -19,7 +19,10 @@ createdb "$BANCO"
 
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$AQUI/fixture.sql"
 
-# Duas vezes seguidas: prova idempotência (add column if not exists / create or replace).
+# Duas vezes seguidas: prova idempotência (add column if not exists / drop
+# view if exists ... cascade + create view — não é "create or replace" porque
+# a lista de colunas da view mudou, mas o "if exists" ainda garante que a
+# segunda rodada não falhe).
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$MIGRACAO"
 psql -q -v ON_ERROR_STOP=1 -d "$BANCO" -f "$MIGRACAO"
 
