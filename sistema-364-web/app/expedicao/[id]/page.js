@@ -148,9 +148,34 @@ function Conteudo() {
 
   const caixas = empacotarCaixas(alocacao, Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id])));
   // Nome do produto por pedidoItemId — a alocação/caixa só carrega ids
-  // (pedidoItemId, recebimentoItemId), e quem monta a caixa fisicamente
+  // (pedidoItemId, embalagemId), e quem monta a caixa fisicamente
   // precisa ver o nome do produto, não um uuid de lote.
   const nomeProdutoPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto?.nome || i.produto_id]));
+
+  // produto_id por pedidoItemId — usado pra buscar as opções de lote
+  // (lotesPorProduto é indexado por produto_id) a partir de uma linha de
+  // alocação, que só carrega pedidoItemId.
+  const produtoIdPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id]));
+
+  // Rótulo do lote pra exibição (código de embalagens.lote, não o uuid) —
+  // usado tanto na seção de alocação quanto no resumo de "Caixas", abaixo.
+  function labelLote(produtoId, embalagemId) {
+    if (!embalagemId) return 'sem lote';
+    const encontrado = (lotesPorProduto[produtoId] || []).find(l => l.embalagemId === embalagemId);
+    return encontrado?.lote || embalagemId;
+  }
+
+  function atualizarLinhaAlocacao(indice, campo, valor) {
+    setAlocacao(alocacao.map((linha, i) => (i === indice ? { ...linha, [campo]: valor } : linha)));
+  }
+
+  function adicionarLinhaAlocacao(pedidoItemId) {
+    setAlocacao([...alocacao, { pedidoItemId, embalagemId: null, quantidade: 0 }]);
+  }
+
+  function removerLinhaAlocacao(indice) {
+    setAlocacao(alocacao.filter((_, i) => i !== indice));
+  }
 
   // Imprime a etiqueta de despacho de UMA caixa — registra a impressão
   // ANTES de montar a etiqueta (mesma ordem de ModalEtiquetas.imprimir():
@@ -250,7 +275,7 @@ function Conteudo() {
         caixas: caixas.map((itensCaixa, indice) => ({
           numero: indice + 1,
           pesoBrutoKg: null,
-          itens: itensCaixa.map(i => ({ pedidoItemId: i.pedidoItemId, produtoId: pedidoItens.find(pi => pi.id === i.pedidoItemId)?.produto_id, recebimentoItemId: i.recebimentoItemId, quantidade: i.quantidade })),
+          itens: itensCaixa.map(i => ({ pedidoItemId: i.pedidoItemId, produtoId: pedidoItens.find(pi => pi.id === i.pedidoItemId)?.produto_id, embalagemId: i.embalagemId, quantidade: i.quantidade })),
         })),
       };
       const r = await fetch(`/api/expedicao/${id}`, { method: 'PUT', headers: await cabecalhoAuth(), body: JSON.stringify(corpo) });
@@ -355,12 +380,53 @@ function Conteudo() {
         </div>
       )}
 
+      <h4>Alocação por produto</h4>
+      {pedidoItens.map(item => {
+        const linhas = alocacao.map((a, idx) => ({ ...a, idx })).filter(a => a.pedidoItemId === item.id);
+        const totalAlocado = linhas.reduce((s, a) => s + Number(a.quantidade || 0), 0);
+        const totalPedido = Number(item.quantidade);
+        const opcoesLote = lotesPorProduto[item.produto_id] || [];
+        return (
+          <div key={item.id} style={{ borderBottom: '1px solid var(--linha)', padding: '6px 0' }}>
+            <strong>{item.produto?.nome}</strong> — pedido {totalPedido}, alocado {totalAlocado}
+            {totalAlocado !== totalPedido && (
+              <span className="tag warn" style={{ marginLeft: 8 }}>diferente do pedido</span>
+            )}
+            {linhas.map(a => (
+              <div key={a.idx} className="row-actions" style={{ marginTop: 4 }}>
+                <select disabled={somenteLeitura} value={a.embalagemId || ''}
+                  onChange={e => atualizarLinhaAlocacao(a.idx, 'embalagemId', e.target.value || null)}>
+                  <option value="">Sem lote</option>
+                  {opcoesLote.map(l => (
+                    <option key={l.embalagemId} value={l.embalagemId}>
+                      {l.lote}{l.validade ? ` — val. ${l.validade}` : ''} — saldo {l.saldo}
+                    </option>
+                  ))}
+                </select>
+                <input type="number" min="0" step="0.001" style={{ width: 90 }} disabled={somenteLeitura}
+                  value={a.quantidade}
+                  onChange={e => atualizarLinhaAlocacao(a.idx, 'quantidade', Number(e.target.value))} />
+                {!somenteLeitura && (
+                  <button className="btn danger small" type="button" onClick={() => removerLinhaAlocacao(a.idx)}>×</button>
+                )}
+              </div>
+            ))}
+            {!somenteLeitura && (
+              <button className="btn secondary small" type="button" style={{ marginTop: 4 }}
+                onClick={() => adicionarLinhaAlocacao(item.id)}>
+                + lote
+              </button>
+            )}
+          </div>
+        );
+      })}
+
       <h4>Caixas ({caixas.length})</h4>
       {caixas.map((itensCaixa, i) => (
         <div key={i} className="row-actions" style={{ borderBottom: '1px solid var(--linha)', padding: '4px 0' }}>
           <strong>Caixa {i + 1}</strong> — {itensCaixa.reduce((s, it) => s + it.quantidade, 0)} un.
           {itensCaixa.map((it, j) => (
-            <span key={j} className="tag"> {nomeProdutoPorPedidoItemId[it.pedidoItemId] || '?'} — lote {it.recebimentoItemId || 'sem lote'} × {it.quantidade}</span>
+            <span key={j} className="tag"> {nomeProdutoPorPedidoItemId[it.pedidoItemId] || '?'} — lote {labelLote(produtoIdPorPedidoItemId[it.pedidoItemId], it.embalagemId)} × {it.quantidade}</span>
           ))}
         </div>
       ))}
