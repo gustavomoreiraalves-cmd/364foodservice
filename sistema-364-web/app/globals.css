@@ -531,8 +531,14 @@ tbody tr:hover td{background:var(--sunken);}
    Documento que acompanha a mercadoria. Moldura preta fina e fonte pequena
    porque tudo tem de caber numa folha A4 — é a mesma densidade do DANFE que
    qualquer emissor imprime. Só aparece na impressão, dentro de .print-area. */
+/* min-height fica bem abaixo dos 285mm úteis da A4 (297mm - 2x6mm de @page)
+   de propósito: uma nota com XML mais imprevisível, uma impressora que
+   ignora o @page e aplica margem própria, ou só a variação normal de fonte
+   entre máquinas some com a folga rápido — foi o que fez uma nota real
+   vazar pra uma página 2 em branco. Preferimos rodapé um pouco mais alto na
+   folha a arriscar imprimir/anexar um PDF de duas páginas por causa disso. */
 .danfe{font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#000; position:relative;
-  display:flex; flex-direction:column; min-height:277mm;}
+  display:flex; flex-direction:column; min-height:250mm;}
 .danfe-canhoto,.danfe-cab,.danfe-linha{display:flex; border:1px solid #000; margin-bottom:2px;}
 .danfe-canhoto>*,.danfe-cab>*,.danfe-linha>*{border-right:1px solid #000; padding:2px 4px; flex:1; min-width:0;}
 .danfe-canhoto>*:last-child,.danfe-cab>*:last-child,.danfe-linha>*:last-child{border-right:0;}
@@ -541,6 +547,7 @@ tbody tr:hover td{background:var(--sunken);}
 .danfe-canhoto-texto{font-size:6.5pt;}
 .danfe-canhoto-assin{display:flex; gap:12px; margin-top:14px; font-size:6pt; text-transform:uppercase;}
 .danfe-canhoto-nf{text-align:center; font-size:8pt;}
+.danfe-emit-legenda{font-size:6pt; font-style:italic; margin-bottom:1px;}
 .danfe-emit{flex:2 !important; display:flex; align-items:center; gap:6px;}
 .danfe-emit-logo{height:44px; width:44px; object-fit:contain; flex-shrink:0;}
 .danfe-emit-texto b{font-size:11pt;}
@@ -558,12 +565,21 @@ tbody tr:hover td{background:var(--sunken);}
 .danfe-itens th{font-size:5.5pt; text-transform:uppercase;}
 .danfe-itens .num{text-align:right;}
 .danfe-item-inf{font-size:5.5pt; font-style:italic; color:#333;}
-.danfe-adic{border:1px solid #000; flex:1 1 auto; min-height:60px; padding:3px 4px; font-size:6.5pt;}
+/* Empurra Dados Adicionais pro rodapé da folha, com o espaço em branco
+   acima — igual ao DANFE que qualquer emissor imprime, não colado direto
+   embaixo da tabela de produtos. margin-top:auto num item de flex-column
+   consome toda a sobra vertical antes dele. */
+.danfe-rodape{margin-top:auto;}
+.danfe-adic-linha{display:flex; gap:2px;}
+.danfe-adic{border:1px solid #000; min-height:80px; padding:3px 4px; font-size:6.5pt; flex:3; min-width:0;}
+.danfe-adic span{display:block; font-size:6pt; text-transform:uppercase; color:#333;}
+.danfe-fisco{flex:1;}
+.danfe-impresso{font-size:5.5pt; color:#333; margin-top:2px;}
 /* Marca d'água de homologação: atravessa a página inteira para não haver
    chance de ser lida como conteúdo da nota. */
-.danfe-marca{position:absolute; top:38%; left:0; right:0; text-align:center;
-  font-size:34pt; font-weight:700; color:rgba(0,0,0,.16);
-  transform:rotate(-20deg); pointer-events:none; letter-spacing:.08em;}
+.danfe-marca{position:absolute; top:32%; left:0; right:0; text-align:center;
+  font-size:26pt; font-weight:700; color:rgba(0,0,0,.16); line-height:1.3;
+  transform:rotate(-20deg); pointer-events:none; letter-spacing:.06em;}
 @page{size:A4 portrait; margin:6mm;}
 
 .ficha{font-family:var(--font-ui); color:#000; max-width:720px; margin:0 auto; padding:10px;}

@@ -23,11 +23,14 @@ export async function carregarModelos() {
     faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
   ]);
   // aquece os shaders WebGL num frame descartável, pra tirar esse pico de
-  // latência (bem maior que os seguintes) de dentro do fluxo real de reconhecimento
+  // latência (bem maior que os seguintes) de dentro do fluxo real de reconhecimento.
+  // detectSingleFace() devolve um ComposableTask (só tem .then, não .catch) — usar try/catch.
   const aquecimento = typeof document !== 'undefined' ? document.createElement('canvas') : null;
   if (aquecimento) {
-    aquecimento.width = 1; aquecimento.height = 1;
-    await faceapi.detectSingleFace(aquecimento, OPCOES()).withFaceLandmarks().withFaceDescriptor().catch(() => {});
+    aquecimento.width = 320; aquecimento.height = 320; // mesmo tamanho do OPCOES().inputSize
+    try {
+      await faceapi.detectSingleFace(aquecimento, OPCOES()).withFaceLandmarks().withFaceDescriptor();
+    } catch { /* aquecimento é best-effort */ }
   }
   carregado = true;
   return faceapi;

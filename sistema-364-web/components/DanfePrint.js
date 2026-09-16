@@ -52,16 +52,26 @@ export default function DanfePrint({ danfe }) {
   const d = danfe;
   const end = d.destinatario.endereco;
   const endEmit = d.emitente.endereco;
+  // Hora da impressão, não da emissão — cada cópia impressa carimba o
+  // próprio momento, como qualquer emissor de DANFE faz no rodapé.
+  const agora = new Date();
+  const dois = n => String(n).padStart(2, '0');
+  const impressoEm = `${dois(agora.getDate())}/${dois(agora.getMonth() + 1)}/${agora.getFullYear()} `
+    + `às ${dois(agora.getHours())}:${dois(agora.getMinutes())}:${dois(agora.getSeconds())}`;
 
   return (
     <div className="print-area">
       <div className="danfe">
-        {d.semValorFiscal && <div className="danfe-marca">SEM VALOR FISCAL</div>}
+        {d.semValorFiscal && (
+          <div className="danfe-marca">NFe EMITIDA EM HOMOLOGAÇÃO<br />SEM VALOR FISCAL</div>
+        )}
 
         <div className="danfe-canhoto">
           <div style={{ flex: 4 }}>
             <div className="danfe-canhoto-texto">
-              RECEBEMOS DE {d.emitente.nome} OS PRODUTOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO
+              RECEBEMOS DE {d.emitente.nome} OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA
+              INDICADA AO LADO. EMISSÃO: {d.emitidaEm} VALOR TOTAL: R$ {d.totais.vNF} DESTINATÁRIO: {d.destinatario.nome} —{' '}
+              {end.logradouro}{end.numero ? `, ${end.numero}` : ''} {end.bairro} {end.municipio}-{end.uf}
             </div>
             <div className="danfe-canhoto-assin">
               <span>DATA DE RECEBIMENTO</span>
@@ -75,6 +85,7 @@ export default function DanfePrint({ danfe }) {
           </div>
         </div>
 
+        <div className="danfe-emit-legenda">IDENTIFICAÇÃO DO EMITENTE</div>
         <div className="danfe-cab">
           <div className="danfe-emit">
             {d.logoUrl && <img className="danfe-emit-logo" src={d.logoUrl} alt="" />}
@@ -82,7 +93,7 @@ export default function DanfePrint({ danfe }) {
               <b>{d.emitente.nome}</b>
               <div>{endEmit.logradouro}, {endEmit.numero}</div>
               <div>{endEmit.bairro} — {endEmit.municipio}/{endEmit.uf}</div>
-              <div>CEP {endEmit.cep}{endEmit.fone ? ` — Fone ${endEmit.fone}` : ''}</div>
+              <div>CEP {endEmit.cep} — Fone {endEmit.fone || ' '}</div>
             </div>
           </div>
           <div className="danfe-titulo">
@@ -153,6 +164,11 @@ export default function DanfePrint({ danfe }) {
           <Campo rot="Outras despesas">{d.totais.vOutro}</Campo>
           <Campo rot="V. total da nota"><b>{d.totais.vNF}</b></Campo>
         </div>
+        <div className="danfe-linha">
+          <Campo rot="Valor do PIS">{d.totais.vPIS}</Campo>
+          <Campo rot="Valor da COFINS">{d.totais.vCOFINS}</Campo>
+          <Campo rot="Valor total do IPI">{d.totais.vIPI}</Campo>
+        </div>
 
         <div className="danfe-sec">Transportador / volumes transportados</div>
         <div className="danfe-linha">
@@ -184,6 +200,7 @@ export default function DanfePrint({ danfe }) {
               <th>CÓDIGO</th><th>DESCRIÇÃO</th><th>NCM/SH</th><th>O/CSOSN</th><th>CFOP</th>
               <th>UN</th><th className="num">QUANT</th><th className="num">V. UNIT</th>
               <th className="num">V. TOTAL</th><th className="num">B.CÁLC ICMS</th><th className="num">V. ICMS</th>
+              <th className="num">ALÍQ. ICMS</th>
             </tr>
           </thead>
           <tbody>
@@ -203,13 +220,25 @@ export default function DanfePrint({ danfe }) {
                 <td className="num">{i.valorTotal}</td>
                 <td className="num">{i.baseIcms}</td>
                 <td className="num">{i.valorIcms}</td>
+                <td className="num">{i.aliquotaIcms}</td>
               </tr>
             ))}
           </tbody>
         </table>
 
-        <div className="danfe-sec">Dados adicionais</div>
-        <div className="danfe-adic">{d.informacoesComplementares}</div>
+        <div className="danfe-rodape">
+          <div className="danfe-sec">Dados adicionais</div>
+          <div className="danfe-adic-linha">
+            <div className="danfe-adic">
+              <span>Informações complementares</span>
+              {d.informacoesComplementares}
+            </div>
+            <div className="danfe-adic danfe-fisco">
+              <span>Reservado ao fisco</span>
+            </div>
+          </div>
+          <div className="danfe-impresso">Impresso em {impressoEm}</div>
+        </div>
       </div>
     </div>
   );
