@@ -452,7 +452,15 @@ function Conteudo() {
                   </select>
                   <input type="number" min="0" max={totalPedido} step="0.001" style={{ width: 90 }} disabled={somenteLeitura}
                     value={a.quantidade}
-                    onChange={e => atualizarLinhaAlocacao(a.idx, 'quantidade', Number(e.target.value))} />
+                    onChange={e => {
+                      // `max` no input só afeta o spinner nativo — não bloqueia
+                      // digitação por teclado. Sem este clamp, um número digitado
+                      // grande demais (typo) chega inteiro em `alocacao` e
+                      // `empacotarCaixas` (lib/expedicao.js) trava a aba tentando
+                      // montar dezenas de milhares de caixas num loop síncrono.
+                      const bruto = Number(e.target.value) || 0;
+                      atualizarLinhaAlocacao(a.idx, 'quantidade', Math.max(0, Math.min(bruto, totalPedido)));
+                    }} />
                   {acimaDoSaldo && <span className="tag warn">acima do saldo</span>}
                   {!somenteLeitura && (
                     <button className="btn danger small" type="button" onClick={() => removerLinhaAlocacao(a.idx)}>×</button>
