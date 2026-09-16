@@ -3,14 +3,17 @@
 
 -- Cenário 1: coluna embalagem_id existe e aceita null.
 do $$
-declare v_tipo text;
+declare v_tipo text; v_nullable text;
 begin
-  select data_type into v_tipo from information_schema.columns
+  select data_type, is_nullable into v_tipo, v_nullable from information_schema.columns
     where table_schema = 'public' and table_name = 'expedicao_itens' and column_name = 'embalagem_id';
   if v_tipo is null then
-    raise exception 'FALHA 1: coluna expedicao_itens.embalagem_id não existe';
+    raise exception 'FALHA 1a: coluna expedicao_itens.embalagem_id não existe';
   end if;
-  raise notice 'OK 1: expedicao_itens.embalagem_id existe (%)', v_tipo;
+  if v_nullable is distinct from 'YES' then
+    raise exception 'FALHA 1b: coluna expedicao_itens.embalagem_id não é nullable, é %', v_nullable;
+  end if;
+  raise notice 'OK 1: expedicao_itens.embalagem_id existe (%) e aceita null', v_tipo;
 end $$;
 
 -- Cenário 2: a view agora traz DUAS linhas pro produto (uma por embalagem),
@@ -42,6 +45,7 @@ end $$;
 
 -- Cenário 4: lote/fabricação vêm certos, sem ambiguidade, e saldo = total
 -- embalado (nenhuma expedição referencia embalagem_id ainda nesta linha).
+-- LOTE-A tem 8 unidades (5 + 3 dos dois embalagem_itens).
 do $$
 declare v_lote text; v_saldo numeric;
 begin
@@ -50,8 +54,8 @@ begin
   if v_lote is distinct from 'LOTE-A' then
     raise exception 'FALHA 4a: lote esperado LOTE-A, veio %', v_lote;
   end if;
-  if v_saldo <> 5 then
-    raise exception 'FALHA 4b: saldo esperado 5, veio %', v_saldo;
+  if v_saldo <> 8 then
+    raise exception 'FALHA 4b: saldo esperado 8 (5+3), veio %', v_saldo;
   end if;
   raise notice 'OK 4: lote e saldo corretos pra LOTE-A';
 end $$;
@@ -75,8 +79,8 @@ begin
 
   select saldo into v_saldo_a from public.vw_estoque_produto_lote where embalagem_id = 'e0000000-0000-0000-0000-000000000001';
   select saldo into v_saldo_b from public.vw_estoque_produto_lote where embalagem_id = 'e0000000-0000-0000-0000-000000000002';
-  if v_saldo_a <> 2 then
-    raise exception 'FALHA 5a: saldo do LOTE-A esperado 2 (5-3), veio %', v_saldo_a;
+  if v_saldo_a <> 5 then
+    raise exception 'FALHA 5a: saldo do LOTE-A esperado 5 (8-3), veio %', v_saldo_a;
   end if;
   if v_saldo_b <> 7 then
     raise exception 'FALHA 5b: saldo do LOTE-B esperado 7 (intocado), veio %', v_saldo_b;
@@ -104,4 +108,18 @@ begin
     raise exception 'FALHA 6: saldo do LOTE-B deveria seguir 7 (expedição cancelada não desconta), veio %', v_saldo;
   end if;
   raise notice 'OK 6: expedição cancelada não desconta do saldo';
+end $$;
+
+-- Cenário 7: validade é calculada como min() dentro do grupo (produto, embalagem).
+-- LOTE-A tem duas embalagem_itens: uma com validade 2026-12-01 e outra com 2026-11-01.
+-- A view deve retornar a MÍNIMA: 2026-11-01.
+do $$
+declare v_validade date;
+begin
+  select validade into v_validade from public.vw_estoque_produto_lote
+    where embalagem_id = 'e0000000-0000-0000-0000-000000000001';
+  if v_validade is distinct from '2026-11-01'::date then
+    raise exception 'FALHA 7: validade de LOTE-A esperada 2026-11-01 (min), veio %', v_validade;
+  end if;
+  raise notice 'OK 7: validade é calculada como min(validade) dentro do grupo produto+embalagem';
 end $$;
