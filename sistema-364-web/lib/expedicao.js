@@ -19,7 +19,7 @@ export function ordenarFefo(lotes) {
 // Para cada item do pedido: se o produto é rastreado, consome os lotes
 // disponíveis em ordem FEFO até cobrir a quantidade; o que sobrar sem saldo
 // de lote (ou o item inteiro, se não for rastreado) entra com
-// recebimentoItemId null — "sem lote", aceito desde a revisão de 25/08 da
+// embalagemId null — "sem lote", aceito desde a revisão de 25/08 da
 // Fase 4. Nunca aloca mais do que a quantidade pedida.
 export function sugerirAlocacao(itensPedido, lotesPorProduto) {
   const alocacao = [];
@@ -32,12 +32,12 @@ export function sugerirAlocacao(itensPedido, lotesPorProduto) {
         const saldo = Number(lote.saldo);
         if (!(saldo > 0)) continue;
         const usar = Math.min(saldo, restante);
-        alocacao.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: lote.recebimentoItemId, quantidade: usar });
+        alocacao.push({ pedidoItemId: item.pedidoItemId, embalagemId: lote.embalagemId, quantidade: usar });
         restante -= usar;
       }
     }
     if (restante > 0) {
-      alocacao.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: null, quantidade: restante });
+      alocacao.push({ pedidoItemId: item.pedidoItemId, embalagemId: null, quantidade: restante });
     }
   }
   return alocacao;
@@ -75,7 +75,7 @@ export function empacotarCaixas(alocacao, produtoPorPedidoItemId) {
         continue;
       }
       const usar = Math.min(espaco, restante);
-      atual.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: item.recebimentoItemId, quantidade: usar });
+      atual.push({ pedidoItemId: item.pedidoItemId, embalagemId: item.embalagemId, quantidade: usar });
       restante -= usar;
     }
   }
