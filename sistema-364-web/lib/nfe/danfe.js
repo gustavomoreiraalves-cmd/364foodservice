@@ -46,6 +46,18 @@ function dataBr(iso) {
   return dataHoraBr(iso).slice(0, 10);
 }
 
+// Máscara só para exibição — o XML guarda o CNPJ/CPF sem pontuação, e é
+// esse valor sem máscara que continua indo pra chave de acesso e pros
+// demais usos internos. 14 dígitos é CNPJ, 11 é CPF; qualquer outro
+// tamanho (documento ausente ou corrompido) sai como veio, sem tentar
+// encaixar numa máscara errada.
+function documentoBr(v) {
+  const d = texto(v).replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return texto(v);
+}
+
 function endereco(e = {}) {
   return {
     logradouro: texto(e.xLgr), numero: texto(e.nro), complemento: texto(e.xCpl),
@@ -130,13 +142,13 @@ export function modeloDanfe(xml) {
     emitente: {
       nome: texto(inf.emit?.xNome),
       fantasia: texto(inf.emit?.xFant),
-      cnpj: texto(inf.emit?.CNPJ),
+      cnpj: documentoBr(inf.emit?.CNPJ),
       ie: texto(inf.emit?.IE),
       endereco: endereco(inf.emit?.enderEmit),
     },
     destinatario: {
       nome: texto(inf.dest?.xNome),
-      documento: texto(inf.dest?.CNPJ || inf.dest?.CPF),
+      documento: documentoBr(inf.dest?.CNPJ || inf.dest?.CPF),
       ie: texto(inf.dest?.IE),
       endereco: endereco(inf.dest?.enderDest),
     },
