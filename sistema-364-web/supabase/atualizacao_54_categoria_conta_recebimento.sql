@@ -3,6 +3,8 @@
 -- para o DRE separar compras de matéria-prima por natureza do custo.
 -- Mesmo enum de contas_a_pagar.categoria_conta (ver atualizacao_16).
 
+begin;
+
 alter table public.materias_primas
   add column if not exists categoria_conta_padrao text;
 
@@ -22,3 +24,5 @@ alter table public.recebimento_itens
   add constraint recebimento_itens_categoria_conta_valida
   check (categoria_conta in
     ('Custos Fixos', 'Custos Diretos', 'Custos Variáveis', 'Investimentos'));
+
+commit;
