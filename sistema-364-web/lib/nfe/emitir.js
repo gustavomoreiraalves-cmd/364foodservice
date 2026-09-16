@@ -32,6 +32,7 @@ import { chamarSefaz } from '../sefaz/transporte.js';
 import { envelopeSoap, extrairCorpoResposta, lerCampos, extrairBloco } from '../sefaz/envelope.js';
 import { endpointSefaz, namespaceServico, acaoSoapServico } from '../sefaz/endpoints.js';
 import { obterCertificadoAtivo, extrairChaveECert, statusCertificado } from '../certificadoServer.js';
+import { gerarParcelas } from '../financeiro.js';
 
 const MODELO = '55';
 
@@ -135,6 +136,26 @@ function dataLocalPortoVelho(data) {
   }).formatToParts(data);
   const p = Object.fromEntries(partes.map(({ type, value }) => [type, value]));
   return `${p.year}-${p.month}-${p.day}`;
+}
+
+// Condição de pagamento do pedido (condicoes_pagamento) → parcelas da conta
+// a receber, via gerarParcelas (lib/financeiro.js — o mesmo cálculo que
+// contas_a_pagar já usa, ver lib/nfe/parcelas.js): 1 parcela cai em à vista
+// (vence na data base, intervaloDias ignorado); N>1 vence a cada
+// intervaloDias, cobrindo condições tipo "30/60/90" (intervaloDias=30, 3
+// parcelas). A última parcela absorve o resto do arredondamento de centavos.
+//
+// pedido.condicao_pagamento_id ausente ou não encontrado → à vista (1
+// parcela, 0 dias), o mesmo comportamento hardcoded que existia antes desta
+// função existir. Mesma filosofia de "melhor esforço" do resto do arquivo:
+// uma condição de pagamento sumida não pode travar uma nota já autorizada
+// pela SEFAZ — vira à vista e segue.
+async function resolverCondicaoPagamento(sb, condicaoPagamentoId) {
+  if (!condicaoPagamentoId) return { numeroParcelas: 1, intervaloDias: 0 };
+  const { data } = await sb.from('condicoes_pagamento')
+    .select('numero_parcelas, intervalo_dias').eq('id', condicaoPagamentoId).maybeSingle();
+  if (!data) return { numeroParcelas: 1, intervaloDias: 0 };
+  return { numeroParcelas: data.numero_parcelas, intervaloDias: data.intervalo_dias };
 }
 
 // A regra mais específica por item. `data` é sempre array (a função SQL é
@@ -264,11 +285,12 @@ export async function registrarFaturamentoDoPedido(sb, { pedido, natureza, numer
     );
   }
 
-  // Conta a receber: à vista, vencendo na data de emissão (decisão já
-  // registrada no spec de 25/08 — parcelamento é resolvido depois, em
-  // Financeiro, não aqui). gera_financeiro da natureza da operação decide
-  // se esta operação deve virar conta a receber (ex.: uma natureza de
-  // "Remessa para conserto" não gera financeiro).
+  // Conta a receber: parcelas conforme a condição de pagamento do pedido
+  // (pedido.condicao_pagamento_id → condicoes_pagamento), à vista quando
+  // ausente — ver calcularParcelas/resolverCondicaoPagamento, acima.
+  // gera_financeiro da natureza da operação decide se esta operação deve
+  // virar conta a receber (ex.: uma natureza de "Remessa para conserto" não
+  // gera financeiro).
   if (!natureza.gera_financeiro) return;
 
   const { data: conta, error: erroConta } = await sb.from('contas_a_receber').insert([{
@@ -286,19 +308,27 @@ export async function registrarFaturamentoDoPedido(sb, { pedido, natureza, numer
       500,
     );
   }
-  const { error: erroParcela } = await sb.from('contas_a_receber_parcelas').insert([{
-    conta_a_receber_id: conta.id,
-    numero: 1,
-    valor: valorTotal,
-    // dataLocalPortoVelho, não dataEmissao.toISOString() — ver o comentário
-    // da função, acima: a vencer "na data de emissão" precisa ser a data
-    // local do emitente, não a data UTC.
-    vencimento: dataLocalPortoVelho(dataEmissao),
-    empresa_id: pedido.empresa_id,
-  }]);
+
+  const condicao = await resolverCondicaoPagamento(sb, pedido.condicao_pagamento_id);
+  // dataLocalPortoVelho, não dataEmissao.toISOString() — ver o comentário da
+  // função, acima: a data base do vencimento precisa ser a data local do
+  // emitente, não a data UTC.
+  const parcelas = gerarParcelas(
+    dataLocalPortoVelho(dataEmissao), valorTotal, condicao.numeroParcelas, condicao.intervaloDias,
+  );
+
+  const { error: erroParcela } = await sb.from('contas_a_receber_parcelas').insert(
+    parcelas.map(p => ({
+      conta_a_receber_id: conta.id,
+      numero: p.numero,
+      valor: p.valor,
+      vencimento: p.vencimento,
+      empresa_id: pedido.empresa_id,
+    })),
+  );
   if (erroParcela) {
     throw erro(
-      `A nota foi autorizada, mas falhou ao gravar a parcela da conta a receber: ${erroParcela.message}. `
+      `A nota foi autorizada, mas falhou ao gravar a(s) parcela(s) da conta a receber: ${erroParcela.message}. `
       + 'Lance manualmente em Financeiro.',
       500,
     );

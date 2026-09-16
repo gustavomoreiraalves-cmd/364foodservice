@@ -38,6 +38,7 @@ function Conteudo() {
   const [produtos, setProdutos] = useState([]);
   const [estoqueProd, setEstoqueProd] = useState([]);
   const [funcionarios, setFuncionarios] = useState([]);
+  const [condicoesPagamento, setCondicoesPagamento] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erroCarregar, setErroCarregar] = useState('');
@@ -50,7 +51,9 @@ function Conteudo() {
   const [iniciandoRomaneio, setIniciandoRomaneio] = useState(null);
   const [erroRomaneio, setErroRomaneio] = useState('');
 
-  const [cabecalho, setCabecalho] = useState({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
+  const [cabecalho, setCabecalho] = useState({
+    data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '', forma_pagamento: '', condicao_pagamento_id: '',
+  });
   const [itens, setItens] = useState([]);
 
   const [busca, setBusca] = useState('');
@@ -64,7 +67,7 @@ function Conteudo() {
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
-    const [r1, r2, r3, r4, r5] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
       // `pedidos` tem mais de uma FK para `funcionarios` (responsavel_id e
       // cancelado_por_id, da atualização 27), então `funcionarios(nome)` sem
       // qualificação devolve PGRST201. O nome da constraint desambigua — mesmo
@@ -79,12 +82,17 @@ function Conteudo() {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', eid).eq('ativo', true).order('nome'),
+      // Sem filtrar `ativo` aqui: um pedido antigo pode apontar pra uma
+      // condição já desativada, e o form (filter c.ativo !== false || c.id ===
+      // selecionado, mesmo padrão de clientes/produtos) precisa dela na lista
+      // pra não mostrar o select vazio num pedido em modo leitura.
+      supabase.from('condicoes_pagamento').select('id, nome, ativo').eq('empresa_id', eid).order('nome'),
     ]);
 
-    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS, embed
+    // Qualquer uma das seis pode falhar (rede, sessão expirada, RLS, embed
     // ambíguo). Sem essa checagem o `|| []` transformava a falha em lista
     // vazia: a tela dizia "Nenhum pedido lançado" com o banco cheio.
-    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5, r6].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -96,6 +104,7 @@ function Conteudo() {
     setProdutos(r3.data || []);
     setEstoqueProd(r4.data || []);
     setFuncionarios(r5.data || []);
+    setCondicoesPagamento(r6.data || []);
     setLoading(false);
     // Fora do Promise.all principal de propósito (achado I3 da revisão de
     // 11/09): `expedicoes` só existe depois da atualização 50, que pode não
@@ -128,6 +137,8 @@ function Conteudo() {
   async function finalizar() {
     if (!itens.length) { alert('Adicione ao menos um item ao pedido.'); return; }
     if (!cabecalho.cliente_id) { alert('Selecione o cliente.'); return; }
+    if (!cabecalho.forma_pagamento) { alert('Selecione a forma de pagamento.'); return; }
+    if (!cabecalho.condicao_pagamento_id) { alert('Selecione a condição de pagamento.'); return; }
     setSalvando(true);
     const { data: pedido, error } = await supabase.from('pedidos').insert([{
       data: cabecalho.data,
@@ -135,6 +146,8 @@ function Conteudo() {
       status: 'Pendente',
       responsavel_id: cabecalho.responsavel_id || null,
       observacoes: cabecalho.observacoes || null,
+      forma_pagamento: cabecalho.forma_pagamento,
+      condicao_pagamento_id: cabecalho.condicao_pagamento_id,
       empresa_id: empresaAtual.id,
     }]).select().single();
     if (error) { setSalvando(false); alert('Erro ao salvar: ' + error.message); return; }
@@ -145,7 +158,7 @@ function Conteudo() {
     setSalvando(false);
     if (e2) { alert('Pedido criado, mas houve erro nos itens: ' + e2.message); }
     setItens([]);
-    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '' });
+    setCabecalho({ data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '', forma_pagamento: '', condicao_pagamento_id: '' });
     carregar();
   }
 
@@ -229,6 +242,7 @@ function Conteudo() {
           cabecalho={cabecalho} setCabecalho={setCabecalho}
           itens={itens} setItens={setItens}
           clientes={clientes} produtos={produtos} funcionarios={funcionarios}
+          condicoesPagamento={condicoesPagamento}
           saldoProduto={saldoProduto}
         />
         <button className="btn" style={{ marginTop: 12 }} onClick={finalizar} disabled={salvando}>

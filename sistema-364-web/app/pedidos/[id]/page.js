@@ -59,7 +59,7 @@ export default function PedidoPage() {
   );
 }
 
-const CABECALHO_VAZIO = { data: '', cliente_id: '', responsavel_id: '', observacoes: '' };
+const CABECALHO_VAZIO = { data: '', cliente_id: '', responsavel_id: '', observacoes: '', forma_pagamento: '', condicao_pagamento_id: '' };
 
 function Conteudo({ setFicha, setDanfe }) {
   const { id } = useParams();
@@ -75,6 +75,7 @@ function Conteudo({ setFicha, setDanfe }) {
   const [clientes, setClientes] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [funcionarios, setFuncionarios] = useState([]);
+  const [condicoesPagamento, setCondicoesPagamento] = useState([]);
   const [estoqueProd, setEstoqueProd] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -174,7 +175,7 @@ function Conteudo({ setFicha, setDanfe }) {
     setLoading(true);
     setErroCarregar('');
     const eid = empresaAtual.id;
-    const [r1, r2, r3, r4, r5] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6] = await Promise.all([
       // O filtro por empresa_id é o que impede alcançar pedido de outra marca
       // do grupo adivinhando o uuid da URL.
       //
@@ -196,12 +197,17 @@ function Conteudo({ setFicha, setDanfe }) {
       supabase.from('produtos').select('*').eq('empresa_id', eid).order('codigo'),
       supabase.from('funcionarios').select('id, nome, user_id').eq('empresa_id', eid).eq('ativo', true).order('nome'),
       supabase.from('vw_estoque_produto').select('*').eq('empresa_id', eid),
+      // Sem filtrar `ativo` aqui: este pedido pode apontar pra uma condição já
+      // desativada — o form (filter c.ativo !== false || c.id === selecionado,
+      // mesmo padrão de clientes/produtos) precisa dela na lista pra não
+      // mostrar o select vazio num pedido antigo, sobretudo em modo leitura.
+      supabase.from('condicoes_pagamento').select('id, nome, ativo').eq('empresa_id', eid).order('nome'),
     ]);
 
-    // Qualquer uma das cinco pode falhar (rede, sessão expirada, RLS). Sem essa
+    // Qualquer uma das seis pode falhar (rede, sessão expirada, RLS). Sem essa
     // checagem a tela seguia com dado parcial e nada avisava o operador — o pior
     // caso é abrir "normal" com saldo e produto errados por baixo.
-    const falha = [r1, r2, r3, r4, r5].find(r => r.error);
+    const falha = [r1, r2, r3, r4, r5, r6].find(r => r.error);
     if (falha) {
       setErroCarregar(falha.error.message);
       setLoading(false);
@@ -212,6 +218,7 @@ function Conteudo({ setFicha, setDanfe }) {
     setProdutos(r3.data || []);
     setFuncionarios(r4.data || []);
     setEstoqueProd(r5.data || []);
+    setCondicoesPagamento(r6.data || []);
 
     const p = r1.data;
     setPedido(p || null);
@@ -221,6 +228,8 @@ function Conteudo({ setFicha, setDanfe }) {
         cliente_id: p.cliente_id || '',
         responsavel_id: p.responsavel_id || '',
         observacoes: p.observacoes || '',
+        forma_pagamento: p.forma_pagamento || '',
+        condicao_pagamento_id: p.condicao_pagamento_id || '',
       };
       setCabecalho(cab);
       setCabecalhoOriginal(cab);
@@ -298,6 +307,8 @@ function Conteudo({ setFicha, setDanfe }) {
   async function salvar() {
     if (!itens.length) { alert('O pedido precisa de ao menos um item.'); return; }
     if (!cabecalho.cliente_id) { alert('Selecione o cliente.'); return; }
+    if (!cabecalho.forma_pagamento) { alert('Selecione a forma de pagamento.'); return; }
+    if (!cabecalho.condicao_pagamento_id) { alert('Selecione a condição de pagamento.'); return; }
     setSalvando(true);
     setErro('');
     const eid = empresaAtual.id;
@@ -336,6 +347,8 @@ function Conteudo({ setFicha, setDanfe }) {
       cliente_id: cabecalho.cliente_id,
       responsavel_id: cabecalho.responsavel_id || null,
       observacoes: cabecalho.observacoes || null,
+      forma_pagamento: cabecalho.forma_pagamento,
+      condicao_pagamento_id: cabecalho.condicao_pagamento_id,
     }).eq('id', id).eq('empresa_id', eid);
     if (eCab) { setSalvando(false); setErro(`Não foi possível salvar as alterações do cabeçalho do pedido: ${eCab.message}`); carregar(); return; }
 
@@ -700,6 +713,7 @@ function Conteudo({ setFicha, setDanfe }) {
           cabecalho={cabecalho} setCabecalho={setCabecalho}
           itens={itens} setItens={setItens}
           clientes={clientes} produtos={produtos} funcionarios={funcionarios}
+          condicoesPagamento={condicoesPagamento}
           saldoProduto={saldoProduto} somenteLeitura={!editavel}
         />
 

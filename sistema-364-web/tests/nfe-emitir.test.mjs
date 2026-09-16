@@ -132,8 +132,13 @@ function criarSbFaturamento(banco, { falharEm = new Set() } = {}) {
       update: valores => { estado.op = 'update'; estado.valores = valores; return chain; },
       insert: linhas => { estado.op = 'insert'; estado.linhas = linhas; return chain; },
       eq: (campo, valor) => { estado.eqCampo = campo; estado.eqValor = valor; return chain; },
-      select: () => chain,
+      // select só marca leitura quando ainda não há update/insert em curso —
+      // registrarFaturamentoDoPedido também chama select() encadeado depois
+      // de insert() (".insert([...]).select('id')"), e ali o op já é
+      // 'insert'; não pode virar 'select' e perder o que foi inserido.
+      select: () => { if (!estado.op) estado.op = 'select'; return chain; },
       single: () => executar(),
+      maybeSingle: () => executar(),
       then: (resolve, reject) => executar().then(resolve, reject),
     };
     async function executar() {
@@ -146,10 +151,14 @@ function criarSbFaturamento(banco, { falharEm = new Set() } = {}) {
         return { data: linha || null, error: null };
       }
       if (estado.op === 'insert') {
-        const linha = { id: `${tabela}-${proximoId++}`, ...estado.linhas[0] };
+        const linhas = estado.linhas.map(l => ({ id: `${tabela}-${proximoId++}`, ...l }));
         banco[tabela] = banco[tabela] || [];
-        banco[tabela].push(linha);
-        return { data: linha, error: null };
+        banco[tabela].push(...linhas);
+        return { data: linhas.length === 1 ? linhas[0] : linhas, error: null };
+      }
+      if (estado.op === 'select') {
+        const linha = (banco[tabela] || []).find(l => l[estado.eqCampo] === estado.eqValor);
+        return { data: linha || null, error: null };
       }
       return { data: null, error: null };
     }
@@ -243,4 +252,47 @@ test('registrarFaturamentoDoPedido: falha ao gravar a conta a receber lança diz
     /autorizada.*Faturado.*Lance manualmente em Financeiro/is,
   );
   assert.equal(banco.pedidos[0].status, 'Faturado', 'o pedido já tinha avançado antes da conta falhar');
+});
+
+// ---------------------------------------------------------------------
+// registrarFaturamentoDoPedido + condição de pagamento do pedido — a conta
+// a receber passa a gerar N parcelas (lidas de condicoes_pagamento via
+// pedido.condicao_pagamento_id) em vez de sempre 1 parcela à vista.
+// ---------------------------------------------------------------------
+
+test('registrarFaturamentoDoPedido: pedido com condição de pagamento parcelada gera as parcelas correspondentes', async () => {
+  const banco = {
+    pedidos: [{ id: 'p1', status: 'Conferido' }],
+    contas_a_receber: [],
+    contas_a_receber_parcelas: [],
+    condicoes_pagamento: [{ id: 'cond-30-60-90', numero_parcelas: 3, intervalo_dias: 30 }],
+  };
+  const sb = criarSbFaturamento(banco);
+  await registrarFaturamentoDoPedido(sb, entradaFaturar({
+    pedido: { ...PEDIDO_FATURAR, condicao_pagamento_id: 'cond-30-60-90' },
+    valorTotal: 300,
+  }));
+
+  assert.equal(banco.contas_a_receber_parcelas.length, 3);
+  assert.deepEqual(
+    banco.contas_a_receber_parcelas.map(p => [p.numero, p.valor, p.vencimento]),
+    [[1, 100, '2026-10-10'], [2, 100, '2026-11-09'], [3, 100, '2026-12-09']],
+  );
+  assert.ok(banco.contas_a_receber_parcelas.every(p => p.conta_a_receber_id === banco.contas_a_receber[0].id));
+  assert.ok(banco.contas_a_receber_parcelas.every(p => p.empresa_id === 'e1'));
+});
+
+test('registrarFaturamentoDoPedido: pedido sem condicao_pagamento_id continua gerando 1 parcela à vista (comportamento antigo preservado)', async () => {
+  const banco = {
+    pedidos: [{ id: 'p1', status: 'Conferido' }],
+    contas_a_receber: [],
+    contas_a_receber_parcelas: [],
+    condicoes_pagamento: [],
+  };
+  const sb = criarSbFaturamento(banco);
+  await registrarFaturamentoDoPedido(sb, entradaFaturar({ pedido: { ...PEDIDO_FATURAR, condicao_pagamento_id: null } }));
+
+  assert.equal(banco.contas_a_receber_parcelas.length, 1);
+  assert.equal(banco.contas_a_receber_parcelas[0].numero, 1);
+  assert.equal(banco.contas_a_receber_parcelas[0].valor, 255.5);
 });

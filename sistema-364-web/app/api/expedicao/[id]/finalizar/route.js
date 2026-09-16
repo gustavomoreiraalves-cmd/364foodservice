@@ -41,7 +41,7 @@ export async function POST(request, { params }) {
     expedicao.transportadora_id
       ? sb.from('transportadoras').select('*').eq('id', expedicao.transportadora_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    sb.from('pedidos').select('id, empresa_id, cliente_id, status, observacoes').eq('id', expedicao.pedido_id).maybeSingle(),
+    sb.from('pedidos').select('id, empresa_id, cliente_id, status, observacoes, condicao_pagamento_id').eq('id', expedicao.pedido_id).maybeSingle(),
   ]);
   if (erroItens || erroCaixas || erroTransportadora || erroPedido) {
     return NextResponse.json({ error: 'Falha ao carregar os dados do romaneio para finalizar.' }, { status: 500 });
