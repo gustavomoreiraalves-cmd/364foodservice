@@ -1,4 +1,4 @@
--- supabase/atualizacao_54_categoria_conta_recebimento.sql
+-- supabase/atualizacao_56_categoria_conta_recebimento.sql
 -- Categoria de custo (Fixo/Direto/Variável/Investimento) por item de recebimento,
 -- para o DRE separar compras de matéria-prima por natureza do custo.
 -- Mesmo enum de contas_a_pagar.categoria_conta (ver atualizacao_16).

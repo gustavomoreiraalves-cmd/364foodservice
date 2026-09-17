@@ -22,7 +22,7 @@
 ### Task 1: Migration — colunas de categoria de custo
 
 **Files:**
-- Create: `supabase/atualizacao_54_categoria_conta_recebimento.sql`
+- Create: `supabase/atualizacao_56_categoria_conta_recebimento.sql`
 
 **Interfaces:**
 - Produces: coluna `materias_primas.categoria_conta_padrao` (text, nullable, check-constrained) e `recebimento_itens.categoria_conta` (text, not null, default `'Custos Diretos'`, check-constrained) — usadas pelas Tasks 2–5.
@@ -30,7 +30,7 @@
 - [ ] **Step 1: Escrever a migration**
 
 ```sql
--- supabase/atualizacao_54_categoria_conta_recebimento.sql
+-- supabase/atualizacao_56_categoria_conta_recebimento.sql
 -- Categoria de custo (Fixo/Direto/Variável/Investimento) por item de recebimento,
 -- para o DRE separar compras de matéria-prima por natureza do custo.
 -- Mesmo enum de contas_a_pagar.categoria_conta (ver atualizacao_16).
@@ -58,7 +58,7 @@ alter table public.recebimento_itens
 
 - [ ] **Step 2: Rodar a migration no Supabase de produção**
 
-Abrir o SQL editor do Supabase (ou `psql "$SUPABASE_DB_URL" -f supabase/atualizacao_54_categoria_conta_recebimento.sql`) e executar. Confirmar sem erro.
+Abrir o SQL editor do Supabase (ou `psql "$SUPABASE_DB_URL" -f supabase/atualizacao_56_categoria_conta_recebimento.sql`) e executar. Confirmar sem erro.
 
 - [ ] **Step 3: Verificar as colunas**
 
@@ -71,7 +71,7 @@ Esperado: as duas colunas aparecem, `recebimento_itens.categoria_conta` como `no
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase/atualizacao_54_categoria_conta_recebimento.sql
+git add supabase/atualizacao_56_categoria_conta_recebimento.sql
 git commit -m "feat(financeiro): adiciona categoria de custo por item de recebimento"
 ```
 
