@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { fmtMoney, fmtDate, custoMedioMP } from '../../lib/format';
+import { agruparPorCategoria } from '../../lib/financeiro';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 
@@ -25,7 +26,7 @@ function Conteudo() {
       const [pedidos, producoes, recebimentos, contasAPagar, contasAReceber, fornecedores, fichas, mps, produtos] = await Promise.all([
         supabase.from('pedidos').select('status, data, pedido_itens(produto_id, quantidade, preco_unitario)').eq('empresa_id', eid),
         supabase.from('producoes').select('*, produtos(nome)').eq('empresa_id', eid).order('data'),
-        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, recebimentos!inner(fornecedor_id, data), inspecoes_qualidade(status)').eq('empresa_id', eid),
+        supabase.from('recebimento_itens').select('materia_prima_id, quantidade, custo_unitario, categoria_conta, recebimentos!inner(fornecedor_id, data), inspecoes_qualidade(status)').eq('empresa_id', eid),
         supabase.from('contas_a_pagar').select('valor_total, created_at').is('recebimento_id', null).eq('empresa_id', eid),
         supabase.from('contas_a_receber').select('valor_total, created_at').eq('empresa_id', eid),
         supabase.from('fornecedores').select('id, nome').eq('empresa_id', eid).order('nome'),
@@ -86,6 +87,9 @@ function Conteudo() {
   const cmvTotal = validos.reduce((s, p) => s + (p.pedido_itens || []).reduce((s2, i) => s2 + Number(i.quantidade) * custoUnitProduto(i.produto_id), 0), 0);
   const recebimentosValidos = d.recebimentos.filter(r => ['aprovado', 'aprovado_com_ressalva'].includes(r.status_qualidade));
   const comprasTotal = recebimentosValidos.reduce((s, r) => s + Number(r.quantidade) * Number(r.custo_unitario), 0);
+  const comprasPorCategoria = agruparPorCategoria(
+    recebimentosValidos.map(r => ({ categoria_conta: r.categoria_conta, quantidade: r.quantidade, custo_unitario: r.custo_unitario }))
+  );
   const despesasTotal = d.contasAPagar.reduce((s, x) => s + Number(x.valor_total), 0);
   const receberTotal = d.contasAReceber.reduce((s, x) => s + Number(x.valor_total), 0);
   const lucroBruto = receitaTotal - cmvTotal;
@@ -142,6 +146,12 @@ function Conteudo() {
             <tbody>
               <tr><td>Entradas (vendas faturadas/enviadas)</td><td className="num">{fmtMoney(entradasCaixa)}</td></tr>
               <tr><td>Saídas (compras de matéria-prima)</td><td className="num">{fmtMoney(comprasTotal)}</td></tr>
+              {Object.entries(comprasPorCategoria).map(([categoria, valor]) => (
+                <tr key={categoria} className="muted">
+                  <td style={{ paddingLeft: 24 }}>↳ {categoria}</td>
+                  <td className="num">{fmtMoney(valor)}</td>
+                </tr>
+              ))}
               <tr><td>Saídas (despesas operacionais)</td><td className="num">{fmtMoney(despesasTotal)}</td></tr>
               <tr><td><b>= Saldo</b></td><td className="num"><b>{fmtMoney(entradasCaixa - comprasTotal - despesasTotal)}</b></td></tr>
               <tr><td className="muted">Contas a receber (emitidas)</td><td className="num muted">{fmtMoney(receberTotal)}</td></tr>

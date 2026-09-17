@@ -5,8 +5,9 @@ import { fmtMoney } from '../../lib/format';
 import AppShell from '../../components/AppShell';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { useCadastro } from '../../lib/cadastro';
+import { CATEGORIAS_CONTA } from '../../lib/financeiro';
 
-const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '' };
+const MP_VAZIA = { nome: '', categoria: '', unidade: 'kg', custo_unitario: '', preco_alvo_kg: '', categoria_conta_padrao: '' };
 
 export default function MateriasPrimasPage() {
   return (
@@ -47,6 +48,7 @@ function Conteudo() {
         preco_alvo_kg: f.preco_alvo_kg === '' || f.preco_alvo_kg === null || f.preco_alvo_kg === undefined
           ? null
           : Number(f.preco_alvo_kg),
+        categoria_conta_padrao: f.categoria_conta_padrao || null,
       }),
     });
 
@@ -61,6 +63,13 @@ function Conteudo() {
       <form onSubmit={salvar} className="form-grid">
         <div><label>Nome</label><input required value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} /></div>
         <div><label>Categoria</label><input placeholder="Carnes, Temperos, Embalagens..." value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} /></div>
+        <div>
+          <label>Categoria de custo (DRE)</label>
+          <select value={form.categoria_conta_padrao} onChange={e => setForm({ ...form, categoria_conta_padrao: e.target.value })}>
+            <option value="">Sem padrão (escolher em cada recebimento)</option>
+            {CATEGORIAS_CONTA.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
         <div><label>Unidade</label>
           <select value={form.unidade} onChange={e => setForm({ ...form, unidade: e.target.value })}>
             <option value="kg">kg</option><option value="g">g</option><option value="un">un</option><option value="L">L</option>

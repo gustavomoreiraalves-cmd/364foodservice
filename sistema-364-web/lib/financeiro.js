@@ -35,3 +35,17 @@ export function gerarParcelas(dataBase, valorTotal, numeroParcelas = 1, interval
 export function isVencida(parcela) {
   return parcela.status === 'Pendente' && parcela.vencimento < hoje();
 }
+
+export function agruparPorCategoria(itens) {
+  const totais = {};
+  for (const item of itens || []) {
+    if (!item?.categoria_conta) continue;
+    const valor = Number(item.quantidade) * Number(item.custo_unitario);
+    if (!valor) continue;
+    totais[item.categoria_conta] = (totais[item.categoria_conta] || 0) + valor;
+  }
+  for (const categoria of Object.keys(totais)) {
+    totais[categoria] = Math.round(totais[categoria] * 100) / 100;
+  }
+  return totais;
+}
