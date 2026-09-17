@@ -7,6 +7,7 @@ import AppShell from '../../components/AppShell';
 import PedidoForm from '../../components/PedidoForm';
 import ThOrdenar from '../../components/ThOrdenar';
 import Paginacao from '../../components/Paginacao';
+import AssinaturasWix from '../../components/AssinaturasWix';
 import { useEmpresaAtual } from '../../lib/empresa';
 import { totalPedido, saldoDisponivel } from '../../lib/pedidos';
 import { filtrarRegistros, alternarOrdenacao, ordenarRegistros, paginar } from '../../lib/listaCadastro';
@@ -55,6 +56,8 @@ function Conteudo() {
     data: hoje(), cliente_id: '', responsavel_id: '', observacoes: '', forma_pagamento: '', condicao_pagamento_id: '',
   });
   const [itens, setItens] = useState([]);
+
+  const [aba, setAba] = useState('pedidos');
 
   const [busca, setBusca] = useState('');
   const [ordenacao, setOrdenacao] = useState({ campo: 'data', direcao: 'desc' });
@@ -236,6 +239,19 @@ function Conteudo() {
 
   return (
     <>
+      <div className="ponto-tabs">
+        <button type="button" className={'ponto-tab' + (aba === 'pedidos' ? ' ativo' : '')} onClick={() => setAba('pedidos')}>Pedidos</button>
+        <button type="button" className={'ponto-tab' + (aba === 'assinaturas' ? ' ativo' : '')} onClick={() => setAba('assinaturas')}>Assinaturas</button>
+      </div>
+
+      {aba === 'assinaturas' && (
+        <div className="panel">
+          <h3>Assinaturas (Wix)</h3>
+          <AssinaturasWix empresaId={empresaAtual?.id} />
+        </div>
+      )}
+
+      {aba === 'pedidos' && <>
       <div className="panel">
         <h3>Novo pedido de venda</h3>
         <PedidoForm
@@ -337,6 +353,7 @@ function Conteudo() {
                      tamanhoPagina={tamanhoPagina} onMudarPagina={setPagina} onMudarTamanho={setTamanhoPagina} />
         )}
       </div>
+      </>}
     </>
   );
 }
