@@ -1,4 +1,4 @@
--- Atualização 56: adiciona policies de INSERT/UPDATE em stock_balances
+-- Atualização 57: adiciona policies de INSERT/UPDATE em stock_balances
 --
 -- Bug: stock_balances tinha RLS habilitada mas só com policy de SELECT.
 -- O trigger trigger_movimento_atualiza_saldo (disparado a partir de
