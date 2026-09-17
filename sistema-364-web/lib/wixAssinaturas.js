@@ -44,6 +44,9 @@ async function obterToken() {
 // de assinatura do Wix não impede); achatamos pra uma linha por assinatura.
 function extrairAssinaturas(pedido) {
   const linhas = [];
+  // recipientInfo é quem recebe a entrega (pode ser diferente de quem paga);
+  // cai pra billingInfo quando o Wix não grava recipientInfo (pedido sem frete).
+  const endereco = pedido.recipientInfo?.address || pedido.billingInfo?.address || null;
   for (const item of pedido.lineItems || []) {
     if (!item.subscriptionInfo) continue;
     const cfg = item.subscriptionInfo;
@@ -65,6 +68,12 @@ function extrairAssinaturas(pedido) {
       compradorCpf: pedido.billingInfo?.contactDetails?.vatId?.id || null,
       compradorEmail: pedido.buyerInfo?.email || null,
       compradorTelefone: pedido.billingInfo?.contactDetails?.phone || null,
+      enderecoRua: endereco?.streetAddress?.name || null,
+      enderecoNumero: endereco?.streetAddress?.number || null,
+      enderecoComplemento: endereco?.streetAddress?.apt || null,
+      enderecoCidade: endereco?.city || null,
+      enderecoUf: endereco?.subdivisionFullname || endereco?.subdivision || null,
+      enderecoCep: endereco?.postalCode || null,
     });
   }
   return linhas;
