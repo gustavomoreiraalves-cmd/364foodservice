@@ -619,6 +619,23 @@ function Conteudo({ setFicha, setEtiqueta }) {
     carregar();
   }
 
+  // Única exceção à regra "sem update geral" de recebimento_itens (ver o
+  // comentário em adicionarItem sobre volumes): categoria_conta é metadado
+  // contábil puro, sem efeito em lote, estoque ou etiqueta — corrigi-la não
+  // precisa do delete+reinsert que uma correção de quantidade/validade exigiria.
+  // Atualiza local antes da resposta do servidor pra não esperar o próximo
+  // `carregar()`; desfaz se o update falhar.
+  async function atualizarCategoriaConta(item, novaCategoria) {
+    const anterior = item.categoria_conta;
+    if (anterior === novaCategoria) return;
+    setLista(l => l.map(i => (i.id === item.id ? { ...i, categoria_conta: novaCategoria } : i)));
+    const { error } = await supabase.from('recebimento_itens').update({ categoria_conta: novaCategoria }).eq('id', item.id);
+    if (error) {
+      alert('Erro ao atualizar a categoria: ' + error.message);
+      setLista(l => l.map(i => (i.id === item.id ? { ...i, categoria_conta: anterior } : i)));
+    }
+  }
+
   async function verAnexo(path) {
     if (!path) return;
     try {
@@ -1025,7 +1042,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
                           <div className="table-wrap">
                             <table>
                               <thead>
-                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Volumes</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th></th></tr>
+                                <tr><th>Lote</th><th>Matéria-prima</th><th>Peso conferido</th><th>Custo unit.</th><th>Volumes</th><th>Depósito</th><th>Validade</th><th>Status sanitário</th><th>Categoria (DRE)</th><th></th></tr>
                               </thead>
                               <tbody>
                                 {g.itens.map(it => {
@@ -1052,6 +1069,11 @@ function Conteudo({ setFicha, setEtiqueta }) {
                                       <td>
                                         <span className={`tag ${STATUS_TAG[status] || 'ok'}`}>{STATUS_LABEL[status] || '—'}</span>
                                         {it.inspecao?.motivo_rejeicao && <div className="muted" style={{ fontSize: 11 }}>{it.inspecao.motivo_rejeicao}</div>}
+                                      </td>
+                                      <td>
+                                        <select value={it.categoria_conta || ''} onChange={e => atualizarCategoriaConta(it, e.target.value)}>
+                                          {CATEGORIAS_CONTA.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
                                       </td>
                                       <td>
                                         <div className="row-actions">
