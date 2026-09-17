@@ -35,7 +35,7 @@ const CAMPOS_BUSCA = ['nome', 'nome_fantasia', 'cnpj', 'cpf', 'tipo', 'municipio
 
 export default function ClientesPage() {
   return (
-    <AppShell modulo="clientes" titulo="Clientes/Fornecedores" desc="Cadastro de clientes, fornecedores e revendas, com dados para nota fiscal">
+    <AppShell modulo="clientes" titulo="Clientes/Fornecedores" desc="Cadastro de clientes, fornecedores, transportadoras e revendas, com dados para nota fiscal">
       <Conteudo />
     </AppShell>
   );
@@ -183,9 +183,10 @@ function Conteudo() {
         <span style={{ display: 'flex', gap: 4 }}>
           {p.papeis.includes('cliente') && <span className="tag categoria">Cliente</span>}
           {p.papeis.includes('fornecedor') && <span className="tag categoria">Fornecedor</span>}
+          {p.papeis.includes('transportador') && <span className="tag categoria">Transportador</span>}
         </span>
       ),
-      textoPuro: p => p.papeis.map(x => (x === 'cliente' ? 'Cliente' : 'Fornecedor')).join(' e '),
+      textoPuro: p => p.papeis.map(x => ({ cliente: 'Cliente', fornecedor: 'Fornecedor', transportador: 'Transportador' }[x])).join(' e '),
     },
     {
       titulo: 'CNPJ / CPF', largura: 132, mono: true,

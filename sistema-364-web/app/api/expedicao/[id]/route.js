@@ -31,9 +31,9 @@ export async function PUT(request, { params }) {
   // qualquer escrita.
   if (transportadoraId) {
     const { data: transportadora, error: erroTransp } = await sb
-      .from('transportadoras').select('id, empresa_id').eq('id', transportadoraId).maybeSingle();
+      .from('fornecedores').select('id, empresa_id, is_transportador').eq('id', transportadoraId).maybeSingle();
     if (erroTransp) return NextResponse.json({ error: `Falha ao validar a transportadora: ${erroTransp.message}` }, { status: 500 });
-    if (!transportadora || transportadora.empresa_id !== expedicao.empresa_id) {
+    if (!transportadora || transportadora.empresa_id !== expedicao.empresa_id || !transportadora.is_transportador) {
       return NextResponse.json({ error: 'Transportadora não encontrada nesta empresa.' }, { status: 400 });
     }
   }

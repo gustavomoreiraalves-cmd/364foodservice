@@ -44,6 +44,7 @@ export function fornecedorParaGravar(form) {
     nome: String(form.nome || '').trim(),
     nome_fantasia: ouNulo(form.nome_fantasia),
     cnpj: soDigitos(form.cnpj) || null,
+    ie: ouNulo(form.ie),
     categoria: form.categoria || 'Outros',
     contato: ouNulo(form.contato),
     telefone: soDigitos(form.telefone) || null,

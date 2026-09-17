@@ -58,7 +58,7 @@ export async function POST(request) {
   // finalizada. Só se busca pelo id do pedido (não por garantirExpedicao, que
   // exige o id da própria expedição — não temos esse id aqui).
   const { data: expedicaoRow, error: erroExpedicao } = await sb.from('expedicoes')
-    .select('*, transportadora:transportadoras(*), expedicao_caixas(*, expedicao_itens(*))')
+    .select('*, transportadora:fornecedores(*), expedicao_caixas(*, expedicao_itens(*))')
     .eq('pedido_id', pedido.id).eq('status', 'finalizado')
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (erroExpedicao) {
@@ -75,8 +75,9 @@ export async function POST(request) {
   // resolverNota/calcularVolumesNfe exigem: `caixas` sempre array (mesmo
   // vazio), cada item com `pedido_item_id`/`quantidade` (nomes de coluna
   // crus, lidos por quantidadesAlocadasPorItem), `transportadora` como a
-  // linha crua de transportadoras (cnpj/nome/ie/logradouro/municipio/uf —
-  // resolverTransporte lê esses nomes diretamente, não um formato NFe).
+  // linha crua de fornecedores com is_transportador (cnpj/nome/ie/logradouro/
+  // municipio/uf — resolverTransporte lê esses nomes diretamente, não um
+  // formato NFe; atualização 58 moveu transportadora pra dentro de fornecedores).
   const expedicao = {
     modo_frete: expedicaoRow.modo_frete,
     transportadora: expedicaoRow.transportadora,

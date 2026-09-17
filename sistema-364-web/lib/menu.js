@@ -34,7 +34,6 @@ export const MENU = [
       { label: 'Vendas Buffet', href: '/vendas/buffet', modulo: 'pedidos' },
       { label: 'Vendas Burguer (iFood)', href: '/vendas/burguer', modulo: 'pedidos' },
       { label: 'Expedição', href: '/expedicao', modulo: 'expedicao' },
-      { label: 'Transportadoras', href: '/transportadoras', modulo: 'transportadoras' },
     ],
   },
   {

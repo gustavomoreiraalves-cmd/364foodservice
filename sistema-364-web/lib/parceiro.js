@@ -6,6 +6,16 @@
 import { clienteParaGravar, recorteComercial } from './clientes.js';
 import { fornecedorParaGravar, mensagemAoCadastrar } from './fornecedores.js';
 
+// Um fornecedor guarda dois papéis independentes desde a atualização 58
+// (is_fornecedor, is_transportador) — o registro existe na tabela por causa de
+// pelo menos um dos dois, mas a etiqueta exibida depende de qual está marcado.
+function papeisDoFornecedor(f) {
+  const p = [];
+  if (f.is_fornecedor !== false) p.push('fornecedor');
+  if (f.is_transportador) p.push('transportador');
+  return p;
+}
+
 function linhaParceiro({ id, clienteId, fornecedorId, papeis, cliente, fornecedor }) {
   const principal = cliente || fornecedor;
   return {
@@ -13,7 +23,7 @@ function linhaParceiro({ id, clienteId, fornecedorId, papeis, cliente, fornecedo
     nome: principal.nome, nome_fantasia: principal.nome_fantasia || '',
     cnpj: principal.cnpj || '', contato: principal.contato || '', telefone: principal.telefone || '',
     cpf: cliente?.cpf || '', tipo: cliente?.tipo || '', municipio: principal.municipio || '', uf: principal.uf || '',
-    categoria: fornecedor?.categoria || '', email: fornecedor?.email || '',
+    categoria: fornecedor?.categoria || '', email: fornecedor?.email || '', ie: fornecedor?.ie || cliente?.ie || '',
     cliente: cliente || null, fornecedor: fornecedor || null,
     ativo: (cliente ? cliente.ativo !== false : true) && (fornecedor ? fornecedor.ativo !== false : true),
   };
@@ -34,7 +44,7 @@ export function montarListaParceiros(clientes, fornecedores) {
     fornecedoresVinculados.add(f.id);
     linhas.push(linhaParceiro({
       id: `c:${c.id}+f:${f.id}`, clienteId: c.id, fornecedorId: f.id,
-      papeis: ['cliente', 'fornecedor'], cliente: c, fornecedor: f,
+      papeis: ['cliente', ...papeisDoFornecedor(f)], cliente: c, fornecedor: f,
     }));
   }
 
@@ -45,45 +55,52 @@ export function montarListaParceiros(clientes, fornecedores) {
 
   for (const f of fornecedores || []) {
     if (fornecedoresVinculados.has(f.id)) continue;
-    linhas.push(linhaParceiro({ id: `f:${f.id}`, clienteId: null, fornecedorId: f.id, papeis: ['fornecedor'], cliente: null, fornecedor: f }));
+    linhas.push(linhaParceiro({ id: `f:${f.id}`, clienteId: null, fornecedorId: f.id, papeis: papeisDoFornecedor(f), cliente: null, fornecedor: f }));
   }
 
   return linhas.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
 }
 
 /**
- * Grava um parceiro (cliente e/ou fornecedor vinculados) a partir de um único
- * formulário. `papeis` decide quais tabelas recebem linha; campos
- * compartilhados saem idênticos nas duas quando os dois papéis estão
- * marcados. Um papel que existia e some desta vez tenta excluir aquele lado —
+ * Grava um parceiro (cliente e/ou fornecedor/transportador vinculados) a
+ * partir de um único formulário. `papeis` decide quais tabelas recebem
+ * linha — fornecedor e transportador dividem a MESMA linha em `fornecedores`
+ * (atualização 58: `is_fornecedor`/`is_transportador`), só cliente é tabela
+ * à parte. Campos compartilhados saem idênticos nas duas quando os dois
+ * lados estão marcados. Um papel que existia e some desta vez tenta excluir
+ * aquele lado (ou, no caso fornecedor/transportador, só destrava o flag) —
  * se a FK barrar (movimento vinculado), o salvamento inteiro para ali, sem
  * gravar nada mais.
  */
 export async function salvarParceiro(sb, { form, papeis, clienteExistente, fornecedorExistente, empresaId, fiscalDisponivel = true }) {
   const querCliente = papeis.includes('cliente');
   const querFornecedor = papeis.includes('fornecedor');
-  if (!querCliente && !querFornecedor) return { error: 'Marque pelo menos um papel: cliente ou fornecedor.' };
+  const querTransportador = papeis.includes('transportador');
+  const querLinhaFornecedor = querFornecedor || querTransportador;
+  if (!querCliente && !querLinhaFornecedor) {
+    return { error: 'Marque pelo menos um papel: cliente, fornecedor ou transportador.' };
+  }
 
   if (!querCliente && clienteExistente) {
     const { error } = await sb.from('clientes').delete().eq('id', clienteExistente.id);
     if (error) return { error: mensagemDeExclusaoDePapel(error, 'cliente') };
   }
-  if (!querFornecedor && fornecedorExistente) {
+  if (!querLinhaFornecedor && fornecedorExistente) {
     const { error } = await sb.from('fornecedores').delete().eq('id', fornecedorExistente.id);
-    if (error) return { error: mensagemDeExclusaoDePapel(error, 'fornecedor') };
+    if (error) return { error: mensagemDeExclusaoDePapel(error, 'fornecedor/transportador') };
   }
 
   let clienteId = querCliente ? clienteExistente?.id : null;
-  let fornecedorId = querFornecedor ? fornecedorExistente?.id : null;
+  let fornecedorId = querLinhaFornecedor ? fornecedorExistente?.id : null;
   let fornecedorCriadoAgora = false;
 
-  // Fornecedor primeiro: se os dois lados são novos, o cliente precisa do id
-  // dele pra gravar o vínculo já na própria criação.
-  if (querFornecedor) {
-    const dados = fornecedorParaGravar(form);
+  // Fornecedor/transportador primeiro: se os dois lados são novos, o cliente
+  // precisa do id dele pra gravar o vínculo já na própria criação.
+  if (querLinhaFornecedor) {
+    const dados = { ...fornecedorParaGravar(form), is_fornecedor: querFornecedor, is_transportador: querTransportador };
     if (fornecedorId) {
       const { error } = await sb.from('fornecedores').update(dados).eq('id', fornecedorId);
-      if (error) return { error: 'Não foi possível salvar o fornecedor: ' + error.message };
+      if (error) return { error: 'Não foi possível salvar o fornecedor/transportador: ' + error.message };
     } else {
       const { data, error } = await sb.from('fornecedores')
         .insert([{ ...dados, empresa_id: empresaId }]).select('*').single();
@@ -95,7 +112,7 @@ export async function salvarParceiro(sb, { form, papeis, clienteExistente, forne
 
   if (querCliente) {
     const base = fiscalDisponivel ? clienteParaGravar(form) : recorteComercial(clienteParaGravar(form));
-    const dados = { ...base, fornecedor_vinculado_id: querFornecedor ? fornecedorId : null };
+    const dados = { ...base, fornecedor_vinculado_id: querLinhaFornecedor ? fornecedorId : null };
     if (clienteId) {
       const { error } = await sb.from('clientes').update(dados).eq('id', clienteId);
       if (error) {
@@ -113,7 +130,7 @@ export async function salvarParceiro(sb, { form, papeis, clienteExistente, forne
     }
   }
 
-  if (querFornecedor && querCliente) {
+  if (querLinhaFornecedor && querCliente) {
     const { error } = await sb.from('fornecedores')
       .update({ cliente_vinculado_id: clienteId }).eq('id', fornecedorId);
     if (error) return { error: 'Não foi possível vincular o fornecedor ao cliente: ' + error.message };

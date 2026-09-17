@@ -16,10 +16,11 @@ export default function FichaParceiro({
 }) {
   const querCliente = papeis.includes('cliente');
   const querFornecedor = papeis.includes('fornecedor');
-  // Endereço é da empresa, não do papel — mostra pra qualquer um dos dois.
+  const querTransportador = papeis.includes('transportador');
+  // Endereço é da empresa, não do papel — mostra pra qualquer um dos três.
   // fiscalDisponivel só entra pro lado cliente: sem a atualização 36, a
   // coluna nem existe em `clientes` (fornecedores tem desde a 41).
-  const mostrarEndereco = querFornecedor || (querCliente && fiscalDisponivel);
+  const mostrarEndereco = querFornecedor || querTransportador || (querCliente && fiscalDisponivel);
 
   function alternarPapel(papel) {
     setPapeis(atual => (atual.includes(papel) ? atual.filter(p => p !== papel) : [...atual, papel]));
@@ -37,6 +38,10 @@ export default function FichaParceiro({
           <label className="check-line">
             <input type="checkbox" checked={querFornecedor} onChange={() => alternarPapel('fornecedor')} />
             Fornecedor
+          </label>
+          <label className="check-line">
+            <input type="checkbox" checked={querTransportador} onChange={() => alternarPapel('transportador')} />
+            Transportador
           </label>
         </div>
       </div>
@@ -164,20 +169,31 @@ export default function FichaParceiro({
         </div>
       )}
 
-      {querFornecedor && (
+      {(querFornecedor || querTransportador) && (
         <div className="form-grid">
-          <div className="secao">Dados de fornecedor</div>
-          <div>
-            <label htmlFor="p-categoria">Categoria</label>
-            <select id="p-categoria" value={form.categoria || 'Outros'}
-                    onChange={e => setForm({ ...form, categoria: e.target.value })}>
-              {CATEGORIAS_FORNECEDOR.map(c => <option key={c}>{c}</option>)}
-            </select>
+          <div className="secao">
+            {querFornecedor && querTransportador ? 'Dados de fornecedor e transportador'
+              : querFornecedor ? 'Dados de fornecedor' : 'Dados de transportador'}
           </div>
+          {querFornecedor && (
+            <>
+              <div>
+                <label htmlFor="p-categoria">Categoria</label>
+                <select id="p-categoria" value={form.categoria || 'Outros'}
+                        onChange={e => setForm({ ...form, categoria: e.target.value })}>
+                  {CATEGORIAS_FORNECEDOR.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="p-email">E-mail</label>
+                <input id="p-email" type="email" value={form.email || ''}
+                       onChange={e => setForm({ ...form, email: e.target.value })} />
+              </div>
+            </>
+          )}
           <div>
-            <label htmlFor="p-email">E-mail</label>
-            <input id="p-email" type="email" value={form.email || ''}
-                   onChange={e => setForm({ ...form, email: e.target.value })} />
+            <label htmlFor="p-ie-forn">Inscrição estadual</label>
+            <input id="p-ie-forn" value={form.ie || ''} onChange={e => setForm({ ...form, ie: e.target.value })} />
           </div>
         </div>
       )}

@@ -39,7 +39,7 @@ export async function POST(request, { params }) {
     sb.from('pedido_itens').select('id, quantidade').eq('pedido_id', expedicao.pedido_id),
     sb.from('expedicao_caixas').select('*, expedicao_itens(*)').eq('expedicao_id', expedicao.id),
     expedicao.transportadora_id
-      ? sb.from('transportadoras').select('*').eq('id', expedicao.transportadora_id).maybeSingle()
+      ? sb.from('fornecedores').select('*').eq('id', expedicao.transportadora_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     sb.from('pedidos').select('id, empresa_id, cliente_id, status, observacoes, condicao_pagamento_id').eq('id', expedicao.pedido_id).maybeSingle(),
   ]);

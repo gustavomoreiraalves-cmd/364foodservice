@@ -84,7 +84,7 @@ function Conteudo() {
 
     const [{ data: itens }, { data: transp }, { data: nats }, { data: caixasSalvas }, { data: empresaLinha }] = await Promise.all([
       supabase.from('pedido_itens').select('*, produto:produtos(id, nome, rastreado)').eq('pedido_id', exp.pedido_id),
-      supabase.from('transportadoras').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
+      supabase.from('fornecedores').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).eq('is_transportador', true).order('nome'),
       supabase.from('naturezas_operacao').select('id, descricao').eq('empresa_id', empresaAtual.id).eq('tipo_operacao', 'saida').eq('ativo', true),
       // produtos/embalagens aninhados só pra etiqueta de despacho — o resto
       // da tela (caixas calculadas a partir de `alocacao`, mais abaixo)
