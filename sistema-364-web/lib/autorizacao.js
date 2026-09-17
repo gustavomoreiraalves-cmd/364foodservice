@@ -90,7 +90,7 @@ export async function garantirUnidade(sb, user, isAdmin, unidadeId, campos = 'id
 // descobrir a empresa, então autorizar", com o mesmo cuidado de trocar 403 por
 // 404 para não virar oráculo de pedidoId de outro dono). Centralizado aqui
 // como as duas funções acima.
-export async function garantirPedido(sb, user, isAdmin, pedidoId, campos = 'id, empresa_id, cliente_id, observacoes, status') {
+export async function garantirPedido(sb, user, isAdmin, pedidoId, campos = 'id, empresa_id, cliente_id, observacoes, status, condicao_pagamento_id') {
   return garantirLinhaDaEmpresa(sb, user, isAdmin, {
     tabela: 'pedidos',
     id: pedidoId,

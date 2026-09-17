@@ -19,7 +19,7 @@ export function ordenarFefo(lotes) {
 // Para cada item do pedido: se o produto é rastreado, consome os lotes
 // disponíveis em ordem FEFO até cobrir a quantidade; o que sobrar sem saldo
 // de lote (ou o item inteiro, se não for rastreado) entra com
-// recebimentoItemId null — "sem lote", aceito desde a revisão de 25/08 da
+// embalagemId null — "sem lote", aceito desde a revisão de 25/08 da
 // Fase 4. Nunca aloca mais do que a quantidade pedida.
 export function sugerirAlocacao(itensPedido, lotesPorProduto) {
   const alocacao = [];
@@ -32,12 +32,12 @@ export function sugerirAlocacao(itensPedido, lotesPorProduto) {
         const saldo = Number(lote.saldo);
         if (!(saldo > 0)) continue;
         const usar = Math.min(saldo, restante);
-        alocacao.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: lote.recebimentoItemId, quantidade: usar });
+        alocacao.push({ pedidoItemId: item.pedidoItemId, embalagemId: lote.embalagemId, quantidade: usar });
         restante -= usar;
       }
     }
     if (restante > 0) {
-      alocacao.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: null, quantidade: restante });
+      alocacao.push({ pedidoItemId: item.pedidoItemId, embalagemId: null, quantidade: restante });
     }
   }
   return alocacao;
@@ -75,7 +75,7 @@ export function empacotarCaixas(alocacao, produtoPorPedidoItemId) {
         continue;
       }
       const usar = Math.min(espaco, restante);
-      atual.push({ pedidoItemId: item.pedidoItemId, recebimentoItemId: item.recebimentoItemId, quantidade: usar });
+      atual.push({ pedidoItemId: item.pedidoItemId, embalagemId: item.embalagemId, quantidade: usar });
       restante -= usar;
     }
   }
@@ -98,6 +98,33 @@ export function calcularDivergencia(pedidoItens, alocacao) {
     if (diferenca !== 0) divergencias.push({ pedidoItemId: item.id, pedido, alocado, diferenca });
   }
   return divergencias;
+}
+
+// Confere se algum par produto+embalagem alocado neste romaneio estourou o
+// saldo real do lote (achado Importante da revisão final de 16/09: a seção
+// "Alocação por produto" deixa o operador digitar qualquer quantidade contra
+// qualquer lote, sem checagem — sugerirAlocacao sempre limitava a
+// min(saldo, restante), mas a edição manual não passa mais por ali).
+//
+// Não soma quantidade aqui: `saldos` já vem de vw_estoque_produto_lote, cujo
+// `saldo` é total_embalado − total_expedido, e total_expedido já inclui as
+// PRÓPRIAS linhas deste romaneio (é uma expedição com status ≠ 'cancelado',
+// exatamente o filtro da view) — então saldo < 0 já significa "o que foi
+// alocado (neste romaneio e/ou em outro concorrente) passou do que existe".
+// Um par sem saldo nenhum na view (lote não encontrado — embalagem cancelada
+// depois da alocação, achado 2) também bloqueia: `saldoPorChave.get` devolve
+// undefined, e `!(undefined >= 0)` é true.
+//
+// `paresAlocados`: [{ produtoId, embalagemId }] únicos, embalagemId != null,
+//   referenciados pelas caixas deste romaneio.
+// `saldos`: [{ produto_id, embalagem_id, saldo }] de vw_estoque_produto_lote,
+//   já filtrada pela empresa e pelos embalagem_id de paresAlocados.
+export function loteAcimaDoSaldo(paresAlocados, saldos) {
+  const saldoPorChave = new Map((saldos || []).map(s => [`${s.produto_id}::${s.embalagem_id}`, Number(s.saldo)]));
+  return (paresAlocados || []).filter(p => {
+    const saldo = saldoPorChave.get(`${p.produtoId}::${p.embalagemId}`);
+    return !(saldo >= 0);
+  });
 }
 
 // Grupo `vol` da NF-e (transp/vol) — sempre derivado das caixas do romaneio,

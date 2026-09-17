@@ -75,7 +75,7 @@ export async function PUT(request, { params }) {
     const linhasItens = (caixa.itens || []).map(item => ({
       empresa_id: expedicao.empresa_id, expedicao_caixa_id: caixaGravada.id,
       pedido_item_id: item.pedidoItemId, produto_id: item.produtoId,
-      recebimento_item_id: item.recebimentoItemId || null, quantidade: item.quantidade,
+      embalagem_id: item.embalagemId || null, quantidade: item.quantidade,
     }));
     if (linhasItens.length) {
       const { error: erroItens } = await sb.from('expedicao_itens').insert(linhasItens);

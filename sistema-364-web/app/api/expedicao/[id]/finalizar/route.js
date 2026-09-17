@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { autorizarModulo } from '../../../../../lib/pontoServer';
 import { garantirExpedicao, exigirUuid } from '../../../../../lib/autorizacao';
-import { calcularDivergencia } from '../../../../../lib/expedicao';
+import { calcularDivergencia, loteAcimaDoSaldo } from '../../../../../lib/expedicao';
 import { emitirNfe } from '../../../../../lib/nfe/emitir';
 
 export const runtime = 'nodejs';
@@ -41,7 +41,7 @@ export async function POST(request, { params }) {
     expedicao.transportadora_id
       ? sb.from('transportadoras').select('*').eq('id', expedicao.transportadora_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    sb.from('pedidos').select('id, empresa_id, cliente_id, status, observacoes').eq('id', expedicao.pedido_id).maybeSingle(),
+    sb.from('pedidos').select('id, empresa_id, cliente_id, status, observacoes, condicao_pagamento_id').eq('id', expedicao.pedido_id).maybeSingle(),
   ]);
   if (erroItens || erroCaixas || erroTransportadora || erroPedido) {
     return NextResponse.json({ error: 'Falha ao carregar os dados do romaneio para finalizar.' }, { status: 500 });
@@ -67,6 +67,34 @@ export async function POST(request, { params }) {
       error: 'O romaneio não cobre exatamente o pedido — ajuste as caixas ou o pedido antes de finalizar.',
       divergencias,
     }, { status: 400 });
+  }
+
+  // Achado Importante da revisão final de 16/09: a seção "Alocação por
+  // produto" deixa o operador digitar qualquer quantidade contra qualquer
+  // lote, sem checar o saldo real — só sugerirAlocacao (a sugestão inicial)
+  // respeitava min(saldo, restante). Confere aqui, com o saldo mais recente
+  // de vw_estoque_produto_lote, ANTES de qualquer escrita (mesmo lugar da
+  // checagem de divergência acima).
+  const paresAlocados = [...new Map(
+    (caixas || []).flatMap(c => (c.expedicao_itens || [])
+      .filter(i => i.embalagem_id)
+      .map(i => [`${i.produto_id}::${i.embalagem_id}`, { produtoId: i.produto_id, embalagemId: i.embalagem_id }]))
+  ).values()];
+  if (paresAlocados.length) {
+    const { data: saldos, error: erroSaldos } = await sb.from('vw_estoque_produto_lote')
+      .select('produto_id, embalagem_id, saldo')
+      .eq('empresa_id', expedicao.empresa_id)
+      .in('embalagem_id', paresAlocados.map(p => p.embalagemId));
+    if (erroSaldos) {
+      return NextResponse.json({ error: `Falha ao conferir o saldo dos lotes: ${erroSaldos.message}` }, { status: 500 });
+    }
+    const lotesAcimaDoSaldo = loteAcimaDoSaldo(paresAlocados, saldos || []);
+    if (lotesAcimaDoSaldo.length) {
+      return NextResponse.json({
+        error: 'A alocação de um ou mais lotes passou do saldo disponível — ajuste a quantidade ou o lote na seção "Alocação por produto" antes de finalizar.',
+        lotesAcimaDoSaldo,
+      }, { status: 400 });
+    }
   }
 
   // Achado da revisão (Importante I1): um `update` comum não é

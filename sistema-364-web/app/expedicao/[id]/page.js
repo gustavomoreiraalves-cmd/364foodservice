@@ -6,6 +6,7 @@ import AppShell from '../../../components/AppShell';
 import { useEmpresaAtual } from '../../../lib/empresa';
 import { sugerirAlocacao, empacotarCaixas, calcularDivergencia } from '../../../lib/expedicao';
 import { medidasImpressao, urlRastreio } from '../../../lib/etiquetas';
+import { fmtDate } from '../../../lib/format';
 import { qrSvg } from '../../../lib/qr';
 import EtiquetaDespachoPrint, { imprimirEtiquetaDespacho } from '../../../components/EtiquetaDespachoPrint';
 
@@ -41,13 +42,14 @@ function Conteudo() {
   // só seleciona id/nome/slug/prefixo/grupo/logo/empregador_id pro seletor
   // de empresas do topo, sem os dois campos do selo).
   const [empresaSim, setEmpresaSim] = useState(null);
-  // Fabricação/validade por (produto_id|recebimento_item_id) — não vem em
-  // `expedicao_itens` nem em `recebimento_itens` (que é o LOTE da matéria-
-  // prima, não da unidade embalada). Só existe em `embalagem_itens`, que
-  // `expedicao_itens` não referencia diretamente — ver o comentário em
-  // `carregar()` sobre a ambiguidade quando mais de uma embalagem consome o
-  // mesmo produto + lote de origem.
-  const [fabricacaoValidadePorItem, setFabricacaoValidadePorItem] = useState({});
+  // Saldo por produto+embalagem (Task 1: vw_estoque_produto_lote agrupada
+  // por embalagem, não mais por matéria-prima) — alimenta a sugestão FEFO
+  // de um rascunho novo E as opções de lote da seção de alocação editável
+  // (Task 4). Sem filtrar saldo>0 aqui: reabrindo um rascunho salvo, o
+  // lote que ele já usa precisa aparecer mesmo com saldo zerado por si
+  // mesmo (mesmo raciocínio que já existia pra não re-rodar sugerirAlocacao
+  // num rascunho salvo, comentário abaixo).
+  const [lotesPorProduto, setLotesPorProduto] = useState({});
   const [etiquetaDespacho, setEtiquetaDespacho] = useState(null);
   const [imprimindoCaixaId, setImprimindoCaixaId] = useState(null);
   const [erroEtiqueta, setErroEtiqueta] = useState('');
@@ -84,11 +86,11 @@ function Conteudo() {
       supabase.from('pedido_itens').select('*, produto:produtos(id, nome, rastreado)').eq('pedido_id', exp.pedido_id),
       supabase.from('transportadoras').select('*').eq('empresa_id', empresaAtual.id).eq('ativo', true).order('nome'),
       supabase.from('naturezas_operacao').select('id, descricao').eq('empresa_id', empresaAtual.id).eq('tipo_operacao', 'saida').eq('ativo', true),
-      // produtos/recebimento_itens aninhados só pra etiqueta de despacho —
-      // o resto da tela (caixas calculadas a partir de `alocacao`, mais
-      // abaixo) nunca usou esses campos e continua sem usar.
+      // produtos/embalagens aninhados só pra etiqueta de despacho — o resto
+      // da tela (caixas calculadas a partir de `alocacao`, mais abaixo)
+      // nunca usou esses campos e continua sem usar.
       supabase.from('expedicao_caixas')
-        .select('*, expedicao_itens(*, produtos(codigo, nome, conservacao_texto), recebimento_itens(lote))')
+        .select('*, expedicao_itens(*, produtos(codigo, nome, conservacao_texto), embalagens(lote, data))')
         .eq('expedicao_id', exp.id).order('numero'),
       // Nome e selo S.I.M. da empresa — `empresaAtual` (lib/empresa.js) não
       // traz `sim_numero`/`sim_municipio`, só o necessário pro seletor do
@@ -101,6 +103,22 @@ function Conteudo() {
     setCaixasSalvas(caixasSalvas || []);
     setEmpresaSim(empresaLinha || null);
 
+    // Saldo por produto+embalagem (Task 1) dos produtos deste pedido — sem
+    // filtro de saldo>0 na consulta (ver comentário do estado
+    // lotesPorProduto, acima); o filtro pra sugestão de rascunho novo é
+    // feito abaixo, em JS, só ali onde faz diferença.
+    const produtoIds = [...new Set((itens || []).map(i => i.produto_id))];
+    const { data: saldosLote } = produtoIds.length
+      ? await supabase.from('vw_estoque_produto_lote').select('*').eq('empresa_id', empresaAtual.id).in('produto_id', produtoIds)
+      : { data: [] };
+    const porProduto = {};
+    for (const l of saldosLote || []) {
+      (porProduto[l.produto_id] ||= []).push({
+        embalagemId: l.embalagem_id, lote: l.lote, fabricacao: l.fabricacao, validade: l.validade, saldo: Number(l.saldo),
+      });
+    }
+    setLotesPorProduto(porProduto);
+
     // Reabrindo um rascunho que já foi salvo antes: usa a alocação que já
     // está gravada, não uma sugestão nova. `vw_estoque_produto_lote.saldo`
     // já desconta as PRÓPRIAS linhas deste rascunho (via total_expedido),
@@ -111,65 +129,91 @@ function Conteudo() {
     const itensSalvos = (caixasSalvas || []).flatMap(c => c.expedicao_itens || []);
     if (itensSalvos.length) {
       setAlocacao(itensSalvos.map(i => ({
-        pedidoItemId: i.pedido_item_id, recebimentoItemId: i.recebimento_item_id, quantidade: i.quantidade,
+        pedidoItemId: i.pedido_item_id, embalagemId: i.embalagem_id, quantidade: i.quantidade,
       })));
-      await carregarFabricacaoValidade(itensSalvos);
       return;
     }
 
     // Rascunho novo, sem nada salvo ainda — sugere a alocação FEFO a partir
     // do saldo de lote (vw_estoque_produto_lote, Task 1) dos produtos deste
-    // pedido. Só busca se houver produto pra filtrar (`.in()` com array
-    // vazio não deveria bater em nada, mas evita depender disso).
-    const produtoIds = [...new Set((itens || []).map(i => i.produto_id))];
-    const { data: saldosLote } = produtoIds.length
-      ? await supabase.from('vw_estoque_produto_lote').select('*').eq('empresa_id', empresaAtual.id).in('produto_id', produtoIds).gt('saldo', 0)
-      : { data: [] };
-
-    // Agrupa o saldo por produto — sugerirAlocacao espera { [produtoId]: lotes[] }.
-    const porProduto = {};
-    for (const l of saldosLote || []) {
-      (porProduto[l.produto_id] ||= []).push({ recebimentoItemId: l.recebimento_item_id, validade: l.validade, saldo: l.saldo });
-    }
-
+    // pedido, só com saldo>0 (porProduto acima não filtra — ver comentário
+    // do estado lotesPorProduto).
     const itensPedidoParaSugestao = (itens || []).map(i => ({
       pedidoItemId: i.id, produtoId: i.produto_id, quantidade: i.quantidade, rastreado: i.produto?.rastreado,
     }));
-    setAlocacao(sugerirAlocacao(itensPedidoParaSugestao, porProduto));
-  }
-
-  // Fabricação e validade da unidade embalada, por produto + lote de
-  // origem — a etiqueta de despacho (spec de 20/08) mostra os dois, mas
-  // nenhum dos dois mora em `expedicao_itens` nem em `recebimento_itens`
-  // (que é o lote da MATÉRIA-PRIMA recebida, não da unidade embalada
-  // expedida). Só existe em `embalagem_itens.validade` e
-  // `embalagens.data`, e `expedicao_itens` não guarda qual
-  // `embalagem_item` específico originou a unidade — só produto + lote de
-  // origem + quantidade (mesma limitação de `vw_estoque_produto_lote`,
-  // atualizacao_50). Quando mais de uma embalagem consumiu o mesmo produto
-  // + lote de origem, fica a primeira encontrada: não há como desambiguar
-  // sem alterar a migração, fora do escopo desta tarefa.
-  async function carregarFabricacaoValidade(itensSalvos) {
-    const chaves = itensSalvos.filter(i => i.recebimento_item_id);
-    const produtoIds = [...new Set(chaves.map(i => i.produto_id))];
-    const loteIds = [...new Set(chaves.map(i => i.recebimento_item_id))];
-    if (!produtoIds.length || !loteIds.length) { setFabricacaoValidadePorItem({}); return; }
-    const { data } = await supabase.from('embalagem_itens')
-      .select('produto_id, recebimento_item_id, validade, embalagens(data)')
-      .in('produto_id', produtoIds).in('recebimento_item_id', loteIds);
-    const mapa = {};
-    for (const e of data || []) {
-      const chave = `${e.produto_id}|${e.recebimento_item_id}`;
-      if (!mapa[chave]) mapa[chave] = { fabricacao: e.embalagens?.data || null, validade: e.validade || null };
-    }
-    setFabricacaoValidadePorItem(mapa);
+    const porProdutoComSaldo = Object.fromEntries(
+      Object.entries(porProduto).map(([pid, lotes]) => [pid, lotes.filter(l => l.saldo > 0)])
+    );
+    setAlocacao(sugerirAlocacao(itensPedidoParaSugestao, porProdutoComSaldo));
   }
 
   const caixas = empacotarCaixas(alocacao, Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id])));
   // Nome do produto por pedidoItemId — a alocação/caixa só carrega ids
-  // (pedidoItemId, recebimentoItemId), e quem monta a caixa fisicamente
+  // (pedidoItemId, embalagemId), e quem monta a caixa fisicamente
   // precisa ver o nome do produto, não um uuid de lote.
   const nomeProdutoPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto?.nome || i.produto_id]));
+
+  // produto_id por pedidoItemId — usado pra buscar as opções de lote
+  // (lotesPorProduto é indexado por produto_id) a partir de uma linha de
+  // alocação, que só carrega pedidoItemId.
+  const produtoIdPorPedidoItemId = Object.fromEntries(pedidoItens.map(i => [i.id, i.produto_id]));
+
+  // Lote/fabricação por embalagem_id vindo do embed de `caixasSalvas`
+  // (`expedicao_itens(*, embalagens(lote, data))`, carregado em carregar()) —
+  // esse embed é um join simples por FK, sem o `status = 'finalizada'` que
+  // `vw_estoque_produto_lote` exige. Serve de fallback quando uma embalagem
+  // referenciada por um rascunho salvo some da view (status mudou depois da
+  // alocação) — ver comentário de `opcoesLoteComExtras`, abaixo.
+  const loteInfoPorEmbalagemId = Object.fromEntries(
+    caixasSalvas.flatMap(c => (c.expedicao_itens || [])
+      .filter(i => i.embalagem_id)
+      .map(i => [i.embalagem_id, { lote: i.embalagens?.lote || null, fabricacao: i.embalagens?.data || null }]))
+  );
+
+  // Rótulo do lote pra exibição (código de embalagens.lote, não o uuid) —
+  // usado tanto na seção de alocação quanto no resumo de "Caixas", abaixo.
+  function labelLote(produtoId, embalagemId) {
+    if (!embalagemId) return 'sem lote';
+    const encontrado = (lotesPorProduto[produtoId] || []).find(l => l.embalagemId === embalagemId);
+    if (encontrado) return encontrado.lote;
+    return loteInfoPorEmbalagemId[embalagemId]?.lote || embalagemId;
+  }
+
+  // Opções do select de lote pra um item do pedido: a lista "viva" de
+  // lotesPorProduto (Task 1, filtrada por status='finalizada' na view) mais
+  // — achado 2 da revisão final — qualquer embalagemId já selecionado em uma
+  // linha deste item que não esteja mais nessa lista (embalagem cancelada
+  // depois que o rascunho já alocou contra ela). Mesmo padrão de
+  // PedidoForm.js (`.filter(c => c.ativo !== false || c.id === ...)`) pra
+  // não deixar o select em branco e a linha de "Caixas" caindo pro uuid cru.
+  function opcoesLoteComExtras(opcoesLote, linhasItem) {
+    const idsExistentes = new Set(opcoesLote.map(l => l.embalagemId));
+    const extras = [];
+    for (const linha of linhasItem) {
+      if (linha.embalagemId && !idsExistentes.has(linha.embalagemId) && !extras.some(e => e.embalagemId === linha.embalagemId)) {
+        const info = loteInfoPorEmbalagemId[linha.embalagemId];
+        extras.push({
+          embalagemId: linha.embalagemId,
+          lote: `${info?.lote || linha.embalagemId} (lote removido?)`,
+          validade: null,
+          saldo: null,
+        });
+      }
+    }
+    return extras.length ? [...opcoesLote, ...extras] : opcoesLote;
+  }
+
+  function atualizarLinhaAlocacao(indice, campo, valor) {
+    setAlocacao(alocacao.map((linha, i) => (i === indice ? { ...linha, [campo]: valor } : linha)));
+  }
+
+  function adicionarLinhaAlocacao(pedidoItemId) {
+    setAlocacao([...alocacao, { pedidoItemId, embalagemId: null, quantidade: 0 }]);
+  }
+
+  function removerLinhaAlocacao(indice) {
+    setAlocacao(alocacao.filter((_, i) => i !== indice));
+  }
 
   // Imprime a etiqueta de despacho de UMA caixa — registra a impressão
   // ANTES de montar a etiqueta (mesma ordem de ModalEtiquetas.imprimir():
@@ -187,7 +231,7 @@ function Conteudo() {
     // só as linhas com lote (produto rastreado) precisam de prefixo de
     // empresa pra montar a URL de rastreio sem ambiguidade entre empresas
     // (mesma checagem de app/recebimentos/page.js:abrirEtiquetas).
-    const algumaLinhaTemLote = itensCaixa.some(i => i.recebimento_itens?.lote);
+    const algumaLinhaTemLote = itensCaixa.some(i => i.embalagens?.lote);
     if (algumaLinhaTemLote && !empresaAtual?.prefixo_codigo) {
       setErroEtiqueta('Esta empresa não tem prefixo de código cadastrado. Cadastre o prefixo antes de imprimir '
         + 'etiquetas de despacho — sem ele o QR pode ficar ambíguo entre empresas.');
@@ -215,8 +259,8 @@ function Conteudo() {
       let produtos;
       try {
         produtos = await Promise.all(itensCaixa.map(async i => {
-          const fv = fabricacaoValidadePorItem[`${i.produto_id}|${i.recebimento_item_id}`] || {};
-          const lote = i.recebimento_itens?.lote;
+          const fv = (lotesPorProduto[i.produto_id] || []).find(l => l.embalagemId === i.embalagem_id) || {};
+          const lote = i.embalagens?.lote || null;
           const qr = lote
             ? await qrSvg(urlRastreio(empresaAtual.prefixo_codigo, lote, process.env.NEXT_PUBLIC_SITE_URL), tamanhoQr)
             : null; // sem lote (não rastreado) — nada pra apontar, a linha sai sem QR.
@@ -225,7 +269,7 @@ function Conteudo() {
             nome: i.produtos?.nome,
             lote,
             quantidade: i.quantidade,
-            fabricacao: fv.fabricacao,
+            fabricacao: i.embalagens?.data || fv.fabricacao,
             validade: fv.validade,
             qrSvg: qr,
           };
@@ -269,7 +313,7 @@ function Conteudo() {
         caixas: caixas.map((itensCaixa, indice) => ({
           numero: indice + 1,
           pesoBrutoKg: null,
-          itens: itensCaixa.map(i => ({ pedidoItemId: i.pedidoItemId, produtoId: pedidoItens.find(pi => pi.id === i.pedidoItemId)?.produto_id, recebimentoItemId: i.recebimentoItemId, quantidade: i.quantidade })),
+          itens: itensCaixa.map(i => ({ pedidoItemId: i.pedidoItemId, produtoId: pedidoItens.find(pi => pi.id === i.pedidoItemId)?.produto_id, embalagemId: i.embalagemId, quantidade: i.quantidade })),
         })),
       };
       const r = await fetch(`/api/expedicao/${id}`, { method: 'PUT', headers: await cabecalhoAuth(), body: JSON.stringify(corpo) });
@@ -374,12 +418,72 @@ function Conteudo() {
         </div>
       )}
 
+      <h4>Alocação por produto</h4>
+      {pedidoItens.map(item => {
+        const linhas = alocacao.map((a, idx) => ({ ...a, idx })).filter(a => a.pedidoItemId === item.id);
+        const totalAlocado = linhas.reduce((s, a) => s + Number(a.quantidade || 0), 0);
+        const totalPedido = Number(item.quantidade);
+        const opcoesLote = lotesPorProduto[item.produto_id] || [];
+        const opcoesLoteExibidas = opcoesLoteComExtras(opcoesLote, linhas);
+        return (
+          <div key={item.id} style={{ borderBottom: '1px solid var(--linha)', padding: '6px 0' }}>
+            <strong>{item.produto?.nome}</strong> — pedido {totalPedido}, alocado {totalAlocado}
+            {totalAlocado !== totalPedido && (
+              <span className="tag warn" style={{ marginLeft: 8 }}>diferente do pedido</span>
+            )}
+            {linhas.map(a => {
+              // Saldo real do lote selecionado (não a lista com extras
+              // injetados de opcoesLoteComExtras — um lote "removido" tem
+              // saldo null ali, e a quantidade digitada não deveria ser
+              // comparada contra isso). Mesmo alerta de PedidoForm.js
+              // (excedeSaldo/"acima do saldo") pro caso equivalente.
+              const loteReal = a.embalagemId ? opcoesLote.find(l => l.embalagemId === a.embalagemId) : null;
+              const acimaDoSaldo = !!loteReal && Number(a.quantidade || 0) > Number(loteReal.saldo);
+              return (
+                <div key={a.idx} className="row-actions" style={{ marginTop: 4 }}>
+                  <select disabled={somenteLeitura} value={a.embalagemId || ''}
+                    onChange={e => atualizarLinhaAlocacao(a.idx, 'embalagemId', e.target.value || null)}>
+                    <option value="">Sem lote</option>
+                    {opcoesLoteExibidas.map(l => (
+                      <option key={l.embalagemId} value={l.embalagemId}>
+                        {l.lote}{l.validade ? ` — val. ${fmtDate(l.validade)}` : ''}{l.saldo != null ? ` — saldo ${l.saldo}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="number" min="0" max={totalPedido} step="0.001" style={{ width: 90 }} disabled={somenteLeitura}
+                    value={a.quantidade}
+                    onChange={e => {
+                      // `max` no input só afeta o spinner nativo — não bloqueia
+                      // digitação por teclado. Sem este clamp, um número digitado
+                      // grande demais (typo) chega inteiro em `alocacao` e
+                      // `empacotarCaixas` (lib/expedicao.js) trava a aba tentando
+                      // montar dezenas de milhares de caixas num loop síncrono.
+                      const bruto = Number(e.target.value) || 0;
+                      atualizarLinhaAlocacao(a.idx, 'quantidade', Math.max(0, Math.min(bruto, totalPedido)));
+                    }} />
+                  {acimaDoSaldo && <span className="tag warn">acima do saldo</span>}
+                  {!somenteLeitura && (
+                    <button className="btn danger small" type="button" onClick={() => removerLinhaAlocacao(a.idx)}>×</button>
+                  )}
+                </div>
+              );
+            })}
+            {!somenteLeitura && (
+              <button className="btn secondary small" type="button" style={{ marginTop: 4 }}
+                onClick={() => adicionarLinhaAlocacao(item.id)}>
+                + lote
+              </button>
+            )}
+          </div>
+        );
+      })}
+
       <h4>Caixas ({caixas.length})</h4>
       {caixas.map((itensCaixa, i) => (
         <div key={i} className="row-actions" style={{ borderBottom: '1px solid var(--linha)', padding: '4px 0' }}>
           <strong>Caixa {i + 1}</strong> — {itensCaixa.reduce((s, it) => s + it.quantidade, 0)} un.
           {itensCaixa.map((it, j) => (
-            <span key={j} className="tag"> {nomeProdutoPorPedidoItemId[it.pedidoItemId] || '?'} — lote {it.recebimentoItemId || 'sem lote'} × {it.quantidade}</span>
+            <span key={j} className="tag"> {nomeProdutoPorPedidoItemId[it.pedidoItemId] || '?'} — lote {labelLote(produtoIdPorPedidoItemId[it.pedidoItemId], it.embalagemId)} × {it.quantidade}</span>
           ))}
         </div>
       ))}

@@ -3,11 +3,22 @@ import { useState } from 'react';
 import { fmtMoney } from '../lib/format';
 import { precoDoItem, totalPedido } from '../lib/pedidos';
 
+// Formas de pagamento aceitas no pedido — check da coluna pedidos.forma_pagamento
+// (atualização 53) lista os mesmos valores.
+export const FORMAS_PAGAMENTO = [
+  { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'pix', label: 'PIX' },
+  { value: 'boleto', label: 'Boleto' },
+  { value: 'cartao_credito', label: 'Cartão de crédito' },
+  { value: 'cartao_debito', label: 'Cartão de débito' },
+  { value: 'transferencia', label: 'Transferência' },
+];
+
 // Cabeçalho e itens do pedido de venda. Usado pelo cadastro em /pedidos e pela
 // edição em /pedidos/[id]. Não fala com o Supabase: quem chama é que grava.
 export default function PedidoForm({
   cabecalho, setCabecalho, itens, setItens,
-  clientes, produtos, funcionarios, saldoProduto,
+  clientes, produtos, funcionarios, saldoProduto, condicoesPagamento = [],
   somenteLeitura = false,
 }) {
   const [novoItem, setNovoItem] = useState({ produto_id: '', quantidade: '', preco_unitario: '' });
@@ -56,6 +67,22 @@ export default function PedidoForm({
           <input type="text" disabled={somenteLeitura} value={cabecalho.observacoes || ''}
             placeholder="Ex.: entregar antes das 10h"
             onChange={e => setCabecalho({ ...cabecalho, observacoes: e.target.value })} />
+        </div>
+        <div><label>Forma de pagamento</label>
+          <select disabled={somenteLeitura} value={cabecalho.forma_pagamento || ''}
+            onChange={e => setCabecalho({ ...cabecalho, forma_pagamento: e.target.value })}>
+            <option value="">Selecione…</option>
+            {FORMAS_PAGAMENTO.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </div>
+        <div><label>Condição de pagamento</label>
+          <select disabled={somenteLeitura} value={cabecalho.condicao_pagamento_id || ''}
+            onChange={e => setCabecalho({ ...cabecalho, condicao_pagamento_id: e.target.value })}>
+            <option value="">Selecione…</option>
+            {condicoesPagamento
+              .filter(c => c.ativo !== false || c.id === cabecalho.condicao_pagamento_id)
+              .map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
         </div>
       </div>
 

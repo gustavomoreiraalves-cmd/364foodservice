@@ -7,6 +7,7 @@ import { FORMAS_PAGAMENTO, isVencida } from '../../../lib/financeiro';
 import { signedUrlRecebimento } from '../../../lib/storage';
 import { arquivosDaNota } from '../../../lib/nfe/arquivos';
 import AppShell from '../../../components/AppShell';
+import CondicoesPagamento from '../../../components/CondicoesPagamento';
 import { useEmpresaAtual } from '../../../lib/empresa';
 
 // Diferente de contas_a_pagar (bucket 'recebimentos', prefixo de pasta
@@ -49,6 +50,7 @@ function Conteudo() {
   const router = useRouter();
   const { empresaAtual } = useEmpresaAtual();
   const [lista, setLista] = useState([]);
+  const [condicoesPagamento, setCondicoesPagamento] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erroCarregar, setErroCarregar] = useState('');
   const [baixaAtiva, setBaixaAtiva] = useState(null);
@@ -75,7 +77,18 @@ function Conteudo() {
     setLoading(false);
   }
 
-  useEffect(() => { carregar(); }, [empresaAtual?.id]);
+  // Independente de carregar(): uma falha aqui (ex.: migração 53 ainda não
+  // aplicada neste ambiente) não pode derrubar a lista de contas a receber,
+  // só a seção de condições de pagamento fica vazia.
+  async function carregarCondicoesPagamento() {
+    if (!empresaAtual) return;
+    const { data, error } = await supabase.from('condicoes_pagamento')
+      .select('id, nome, numero_parcelas, intervalo_dias, ativo')
+      .eq('empresa_id', empresaAtual.id).order('nome');
+    setCondicoesPagamento(error ? [] : (data || []));
+  }
+
+  useEffect(() => { carregar(); carregarCondicoesPagamento(); }, [empresaAtual?.id]);
 
   function abrirBaixa(parcela) {
     setBaixaAtiva({ parcelaId: parcela.id, data_recebimento: hoje(), forma_recebimento: FORMAS_PAGAMENTO[0], comprovanteArquivo: null });
@@ -136,6 +149,8 @@ function Conteudo() {
     .sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1));
 
   return (
+    <>
+    <CondicoesPagamento empresaId={empresaAtual.id} condicoes={condicoesPagamento} onAtualizar={carregarCondicoesPagamento} />
     <div className="panel">
       <h3>Contas a receber ({parcelasFiltradas.length})</h3>
       <div className="form-grid" style={{ marginBottom: 12 }}>
@@ -221,5 +236,6 @@ function Conteudo() {
         </table>
       </div>
     </div>
+    </>
   );
 }
