@@ -38,7 +38,7 @@ const HEADER_VAZIO = () => ({
 });
 const ITEM_VAZIO = () => ({
   materia_prima_id: '', quantidade: '', peso_nota_kg: '', custo_unitario: '',
-  deposito_id: '', local_armazenamento: '', observacoes: '',
+  deposito_id: '', local_armazenamento: '', observacoes: '', categoria_conta: '',
   validade: '', numero_lote_fornecedor: '', condicao_embalagem: 'Íntegra', status_qualidade: 'aprovado',
   motivo_rejeicao: '', temperatura_c: '', inspecionado_por_id: '', volumes: '',
   fotoProdutoArquivo: null, documentoSanitarioArquivo: null,
@@ -292,6 +292,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
     setItemForm(f => ({
       ...ITEM_VAZIO(),
       materia_prima_id: materiaPrimaId,
+      // Categoria do DRE: prioriza o padrão cadastrado na matéria-prima; sem
+      // padrão, cai na categoria já escolhida no cabeçalho da nota.
+      categoria_conta: mps.find(m => m.id === materiaPrimaId)?.categoria_conta_padrao || header.categoria_conta_pagar,
       ...(itemDaNotaEmConferencia
         ? { peso_nota_kg: f.peso_nota_kg, custo_unitario: f.custo_unitario }
         : {}),
@@ -327,6 +330,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
     setItemForm({
       ...ITEM_VAZIO(),
       materia_prima_id: item.materiaPrimaId,
+      categoria_conta: mps.find(m => m.id === item.materiaPrimaId)?.categoria_conta_padrao || header.categoria_conta_pagar,
       quantidade: '',
       peso_nota_kg: String(pesoNotaKg),
       custo_unitario: String(custoUnitario),
@@ -384,6 +388,13 @@ function Conteudo({ setFicha, setEtiqueta }) {
     if (alvo?._nfe) devolverAFila(filaDoNfe(alvo._nfe, alvo.materia_prima_id));
   }
 
+  // Ajusta um campo de um item já adicionado à lista (antes de registrar o
+  // recebimento) — por enquanto só a categoria de custo do DRE, que o
+  // operador pode trocar item a item mesmo depois do default aplicado.
+  function atualizarItemStaged(key, patch) {
+    setItens(itens.map(i => (i._key === key ? { ...i, ...patch } : i)));
+  }
+
   async function registrar(e) {
     e.preventDefault();
     if (itensDaNota.length > 0) {
@@ -428,6 +439,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           validade: !ehSimples ? (it.validade || null) : null,
           numero_lote_fornecedor: it._mp.controle_recebimento === 'lote' ? (it.numero_lote_fornecedor || null) : null,
           volumes: it.volumes ? Number(it.volumes) : null,
+          categoria_conta: it.categoria_conta,
           empresa_id: empresaAtual.id,
         }]).select('id').single();
 
@@ -464,6 +476,7 @@ function Conteudo({ setFicha, setEtiqueta }) {
           documentoSanitarioArquivo: it.documentoSanitarioArquivo,
           quantidade: Number(it.quantidade),
           custoUnitario: Number(it.custo_unitario),
+          categoriaConta: it.categoria_conta,
           statusEfetivo: ehSimples ? 'aprovado' : it.status_qualidade,
         });
       }
@@ -950,6 +963,9 @@ function Conteudo({ setFicha, setEtiqueta }) {
               <div className="item-line" key={it._key}>
                 <span>{it._mp.nome} <span className="muted">({REGRA_LABEL[it._mp.controle_recebimento]})</span></span>
                 <span className="num">{Number(it.quantidade)} {it._mp.unidade} · {fmtMoney(it.custo_unitario)}</span>
+                <select value={it.categoria_conta} onChange={e => atualizarItemStaged(it._key, { categoria_conta: e.target.value })}>
+                  {CATEGORIAS_CONTA.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
                 <button className="btn danger small" type="button" onClick={() => removerItemStaged(it._key)}>×</button>
               </div>
             ))}
