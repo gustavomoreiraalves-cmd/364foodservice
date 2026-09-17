@@ -349,6 +349,10 @@ function ParametrosSimplesNacional({
     );
   }
 
+  const competenciaAnterior = mesAnterior();
+  const temCompetenciaAnterior = params.some(p => (p.competencia || '').slice(0, 7) === competenciaAnterior);
+  const atrasado = new Date().getDate() >= 15 && !temCompetenciaAnterior;
+
   return (
     <div className="panel">
       <h3>Parâmetros do Simples Nacional</h3>
@@ -357,6 +361,13 @@ function ParametrosSimplesNacional({
         percentual pronto, aqui, e a emissão usa o valor da competência da nota, nunca um percentual fixo no
         cadastro.
       </p>
+
+      {atrasado && (
+        <div className="banner erro" style={{ marginBottom: 10 }}>
+          Falta informar a competência {formatarCompetencia(`${competenciaAnterior}-01`)} — a partir do dia 15 de
+          cada mês é obrigatório ter o percentual do mês anterior cadastrado.
+        </div>
+      )}
 
       {!form && (
         <button className="btn secondary small" onClick={onNovo}>Informar competência</button>
@@ -505,6 +516,13 @@ function hoje() {
 
 function mesAtual() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function mesAnterior() {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return d.toISOString().slice(0, 7);
 }
 
 function fracaoParaPercentual(v) {
