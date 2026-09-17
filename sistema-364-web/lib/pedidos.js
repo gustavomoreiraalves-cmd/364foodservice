@@ -27,14 +27,18 @@ export function totalPedido(itens) {
   );
 }
 
-// Preço vazio na tela cai no preço de venda do produto; zero digitado é zero
-// de propósito (bonificação, brinde), por isso o teste é contra string vazia
-// e null, e não um `||` sobre o número.
-export function precoDoItem(precoDigitado, produto) {
+// Preço vazio na tela cai no preço de venda do produto (ou no preço de
+// atacado, se o cliente for Revenda e o produto tiver um cadastrado); zero
+// digitado é zero de propósito (bonificação, brinde), por isso o teste é
+// contra string vazia e null, e não um `||` sobre o número.
+export function precoDoItem(precoDigitado, produto, cliente) {
   const digitado = precoDigitado === '' || precoDigitado === null || precoDigitado === undefined
     ? null
     : Number(precoDigitado);
   if (digitado !== null && !Number.isNaN(digitado)) return digitado;
+  if (cliente?.tipo === 'Revenda' && produto?.preco_atacado !== null && produto?.preco_atacado !== undefined) {
+    return Number(produto.preco_atacado);
+  }
   return Number(produto?.preco_venda || 0);
 }
 

@@ -56,6 +56,27 @@ test('precoDoItem: zero digitado é preço zero, não cai no produto', () => {
   assert.equal(precoDoItem('0', { preco_venda: 50 }), 0);
 });
 
+test('precoDoItem: cliente Revenda usa preço de atacado do produto', () => {
+  const produto = { preco_venda: 50, preco_atacado: 40 };
+  assert.equal(precoDoItem('', produto, { tipo: 'Revenda' }), 40);
+});
+
+test('precoDoItem: cliente Revenda sem preço de atacado cadastrado cai no preço de venda', () => {
+  const produto = { preco_venda: 50, preco_atacado: null };
+  assert.equal(precoDoItem('', produto, { tipo: 'Revenda' }), 50);
+});
+
+test('precoDoItem: cliente não-Revenda usa preço de venda mesmo com atacado cadastrado', () => {
+  const produto = { preco_venda: 50, preco_atacado: 40 };
+  assert.equal(precoDoItem('', produto, { tipo: 'Consumidor Final' }), 50);
+  assert.equal(precoDoItem('', produto, null), 50);
+});
+
+test('precoDoItem: preço digitado vence atacado também', () => {
+  const produto = { preco_venda: 50, preco_atacado: 40 };
+  assert.equal(precoDoItem('12.34', produto, { tipo: 'Revenda' }), 12.34);
+});
+
 const original = [
   { id: 'a', produto_id: 'p1', quantidade: 2, preco_unitario: 10 },
   { id: 'b', produto_id: 'p2', quantidade: 5, preco_unitario: 4 },

@@ -11,7 +11,7 @@ import ProdutoFiscal from '../../components/ProdutoFiscal';
 import ConfiguracaoFiscalModal from '../../components/ConfiguracaoFiscalModal';
 import { pendenciasFiscaisProduto, fatorConversaoTributavel } from '../../lib/fiscal';
 
-const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', validade_dias: 90, producao_interna: false, rastreado: false };
+const PROD_VAZIO = { nome: '', categoria: '', unidade: 'un', custo_unitario: '', preco_venda: '', preco_atacado: '', validade_dias: 90, producao_interna: false, rastreado: false };
 
 // Bloco fiscal, separado do resto porque só ele depende da atualização 36: se a
 // migração ainda não rodou neste banco, estes campos não vão no insert.
@@ -387,6 +387,11 @@ function Conteudo() {
       unidade: formProd.unidade,
       custo_unitario: custo,
       preco_venda: Number(formProd.preco_venda),
+      // Em branco = sem preço de atacado cadastrado; pedido de cliente Revenda
+      // cai no preco_venda normal (lib/pedidos.js precoDoItem).
+      preco_atacado: formProd.preco_atacado === '' || formProd.preco_atacado === null || formProd.preco_atacado === undefined
+        ? null
+        : Number(formProd.preco_atacado),
       // Teste tem que ser "campo em branco", não falsy: `|| 90` apagaria um
       // validade_dias = 0 salvo de propósito ao reabrir o produto para editar.
       validade_dias: formProd.validade_dias === '' || formProd.validade_dias === null || formProd.validade_dias === undefined
@@ -740,6 +745,12 @@ function Conteudo() {
                       <label htmlFor="p-preco">Preço de venda (R$)</label>
                       <input id="p-preco" type="number" step="0.01" required value={formProd.preco_venda}
                              onChange={e => setFormProd({ ...formProd, preco_venda: e.target.value })} />
+                    </div>
+                    <div>
+                      <label htmlFor="p-preco-atacado">Preço de atacado (R$)</label>
+                      <input id="p-preco-atacado" type="number" step="0.01" placeholder="0,00" value={formProd.preco_atacado}
+                             onChange={e => setFormProd({ ...formProd, preco_atacado: e.target.value })} />
+                      <p className="ajuda">Em branco, pedido de cliente Revenda usa o preço de venda normal.</p>
                     </div>
                     <div>
                       <label htmlFor="p-val">Validade (dias)</label>

@@ -27,7 +27,8 @@ export default function PedidoForm({
     e.preventDefault();
     const prod = produtos.find(p => p.id === novoItem.produto_id);
     if (!prod) return;
-    const preco = precoDoItem(novoItem.preco_unitario, prod);
+    const cliente = clientes.find(c => c.id === cabecalho.cliente_id);
+    const preco = precoDoItem(novoItem.preco_unitario, prod, cliente);
     setItens([...itens, { produto_id: prod.id, quantidade: Number(novoItem.quantidade), preco_unitario: preco }]);
     setNovoItem({ produto_id: '', quantidade: '', preco_unitario: '' });
   }
@@ -103,7 +104,7 @@ export default function PedidoForm({
               <input type="number" step="0.001" min="0.001" required value={novoItem.quantidade}
                 onChange={e => setNovoItem({ ...novoItem, quantidade: e.target.value })} />
             </div>
-            <div><label>Preço unit. (R$ — vazio usa o preço de venda)</label>
+            <div><label>Preço unit. (R$ — vazio usa o preço {clientes.find(c => c.id === cabecalho.cliente_id)?.tipo === 'Revenda' ? 'de atacado' : 'de venda'})</label>
               <input type="number" step="0.01" min="0" value={novoItem.preco_unitario}
                 onChange={e => setNovoItem({ ...novoItem, preco_unitario: e.target.value })} />
             </div>
