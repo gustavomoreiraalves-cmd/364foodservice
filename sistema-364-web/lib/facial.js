@@ -7,8 +7,8 @@
 export const LIMIAR_MATCH = 0.45;      // distância euclidiana máxima p/ aceitar
 export const MARGEM_SEGUNDO = 0.05;    // distância mínima p/ o 2º colocado
 export const ZONA_CINZENTA = 0.5;      // entre LIMIAR e isto: recaptura e tira média
-export const LIMIAR_EAR = 0.2;         // olho fechado quando EAR < 0.20
-export const EAR_ABERTO = 0.28;        // olho reaberto quando EAR > 0.28
+export const LIMIAR_EAR = 0.23;        // olho fechado quando EAR < 0.23
+export const EAR_ABERTO = 0.25;        // olho reaberto quando EAR > 0.25
 export const QUALIDADE_MINIMA = 0.8;   // score mínimo de detecção no cadastro
 
 let faceapi = null;

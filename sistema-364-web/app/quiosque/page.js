@@ -206,7 +206,7 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
 
     // 2) liveness: piscada via EAR
     setInstrucao('Agora pisque os olhos');
-    const liveTimeout = Date.now() + 8000;
+    const liveTimeout = Date.now() + 12000;
     let piscadas = 0;
     let earMin = 1;
     let fechado = false;
@@ -218,7 +218,10 @@ function TelaQuiosque({ token, info, aoDesautorizar }) {
         if (!fechado && ear < LIMIAR_EAR) fechado = true;
         if (fechado && ear > EAR_ABERTO) { piscadas++; fechado = false; }
       }
-      await new Promise(r => setTimeout(r, 100));
+      // sem espera extra fixa: a própria inferência já leva ~100-200ms, e uma
+      // piscada dura só ~150-300ms — delay fixo reduzia a chance de capturar
+      // o frame exato de olho fechado (efeito estroboscópio)
+      await new Promise(r => setTimeout(r, 20));
     }
     if (cancelarLoopRef.current) return;
     const livenessOk = piscadas >= 1;
